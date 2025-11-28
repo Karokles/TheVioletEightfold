@@ -1,0 +1,47 @@
+{
+  "EN": {
+    "APP_TITLE": "The Violet Eightfold",
+    "SUBTITLE": "Inner Council",
+    "DIRECT_COUNSEL": "Direct Counsel",
+    "COUNCIL_SESSION": "Council Session",
+    "BLUEPRINT": "Soul Blueprint",
+    "ENTER_TOPIC_PLACEHOLDER": "What thought or dilemma summons the Council?",
+    "CONVENE": "Convene",
+    "ADJOURN_TITLE": "Integrate & Adjourn",
+    "INPUT_PLACEHOLDER": "Consult",
+    "INPUT_COUNCIL_PLACEHOLDER": "Add your voice...",
+    "COUNCIL_THINKING": "The Council is deliberating...",
+    "SUMMONING": "Summoning...",
+    "AWAITING": "Awaiting Thought",
+    "CHAMBER_TITLE": "The Chamber",
+    "FOOTER_TEXT": "AI Advice • Life Arc Integrated",
+    "LOGIN_TITLE": "Enter the Council",
+    "LOGIN_USERNAME": "Username",
+    "LOGIN_SECRET": "Secret",
+    "LOGIN_BUTTON": "Enter",
+    "LOGIN_ERROR": "Invalid credentials"
+  },
+  "DE": {
+    "APP_TITLE": "Das Violette Achtfache",
+    "SUBTITLE": "Innerer Rat",
+    "DIRECT_COUNSEL": "Direkter Rat",
+    "COUNCIL_SESSION": "Ratssitzung",
+    "BLUEPRINT": "Seelen-Blaupause",
+    "ENTER_TOPIC_PLACEHOLDER": "Welcher Gedanke oder welches Dilemma ruft den Rat?",
+    "CONVENE": "Einberufen",
+    "ADJOURN_TITLE": "Integrieren & Vertagen",
+    "INPUT_PLACEHOLDER": "Konsultiere",
+    "INPUT_COUNCIL_PLACEHOLDER": "Erhebe deine Stimme...",
+    "COUNCIL_THINKING": "Der Rat berät sich...",
+    "SUMMONING": "Beschwörung...",
+    "AWAITING": "Erwarte Gedanken",
+    "CHAMBER_TITLE": "Die Kammer",
+    "FOOTER_TEXT": "KI-Beratung • Lebensbogen integriert",
+    "LOGIN_TITLE": "Betrete den Rat",
+    "LOGIN_USERNAME": "Benutzername",
+    "LOGIN_SECRET": "Geheimnis",
+    "LOGIN_BUTTON": "Eintreten",
+    "LOGIN_ERROR": "Ungültige Anmeldedaten"
+  }
+}
+
