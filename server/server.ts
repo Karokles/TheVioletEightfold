@@ -64,10 +64,12 @@ const users: User[] = [
 // Authentication middleware
 interface AuthenticatedRequest extends Request {
   user?: User;
+  headers: Request['headers'];
+  body: Request['body'];
 }
 
 const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers?.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
@@ -117,7 +119,7 @@ app.post('/api/login', (req: Request, res: Response) => {
 // Council endpoint
 app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { userId, messages, userProfile } = req.body;
+    const { userId, messages, userProfile } = (req.body as { userId?: string; messages?: any[]; userProfile?: any }) || {};
 
     if (!userId || !messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'userId and messages array are required' });
