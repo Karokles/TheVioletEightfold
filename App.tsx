@@ -7,7 +7,7 @@ import { StatsInterface } from './components/StatsInterface';
 import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
-import { ArchetypeId } from './types';
+import { ArchetypeId } from './constants';
 import { Language, UserStats, ScribeAnalysis } from './types';
 import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats } from './services/userService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp } from 'lucide-react';
