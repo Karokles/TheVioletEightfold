@@ -68,7 +68,7 @@ interface AuthenticatedRequest extends Request {
   body: Request['body'];
 }
 
-const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
   const authHeader = req.headers?.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
