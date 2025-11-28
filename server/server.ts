@@ -1,10 +1,10 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import OpenAI from 'openai';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -62,11 +62,11 @@ const users: User[] = [
 ];
 
 // Authentication middleware
-interface AuthenticatedRequest extends express.Request {
+interface AuthenticatedRequest extends Request {
   user?: User;
 }
 
-const authenticate = (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -85,12 +85,12 @@ const authenticate = (req: AuthenticatedRequest, res: express.Response, next: ex
 };
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
 // Login endpoint
-app.post('/api/login', (req, res) => {
+app.post('/api/login', (req: Request, res: Response) => {
   const { username, secret } = req.body;
 
   if (!username || !secret) {
@@ -115,7 +115,7 @@ app.post('/api/login', (req, res) => {
 });
 
 // Council endpoint
-app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res) => {
+app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { userId, messages, userProfile } = req.body;
 
@@ -128,9 +128,9 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res) =>
     const systemPrompt = buildCouncilSystemPrompt(userProfile);
 
     // Build conversation history
-    const conversationHistory = messages.map((msg: any) => ({
-      role: msg.role === 'user' ? 'user' : 'assistant',
-      content: msg.content,
+    const conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = messages.map((msg: any) => ({
+      role: (msg.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: String(msg.content),
     }));
 
     // Call OpenAI
@@ -139,7 +139,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res) =>
       messages: [
         { role: 'system', content: systemPrompt },
         ...conversationHistory,
-      ],
+      ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
       temperature: 0.7,
       stream: false,
     });
