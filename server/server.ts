@@ -57,8 +57,8 @@ const users: User[] = [
   },
   {
     id: 'friend3',
-    username: 'friend3',
-    secretHash: createHash('sha256').update('friend3-test-secret').digest('hex'),
+    username: 'marie',
+    secretHash: createHash('sha256').update('haute-couture').digest('hex'),
   },
   {
     id: 'friend4',
