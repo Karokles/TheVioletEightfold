@@ -10,7 +10,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 | `selma` | `moonlight-whisper` |
 | `alicia` | `form-follows-function` |
 | `marie` | `haute-couture` |
-| `friend4` | `friend4-test-secret` |
+| `tuana` | `dawn-break` |
 | `friend5` | `friend5-test-secret` |
 
 ## Usage

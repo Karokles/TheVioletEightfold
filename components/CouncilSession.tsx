@@ -79,12 +79,20 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         const newTurns = parseBufferToTurns(buffer, historyRef.current.length);
         setHistory(prev => [...prev, ...newTurns]);
         setStreamingContent('');
-    } catch (error) {
+    } catch (error: any) {
         console.error("Council error:", error);
+        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        console.error("Full error details:", {
+            message: errorMessage,
+            stack: error?.stack,
+            name: error?.name,
+        });
         setHistory(prev => [...prev, { 
             id: `err-${Date.now()}`, 
             speaker: 'SYSTEM', 
-            content: language === 'DE' ? 'Der Rat wurde durch einen Fehler unterbrochen.' : 'The council was disrupted by a connection error.', 
+            content: language === 'DE' 
+                ? `Der Rat wurde durch einen Fehler unterbrochen: ${errorMessage}` 
+                : `The council was disrupted: ${errorMessage}`, 
             isUser: false 
         }]);
     } finally {

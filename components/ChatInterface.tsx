@@ -57,7 +57,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
     setStatus(ChatStatus.STREAMING);
 
     try {
-      const stream = await sendMessageToArchetype(activeArchetype, userMsg.content, language, currentLore);
+      // Build conversation history from existing messages (excluding the init message)
+      const conversationHistory: Message[] = messages
+        .filter(msg => msg.id !== getInitMessage().id)
+        .map(msg => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp,
+        }));
+
+      const stream = await sendMessageToArchetype(activeArchetype, userMsg.content, language, currentLore, conversationHistory);
       
       const botMsgId = (Date.now() + 1).toString();
       setMessages(prev => [...prev, {
@@ -80,8 +90,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
         }
       }
       setStatus(ChatStatus.IDLE);
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error('Chat error:', error);
+      const errorMessage = error?.message || error?.toString() || 'Connection error';
+      console.error('Full error details:', {
+        message: errorMessage,
+        stack: error?.stack,
+        name: error?.name,
+      });
+      
+      // Show error message to user
+      setMessages(prev => [...prev, {
+        id: `error-${Date.now()}`,
+        role: 'model',
+        content: language === 'DE' 
+          ? `Fehler: ${errorMessage}` 
+          : `Error: ${errorMessage}`,
+        timestamp: Date.now(),
+        archetypeId: activeArchetype
+      }]);
       setStatus(ChatStatus.ERROR);
     }
   };

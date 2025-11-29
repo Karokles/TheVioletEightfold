@@ -1,10 +1,12 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
+type NextFunction = (err?: any) => void;
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createHash, randomBytes } from 'node:crypto';
 import OpenAI from 'openai';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -62,8 +64,8 @@ const users: User[] = [
   },
   {
     id: 'friend4',
-    username: 'friend4',
-    secretHash: createHash('sha256').update('friend4-test-secret').digest('hex'),
+    username: 'tuana',
+    secretHash: createHash('sha256').update('dawn-break').digest('hex'),
   },
   {
     id: 'friend5',
@@ -173,9 +175,48 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
   }
 });
 
-// Helper function to build council system prompt
+// Load archetypes config
+function loadArchetypesConfig() {
+  try {
+    const configPath = join(__dirname, '../config/archetypes.json');
+    const configData = readFileSync(configPath, 'utf-8');
+    return JSON.parse(configData);
+  } catch (error) {
+    console.error('Failed to load archetypes config:', error);
+    return {};
+  }
+}
+
+// Helper function to build system prompt
 function buildCouncilSystemPrompt(userProfile: any): string {
-  // This will be replaced with actual config loading later
+  const archetypesConfig = loadArchetypesConfig();
+  const language = userProfile?.language || 'EN';
+  const activeArchetype = userProfile?.activeArchetype;
+
+  // If activeArchetype is set, this is a DIRECT CHAT - only that archetype should respond
+  if (activeArchetype && archetypesConfig[activeArchetype]) {
+    const archetypeConfig = archetypesConfig[activeArchetype];
+    const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
+    const systemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
+    
+    let directChatPrompt = `${systemPrompt}\n\nCRITICAL INSTRUCTIONS:
+- You are speaking DIRECTLY to the user in a one-on-one conversation.
+- Respond ONLY as ${archetypeName}. 
+- Do NOT simulate other archetypes or create a council dialogue.
+- Do NOT use the [[SPEAKER:]] format - just respond naturally as ${archetypeName}.
+- This is a direct conversation, not a council session.
+- Be authentic to your archetype's voice and perspective.
+- Do not mention other archetypes unless the user asks about them.`;
+
+    // Add user profile context if provided
+    if (userProfile && userProfile.lore) {
+      return `${directChatPrompt}\n\n[USER PSYCHOLOGICAL PROFILE & BACKGROUND]\n${userProfile.lore}\n\nIntegrate this context into your understanding of the user. DO NOT recite these facts explicitly unless relevant. Use them to "relate for yourself" and shape your advice/tone.`;
+    }
+
+    return directChatPrompt;
+  }
+
+  // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
   const basePrompt = `You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
 The user is present in the session. This is an ongoing conversation.
 
