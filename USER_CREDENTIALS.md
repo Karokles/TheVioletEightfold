@@ -9,7 +9,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 | `lion` | `TuerOhneWiederkehr2025` |
 | `selma` | `moonlight-whisper` |
 | `friend2` | `friend2-test-secret` |
-| `friend3` | `friend3-test-secret` |
+| `marie` | `haute-couture` |
 | `friend4` | `friend4-test-secret` |
 | `friend5` | `friend5-test-secret` |
 
