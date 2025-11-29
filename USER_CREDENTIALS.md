@@ -7,7 +7,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 | Username | Secret (Password) |
 |----------|------------------|
 | `lion` | `lion-test-secret` |
-| `friend1` | `friend1-test-secret` |
+| `selma` | `moonlight-whisper` |
 | `friend2` | `friend2-test-secret` |
 | `friend3` | `friend3-test-secret` |
 | `friend4` | `friend4-test-secret` |
@@ -21,9 +21,9 @@ When logging into the app, use:
 
 ## Example
 
-To log in as the first friend:
-- Username: `friend1`
-- Secret: `friend1-test-secret`
+To log in as selma:
+- Username: `selma`
+- Secret: `moonlight-whisper`
 
 ## Security Note
 
