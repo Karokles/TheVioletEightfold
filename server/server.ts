@@ -43,7 +43,7 @@ const users: User[] = [
   {
     id: 'lion',
     username: 'lion',
-    secretHash: createHash('sha256').update('lion-test-secret').digest('hex'),
+    secretHash: createHash('sha256').update('TuerOhneWiederkehr2025').digest('hex'),
   },
   {
     id: 'friend1',

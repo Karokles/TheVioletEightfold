@@ -6,7 +6,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 
 | Username | Secret (Password) |
 |----------|------------------|
-| `lion` | `lion-test-secret` |
+| `lion` | `TuerOhneWiederkehr2025` |
 | `selma` | `moonlight-whisper` |
 | `friend2` | `friend2-test-secret` |
 | `friend3` | `friend3-test-secret` |
