@@ -32,6 +32,12 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   
   const dialogueEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyRef = useRef<DialogueTurn[]>([]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
 
   const ui = getUIText(language);
   const archetypes = getArchetypes(language);
@@ -70,7 +76,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
             }
         }
         
-        const newTurns = parseBufferToTurns(buffer, history.length);
+        const newTurns = parseBufferToTurns(buffer, historyRef.current.length);
         setHistory(prev => [...prev, ...newTurns]);
         setStreamingContent('');
     } catch (error) {
@@ -106,6 +112,20 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     const content = userInput;
     setUserInput('');
     
+    // Use ref to get current history (always up-to-date)
+    // sendMessageToCouncil will add the new user message, so we only include previous turns
+    const currentHistory = historyRef.current;
+    
+    // Build conversation history from current history (before adding the new user message)
+    const conversationHistory: Message[] = currentHistory
+      .filter(turn => turn.speaker !== 'SYSTEM')
+      .map(turn => ({
+        id: turn.id,
+        role: turn.isUser ? 'user' : 'assistant',
+        content: turn.content,
+        timestamp: Date.now(),
+      }));
+
     // Add user message to history for UI display
     const userTurn: DialogueTurn = {
       id: `user-${Date.now()}`,
@@ -114,17 +134,6 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       isUser: true
     };
     setHistory(prev => [...prev, userTurn]);
-
-    // Build conversation history from current history (before adding the new user message)
-    // sendMessageToCouncil will add the new user message, so we only include previous turns
-    const conversationHistory: Message[] = history
-      .filter(turn => turn.speaker !== 'SYSTEM')
-      .map(turn => ({
-        id: turn.id,
-        role: turn.isUser ? 'user' : 'assistant',
-        content: turn.content,
-        timestamp: Date.now(),
-      }));
 
     await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore));
   };
