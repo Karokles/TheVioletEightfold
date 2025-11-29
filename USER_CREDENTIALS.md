@@ -1,0 +1,39 @@
+# User Credentials
+
+This file contains the test user credentials for The Violet Eightfold app.
+
+## Test Users
+
+| Username | Secret (Password) |
+|----------|------------------|
+| `lion` | `lion-test-secret` |
+| `friend1` | `friend1-test-secret` |
+| `friend2` | `friend2-test-secret` |
+| `friend3` | `friend3-test-secret` |
+| `friend4` | `friend4-test-secret` |
+| `friend5` | `friend5-test-secret` |
+
+## Usage
+
+When logging into the app, use:
+- **Username**: One of the usernames from the table above
+- **Secret**: The corresponding secret/password from the table
+
+## Example
+
+To log in as the first friend:
+- Username: `friend1`
+- Secret: `friend1-test-secret`
+
+## Security Note
+
+⚠️ **For Production**: These are test credentials. In production, you should:
+1. Store user credentials in a secure database
+2. Use proper password hashing (already implemented with SHA-256)
+3. Never commit real user passwords to the repository
+4. Consider implementing proper authentication with JWT tokens or OAuth
+
+## Location in Code
+
+These credentials are defined in `server/server.ts` (lines 40-73).
+
