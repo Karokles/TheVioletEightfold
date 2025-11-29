@@ -2,7 +2,7 @@ import { ArchetypeId } from '../constants';
 import { Language, Message } from '../types';
 import { getCurrentUser } from './userService';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // Get auth headers for API requests
 const getAuthHeaders = () => {
@@ -115,12 +115,50 @@ export const startCouncilSession = async (
 };
 
 export const sendMessageToCouncil = async (
-  message: string
+  message: string,
+  conversationHistory: Message[],
+  lang: Language,
+  currentLore: string
 ): Promise<AsyncIterable<{ text: string }>> => {
-  // For now, we'll need to maintain session state
-  // In a full implementation, you'd want a session ID from the backend
-  // This is a simplified version
-  throw new Error('Session management not yet implemented. Please start a new council session.');
+  const user = getCurrentUser();
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+
+  // Add the new user message to history
+  const messages: Message[] = [
+    ...conversationHistory,
+    {
+      id: Date.now().toString(),
+      role: 'user',
+      content: message,
+      timestamp: Date.now(),
+    },
+  ];
+
+  const response = await fetch(`${API_BASE_URL}/api/council`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      userId: user.id,
+      messages,
+      userProfile: {
+        lore: currentLore,
+        language: lang,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to send message to council');
+  }
+
+  const data = await response.json();
+  
+  return (async function* () {
+    yield { text: data.reply || '' };
+  })();
 };
 
 // Login function

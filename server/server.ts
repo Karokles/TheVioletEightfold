@@ -15,7 +15,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+// CORS configuration - allow all origins for testing, with proper headers
+app.use(cors({
+  origin: true, // Allow all origins for testing flexibility
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 
 // Initialize OpenAI
@@ -32,32 +38,37 @@ interface User {
 }
 
 const users: User[] = [
-  // Pre-populated test users (5-10 friends)
+  // Pre-populated test users (lion + 5 friends)
   // In production, these should be in a database
   {
-    id: 'user1',
+    id: 'lion',
+    username: 'lion',
+    secretHash: createHash('sha256').update('lion-test-secret').digest('hex'),
+  },
+  {
+    id: 'friend1',
     username: 'friend1',
-    secretHash: createHash('sha256').update('secret1').digest('hex'),
+    secretHash: createHash('sha256').update('friend1-test-secret').digest('hex'),
   },
   {
-    id: 'user2',
+    id: 'friend2',
     username: 'friend2',
-    secretHash: createHash('sha256').update('secret2').digest('hex'),
+    secretHash: createHash('sha256').update('friend2-test-secret').digest('hex'),
   },
   {
-    id: 'user3',
+    id: 'friend3',
     username: 'friend3',
-    secretHash: createHash('sha256').update('secret3').digest('hex'),
+    secretHash: createHash('sha256').update('friend3-test-secret').digest('hex'),
   },
   {
-    id: 'user4',
+    id: 'friend4',
     username: 'friend4',
-    secretHash: createHash('sha256').update('secret4').digest('hex'),
+    secretHash: createHash('sha256').update('friend4-test-secret').digest('hex'),
   },
   {
-    id: 'user5',
+    id: 'friend5',
     username: 'friend5',
-    secretHash: createHash('sha256').update('secret5').digest('hex'),
+    secretHash: createHash('sha256').update('friend5-test-secret').digest('hex'),
   },
 ];
 
@@ -93,27 +104,32 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 // Login endpoint
 app.post('/api/login', (req: Request, res: Response) => {
-  const { username, secret } = req.body;
+  try {
+    const { username, secret } = req.body;
 
-  if (!username || !secret) {
-    return res.status(400).json({ error: 'Username and secret are required' });
+    if (!username || !secret) {
+      return res.status(400).json({ error: 'Username and secret are required' });
+    }
+
+    const secretHash = createHash('sha256').update(secret).digest('hex');
+    const user = users.find(u => u.username === username && u.secretHash === secretHash);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Generate token
+    const token = randomBytes(32).toString('hex');
+    user.token = token;
+
+    res.json({
+      userId: user.id,
+      token,
+    });
+  } catch (error: any) {
+    console.error('Login API error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
-
-  const secretHash = createHash('sha256').update(secret).digest('hex');
-  const user = users.find(u => u.username === username && u.secretHash === secretHash);
-
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-
-  // Generate token
-  const token = randomBytes(32).toString('hex');
-  user.token = token;
-
-  res.json({
-    userId: user.id,
-    token,
-  });
 });
 
 // Council endpoint
@@ -148,15 +164,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
 
     let reply = completion.choices[0]?.message?.content || '';
 
-    // Check for breakthrough and append [LORE UPDATE] if detected
-    const breakthroughKeywords = ['breakthrough', 'realization', 'epiphany', 'insight', 'understanding', 'clarity'];
-    const hasBreakthrough = breakthroughKeywords.some(keyword => 
-      reply.toLowerCase().includes(keyword)
-    );
-
-    if (hasBreakthrough) {
-      reply += '\n\n[LORE UPDATE]\nA significant breakthrough or realization has been identified in this session. Consider updating your personal lore with the insights gained.';
-    }
+    // Removed automatic [LORE UPDATE] - let the AI decide if it wants to mention breakthroughs naturally
 
     res.json({ reply });
   } catch (error: any) {
@@ -210,6 +218,17 @@ Valid Archetype IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLOR
 
   return basePrompt;
 }
+
+// 404 handler for unknown routes
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Global error handler
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: err.message || 'Internal server error' });
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

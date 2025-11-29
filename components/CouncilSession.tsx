@@ -5,7 +5,7 @@ import { startCouncilSession, sendMessageToCouncil } from '../services/aiService
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
 import { Play, Sparkles, Send, Download, Save, CheckCircle2, User } from 'lucide-react';
-import { Language, UserStats, ScribeAnalysis } from '../types';
+import { Language, UserStats, ScribeAnalysis, Message } from '../types';
 
 interface DialogueTurn {
   id: string;
@@ -106,14 +106,26 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     const content = userInput;
     setUserInput('');
     
-    setHistory(prev => [...prev, {
-        id: `user-${Date.now()}`,
-        speaker: 'USER',
-        content: content,
-        isUser: true
-    }]);
+    // Add user message to history
+    const userTurn: DialogueTurn = {
+      id: `user-${Date.now()}`,
+      speaker: 'USER',
+      content: content,
+      isUser: true
+    };
+    setHistory(prev => [...prev, userTurn]);
 
-    await handleStream(sendMessageToCouncil(content));
+    // Convert history to Message format for API
+    const conversationHistory: Message[] = history
+      .filter(turn => turn.speaker === 'USER' || turn.speaker !== 'SYSTEM')
+      .map(turn => ({
+        id: turn.id,
+        role: turn.isUser ? 'user' : 'assistant',
+        content: turn.content,
+        timestamp: Date.now(),
+      }));
+
+    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore));
   };
 
   // --- Scribe Integration Handler ---
