@@ -106,7 +106,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     const content = userInput;
     setUserInput('');
     
-    // Add user message to history
+    // Add user message to history for UI display
     const userTurn: DialogueTurn = {
       id: `user-${Date.now()}`,
       speaker: 'USER',
@@ -115,9 +115,10 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     };
     setHistory(prev => [...prev, userTurn]);
 
-    // Convert history to Message format for API
+    // Build conversation history from current history (before adding the new user message)
+    // sendMessageToCouncil will add the new user message, so we only include previous turns
     const conversationHistory: Message[] = history
-      .filter(turn => turn.speaker === 'USER' || turn.speaker !== 'SYSTEM')
+      .filter(turn => turn.speaker !== 'SYSTEM')
       .map(turn => ({
         id: turn.id,
         role: turn.isUser ? 'user' : 'assistant',
