@@ -1,240 +1,258 @@
 # Deployment Guide
 
-## Quick Deployment Checklist
-
-- [ ] Backend deployed and accessible
-- [ ] Frontend deployed and accessible
-- [ ] Environment variables set
-- [ ] CORS configured correctly
-- [ ] Users added to backend
-- [ ] Test login works
-- [ ] Mobile access tested
+**Repository:** Karokles/TheVioletEightfold  
+**Frontend:** Vercel  
+**Backend:** Render  
+**Database:** Supabase Postgres
 
 ---
 
-## Platform-Specific Guides
+## Environment Variables
 
-### Railway (Backend) + Vercel (Frontend) - Recommended
+### Render (Backend)
 
-**Railway Backend:**
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NODE_ENV` | ✅ Yes | Set to `production` |
+| `JWT_SECRET` | ✅ Yes | Random secure string (min 32 chars) for JWT signing |
+| `OPENAI_API_KEY` | ✅ Yes | OpenAI API key for GPT-4o-mini |
+| `SUPABASE_URL` | ⚠️ Optional | Supabase project URL (feature flag: falls back if missing) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ⚠️ Optional | Supabase service role key (feature flag: falls back if missing) |
+| `ALLOWED_ORIGINS` | ✅ Yes | Comma-separated frontend URLs (e.g., `https://your-app.vercel.app,http://localhost:3000`) |
+| `PORT` | ❌ No | Auto-set by Render |
 
-1. Sign up at [railway.app](https://railway.app)
-2. New Project → Deploy from GitHub
-3. Select your repo
-4. Set root directory: `server`
-5. Add environment variables:
-   ```
-   OPENAI_API_KEY=your-key-here
-   NODE_ENV=production
-   ```
-6. Deploy
-7. Copy the generated URL (e.g., `https://your-app.railway.app`)
-
-**Vercel Frontend:**
-
-1. Sign up at [vercel.com](https://vercel.com)
-2. Import Project → GitHub
-3. Framework Preset: Vite
-4. Build Command: `npm run build`
-5. Output Directory: `dist`
-6. Environment Variables:
-   ```
-   VITE_API_BASE_URL=https://your-app.railway.app
-   ```
-7. Deploy
-
-**Update Backend CORS:**
-```typescript
-app.use(cors({
-  origin: ['https://your-frontend.vercel.app']
-}));
-```
-
----
-
-### Render (Full Stack)
-
-**Backend Service:**
-
-1. New → Web Service
-2. Connect GitHub repo
-3. Settings:
-   - Build Command: `cd server && npm install && npm run build`
-   - Start Command: `cd server && npm start`
-   - Environment: Node
-4. Environment Variables:
-   ```
-   OPENAI_API_KEY=your-key
-   NODE_ENV=production
-   PORT=10000
-   ```
-5. Deploy
-
-**Frontend Static Site:**
-
-1. New → Static Site
-2. Connect GitHub repo
-3. Settings:
-   - Build Command: `npm install && npm run build`
-   - Publish Directory: `dist`
-4. Environment Variables:
-   ```
-   VITE_API_BASE_URL=https://your-backend.onrender.com
-   ```
-5. Deploy
-
----
-
-### DigitalOcean App Platform
-
-**Single App (Full Stack):**
-
-1. Create App → GitHub
-2. Add Components:
-   - **Backend Component:**
-     - Source: `server/`
-     - Build Command: `npm install && npm run build`
-     - Run Command: `npm start`
-     - Environment Variables:
-       ```
-       OPENAI_API_KEY=your-key
-       NODE_ENV=production
-       ```
-   
-   - **Frontend Component:**
-     - Source: Root
-     - Build Command: `npm install && npm run build`
-     - Output Directory: `dist`
-     - Environment Variables:
-       ```
-       VITE_API_BASE_URL=https://your-backend-url
-       ```
-
-3. Deploy
-
----
-
-## Environment Variables Reference
-
-### Backend (`server/.env`)
-```env
-OPENAI_API_KEY=sk-...                    # Required
-PORT=3001                                 # Optional (default: 3001)
-NODE_ENV=production                       # Optional
-```
-
-### Frontend (`.env` or `.env.production`)
-```env
-VITE_API_BASE_URL=https://your-backend-url  # Required for production
-```
-
----
-
-## Adding Users for Production
-
-Edit `server/server.ts` before deploying:
-
-```typescript
-const users: User[] = [
-  {
-    id: 'user1',
-    username: 'friend1',
-    secretHash: createHash('sha256').update('strong-password-here').digest('hex'),
-  },
-  // Add more users...
-];
-```
-
-**Or create a users.json file** (better for production):
-
-```typescript
-// server/users.json
-[
-  { "id": "user1", "username": "friend1", "secret": "password1" },
-  { "id": "user2", "username": "friend2", "secret": "password2" }
-]
-
-// server/server.ts - Load from file
-import usersData from './users.json' assert { type: 'json' };
-const users = usersData.map(u => ({
-  id: u.id,
-  username: u.username,
-  secretHash: createHash('sha256').update(u.secret).digest('hex'),
-}));
-```
-
----
-
-## Security Checklist
-
-- [ ] Changed default test user passwords
-- [ ] Using HTTPS (not HTTP)
-- [ ] CORS restricted to your frontend domain
-- [ ] `.env` files not committed to git
-- [ ] OpenAI API key secured
-- [ ] Rate limiting considered (for production)
-- [ ] Error messages don't leak sensitive info
-
----
-
-## Monitoring & Maintenance
-
-**Check Backend Health:**
+**Generate JWT_SECRET:**
 ```bash
-curl https://your-backend-url/api/health
+openssl rand -base64 32
 ```
 
-**View Logs:**
-- Railway: Dashboard → Deployments → View Logs
-- Render: Dashboard → Logs
-- Vercel: Dashboard → Deployments → View Function Logs
+### Vercel (Frontend)
 
-**Update Users:**
-1. Edit `server/server.ts`
-2. Redeploy backend
-3. Users take effect immediately
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_API_BASE_URL` | ✅ Yes | Backend URL (e.g., `https://thevioleteightfold-4224.onrender.com`) |
 
 ---
 
-## Cost Estimates
+## API Base URL Configuration
 
-**Railway:**
-- Free tier: $5/month credit
-- Backend: ~$5-10/month
+### Frontend
+The frontend uses `VITE_API_BASE_URL` environment variable:
+- **Production:** Must be set to Render backend URL
+- **Development:** Falls back to `http://localhost:3001` if not set
 
-**Vercel:**
-- Free tier: Generous for personal projects
-- Frontend: Free for most use cases
+**Location:** `services/aiService.ts:6-19`
 
-**Render:**
-- Free tier: Sleeps after inactivity
-- Paid: $7/month per service
+### Backend CORS
+Backend CORS is configured via `ALLOWED_ORIGINS`:
+- Comma-separated list of allowed origins
+- Must include Vercel deployment domain(s)
+- Must include `http://localhost:3000` for local dev
 
-**Total Estimated Cost:** $0-20/month depending on usage
+**Location:** `server/server.ts:40-61`
 
 ---
 
-## Quick Deploy Script
+## Deployment Steps
 
-Create `deploy.sh`:
+### 1. Backend (Render)
 
-```bash
-#!/bin/bash
+1. **Set Environment Variables:**
+   - Go to Render Dashboard → Your Service → Environment
+   - Add all required variables (see table above)
+   - Ensure `ALLOWED_ORIGINS` includes your Vercel domain
 
-# Build backend
-cd server
-npm install
-npm run build
+2. **Deploy:**
+   - Push branch to GitHub
+   - Render auto-deploys (if connected) OR
+   - Manually trigger deployment
 
-# Build frontend
-cd ..
-npm install
-npm run build
+3. **Verify:**
+   ```bash
+   curl https://thevioleteightfold-4224.onrender.com/api/health
+   curl https://thevioleteightfold-4224.onrender.com/api/auth/health
+   ```
 
-echo "✅ Build complete! Ready to deploy."
-echo "📦 Backend: server/dist/"
-echo "📦 Frontend: dist/"
+### 2. Frontend (Vercel)
+
+1. **Set Environment Variables:**
+   - Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+   - Add `VITE_API_BASE_URL` = `https://thevioleteightfold-4224.onrender.com`
+
+2. **Deploy:**
+   - Push branch to GitHub
+   - Vercel auto-deploys (if connected) OR
+   - Manually trigger deployment
+
+3. **Verify:**
+   - Open frontend URL
+   - Test login → should get JWT token
+   - Test Single Chat → should work
+   - Test Council Session → should work
+
+---
+
+## Health Check Endpoints
+
+### `/api/health` (Public)
+Returns general server health:
+```json
+{
+  "status": "ok",
+  "uptime": 12345,
+  "timestamp": "2025-01-27T...",
+  "environment": "production",
+  "commitHash": "abc123",
+  "jwtSecretSet": true,
+  "supabaseStatus": "configured"
+}
 ```
 
-Run: `chmod +x deploy.sh && ./deploy.sh`
+### `/api/auth/health` (Public)
+Returns auth-specific diagnostics:
+```json
+{
+  "ok": true,
+  "hasJwtSecret": true,
+  "hasSupabase": true,
+  "build": "abc123"
+}
+```
 
+---
+
+## Troubleshooting
+
+### 401 "Invalid token" Errors
+
+1. **Check JWT_SECRET:**
+   ```bash
+   curl https://thevioleteightfold-4224.onrender.com/api/auth/health
+   ```
+   Verify `hasJwtSecret: true`
+
+2. **Check Token Format:**
+   - Token should be JWT (3 dot-separated segments)
+   - Frontend sends: `Authorization: Bearer <token>`
+   - Backend accepts: `Authorization: Bearer <token>`, `Authorization: <token>`, or `x-auth-token: <token>`
+
+3. **Check CORS:**
+   - Verify `ALLOWED_ORIGINS` includes frontend domain
+   - Check browser console for CORS errors
+
+4. **Check Render Logs:**
+   - Look for `[AUTH]` prefixed logs
+   - Check for JWT verification errors
+   - Verify tokenHash and error type
+
+### CORS Errors
+
+1. **Verify ALLOWED_ORIGINS:**
+   - Must include exact Vercel domain (e.g., `https://the-violet-eightfold.vercel.app`)
+   - Must include `http://localhost:3000` for local dev
+   - No trailing slashes
+
+2. **Check Headers:**
+   - Backend allows: `Content-Type`, `Authorization`, `x-auth-token`
+   - Preflight requests should return 200
+
+### Supabase Connection Issues
+
+1. **Check Environment Variables:**
+   - `SUPABASE_URL` must be set
+   - `SUPABASE_SERVICE_ROLE_KEY` must be set
+   - Both must be valid
+
+2. **Check Health Endpoint:**
+   ```bash
+   curl https://thevioleteightfold-4224.onrender.com/api/health
+   ```
+   Verify `supabaseStatus: "configured"`
+
+3. **Check Logs:**
+   - Look for `[SUPABASE]` prefixed logs
+   - Errors are logged but don't fail requests (feature flag)
+
+---
+
+## Testing Checklist
+
+### Backend
+- [ ] Health endpoint returns `status: "ok"`
+- [ ] Auth health endpoint returns `ok: true, hasJwtSecret: true`
+- [ ] Login returns JWT token
+- [ ] Council endpoint accepts JWT token
+- [ ] Integration endpoint creates lore entries
+- [ ] Legacy tokens rejected with clear message
+
+### Frontend
+- [ ] Login works and stores JWT token
+- [ ] Single Chat works with JWT token
+- [ ] Council Session works with JWT token
+- [ ] Integration button calls backend and persists to Supabase
+- [ ] Auto-logout on 401 (all reasons)
+- [ ] User-friendly error messages
+
+### Supabase
+- [ ] Users table: users created on login
+- [ ] Council sessions: sessions created on /api/council calls
+- [ ] Lore entries: entries created for direct, council, and integration types
+- [ ] User-specific scoping: different users don't see each other's entries
+
+---
+
+## Manual Test Steps
+
+1. **Login:**
+   - Use test user credentials
+   - Verify token is JWT format (3 segments)
+   - Check localStorage: `vc_auth_token` and `vc_user_id`
+
+2. **Single Chat:**
+   - Select archetype
+   - Send message
+   - Verify response received
+   - Check Supabase: lore entry created (if configured)
+
+3. **Council Session:**
+   - Start session with topic
+   - Send messages
+   - Verify responses received
+   - Check Supabase: council session and lore entries created (if configured)
+
+4. **Integration:**
+   - Complete council session
+   - Click "Integrate" button
+   - Verify session history persisted to Supabase (if configured)
+   - Check lore entry created with type "integration"
+
+5. **Auth Error Handling:**
+   - Manually clear token from localStorage
+   - Make API call
+   - Verify auto-logout and re-login prompt
+
+---
+
+## Rollback Plan
+
+If issues occur:
+
+1. **Revert to Previous Version:**
+   ```bash
+   git revert HEAD
+   git push
+   ```
+
+2. **Or Deploy Previous Branch:**
+   - Switch Render to previous branch/commit
+   - Redeploy
+
+3. **Remove JWT_SECRET:**
+   - Remove JWT_SECRET from Render environment variables
+   - System will fall back to dev mode (not recommended for production)
+
+**Note:** After rollback, users with JWT tokens will need to re-login (legacy tokens will work again).
+
+---
+
+**Last Updated:** 2025-01-27

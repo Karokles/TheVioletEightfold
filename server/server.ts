@@ -57,7 +57,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
 }));
 app.use(express.json());
 
@@ -252,6 +252,24 @@ app.get('/api/health', (req: Request, res: Response) => {
     commitHash: commitHash,
     jwtSecretSet: !!process.env.JWT_SECRET,
     supabaseStatus: supabaseStatus
+  });
+});
+
+// Auth health endpoint (for auth-specific diagnostics)
+app.get('/api/auth/health', (req: Request, res: Response) => {
+  let build = 'unknown';
+  try {
+    const { execSync } = require('node:child_process');
+    build = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', stdio: 'pipe' }).toString().trim();
+  } catch {
+    build = new Date().toISOString().substring(0, 10); // Fallback to date
+  }
+  
+  res.json({
+    ok: true,
+    hasJwtSecret: !!process.env.JWT_SECRET,
+    hasSupabase: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    build: build
   });
 });
 
