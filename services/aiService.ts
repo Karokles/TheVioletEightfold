@@ -87,9 +87,25 @@ export const sendMessageToArchetype = async (
   if (!response.ok) {
     // Handle 401 Unauthorized: clear tokens and force re-login
     if (response.status === 401) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'unauthorized' };
+      }
+      
+      // Check for invalid_* reasons to trigger auto-logout
+      const reason = errorData.reason || '';
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+        const { handleAuthError } = await import('./userService');
+        handleAuthError();
+        throw new Error('Session expired. Please sign in again.');
+      }
+      
+      // Other 401 reasons (malformed, etc.) - still clear token
       const { handleAuthError } = await import('./userService');
       handleAuthError();
-      throw new Error('Session expired. Please sign in again.');
+      throw new Error(errorData.message || 'Session expired. Please sign in again.');
     }
     
     let errorData;
@@ -98,7 +114,7 @@ export const sendMessageToArchetype = async (
     } catch {
       errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
     }
-    const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
     console.error('Direct chat API error:', errorMsg, 'Status:', response.status, 'URL:', API_BASE_URL);
     throw new Error(errorMsg);
   }
@@ -147,9 +163,25 @@ export const startCouncilSession = async (
   if (!response.ok) {
     // Handle 401 Unauthorized: clear tokens and force re-login
     if (response.status === 401) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'unauthorized' };
+      }
+      
+      // Check for invalid_* reasons to trigger auto-logout
+      const reason = errorData.reason || '';
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+        const { handleAuthError } = await import('./userService');
+        handleAuthError();
+        throw new Error('Session expired. Please sign in again.');
+      }
+      
+      // Other 401 reasons (malformed, etc.) - still clear token
       const { handleAuthError } = await import('./userService');
       handleAuthError();
-      throw new Error('Session expired. Please sign in again.');
+      throw new Error(errorData.message || 'Session expired. Please sign in again.');
     }
     
     let errorData;
@@ -158,7 +190,7 @@ export const startCouncilSession = async (
     } catch {
       errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
     }
-    const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
     console.error('Council API error:', errorMsg, 'Status:', response.status);
     throw new Error(errorMsg);
   }
@@ -208,9 +240,25 @@ export const sendMessageToCouncil = async (
   if (!response.ok) {
     // Handle 401 Unauthorized: clear tokens and force re-login
     if (response.status === 401) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'unauthorized' };
+      }
+      
+      // Check for invalid_* reasons to trigger auto-logout
+      const reason = errorData.reason || '';
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+        const { handleAuthError } = await import('./userService');
+        handleAuthError();
+        throw new Error('Session expired. Please sign in again.');
+      }
+      
+      // Other 401 reasons (malformed, etc.) - still clear token
       const { handleAuthError } = await import('./userService');
       handleAuthError();
-      throw new Error('Session expired. Please sign in again.');
+      throw new Error(errorData.message || 'Session expired. Please sign in again.');
     }
     
     let errorData;
@@ -219,7 +267,7 @@ export const sendMessageToCouncil = async (
     } catch {
       errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
     }
-    const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
     console.error('Council API error:', errorMsg, 'Status:', response.status);
     throw new Error(errorMsg);
   }
