@@ -90,8 +90,11 @@ const tests = [
       }
       authToken = data.token;
       userId = data.userId;
+      // Check if token is JWT (has 3 dot-separated segments)
+      const isJWT = authToken.split('.').length === 3;
       console.log(`   User ID: ${userId}`);
-      console.log(`   Token: ${authToken.substring(0, 16)}...`);
+      console.log(`   Token format: ${isJWT ? 'JWT' : 'Legacy'}`);
+      console.log(`   Token preview: ${authToken.substring(0, 20)}...`);
     },
   },
   {
@@ -108,7 +111,11 @@ const tests = [
       if (data.authHeaderFormat !== 'bearer') {
         throw new Error(`Expected authHeaderFormat: 'bearer', got: '${data.authHeaderFormat}'`);
       }
+      if (!data.tokenLooksLikeJwt) {
+        throw new Error(`Expected tokenLooksLikeJwt: true, got: ${data.tokenLooksLikeJwt}`);
+      }
       console.log(`   Format: ${data.authHeaderFormat}`);
+      console.log(`   Is JWT: ${data.tokenLooksLikeJwt}`);
       console.log(`   Verify: ${data.verifyResult}`);
     },
   },
