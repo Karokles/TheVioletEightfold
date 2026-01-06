@@ -117,37 +117,38 @@ interface AuthenticatedRequest extends Request {
 }
 
 const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
-  const authHeader = req.headers?.authorization;
-  
-  // Check if authorization header exists
-  if (!authHeader) {
-    return res.status(401).json({ 
-      error: 'unauthorized',
-      reason: 'missing_token',
-      message: 'Missing or invalid token'
-    });
-  }
-  
-  // Normalize header: handle "Bearer Bearer <token>" edge case
-  let normalizedHeader = authHeader.trim();
-  while (normalizedHeader.startsWith('Bearer ')) {
-    normalizedHeader = normalizedHeader.substring(7).trim();
-  }
-  
-  // Extract token
+  // Try multiple header formats: Authorization, x-auth-token
   let token = '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else {
-    // Legacy format: token without "Bearer " prefix
-    token = normalizedHeader;
+  const authHeader = req.headers?.authorization;
+  const xAuthToken = req.headers?.['x-auth-token'] as string | undefined;
+  
+  // Priority: Authorization header first, then x-auth-token
+  if (authHeader) {
+    // Normalize header: handle "Bearer Bearer <token>" edge case
+    let normalizedHeader = authHeader.trim();
+    while (normalizedHeader.startsWith('Bearer ')) {
+      normalizedHeader = normalizedHeader.substring(7).trim();
+    }
+    
+    // Extract token
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      // Legacy format: token without "Bearer " prefix
+      token = normalizedHeader;
+    }
+  } else if (xAuthToken) {
+    // Support x-auth-token header as fallback
+    token = xAuthToken.trim();
   }
   
-  if (token.length === 0) {
+  // Check if token exists
+  if (!token || token.length === 0) {
+    const reason = authHeader || xAuthToken ? 'empty_token' : 'missing_token';
     return res.status(401).json({ 
       error: 'unauthorized',
-      reason: 'empty_token',
-      message: 'Token is empty'
+      reason: reason,
+      message: reason === 'missing_token' ? 'Missing or invalid token' : 'Token is empty'
     });
   }
   
@@ -166,7 +167,8 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
         });
       }
       
-      const decoded = jwt.verify(token, JWT_SECRET_FINAL) as { userId: string; username: string; iat: number; exp: number };
+      // Explicitly set algorithm to HS256 for consistency
+      const decoded = jwt.verify(token, JWT_SECRET_FINAL, { algorithms: ['HS256'] }) as { userId: string; username: string; iat: number; exp: number };
       
       // Find user by userId from JWT claims
       const user = users.find(u => u.id === decoded.userId);
@@ -446,6 +448,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Server configuration error' });
     }
     
+    // Explicitly set algorithm to HS256 for consistency
     const token = jwt.sign(
       {
         userId: user.id,
@@ -453,6 +456,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
       },
       JWT_SECRET_FINAL,
       {
+        algorithm: 'HS256',
         expiresIn: JWT_EXPIRY,
         issuer: 'violet-eightfold',
       }
