@@ -2,7 +2,23 @@ import { ArchetypeId } from '../constants';
 import { Language, Message } from '../types';
 import { getCurrentUser } from './userService';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Production safety check: ensure API base URL is set in production builds
+const getApiBaseUrl = (): string => {
+  const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+  
+  // In production build, require VITE_API_BASE_URL to be set
+  if (import.meta.env.PROD && !url) {
+    throw new Error(
+      'VITE_API_BASE_URL is not set. Please configure it in your deployment environment. ' +
+      'This is required for production builds to connect to the backend.'
+    );
+  }
+  
+  // Fallback to localhost only in development
+  return url || 'http://localhost:3001';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Get auth headers for API requests
 const getAuthHeaders = () => {
@@ -47,11 +63,11 @@ export const sendMessageToArchetype = async (
 
   // For direct chat, use the council endpoint with activeArchetype set
   // This tells the server to use only that archetype's prompt
+  // Note: userId is derived server-side from the auth token, not sent in body
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      userId: user.id,
       messages,
       userProfile: {
         lore: currentLore,
@@ -101,11 +117,11 @@ export const startCouncilSession = async (
     },
   ];
 
+  // Note: userId is derived server-side from the auth token, not sent in body
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      userId: user.id,
       messages,
       userProfile: {
         lore: currentLore,
@@ -155,11 +171,11 @@ export const sendMessageToCouncil = async (
     },
   ];
 
+  // Note: userId is derived server-side from the auth token, not sent in body
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      userId: user.id,
       messages,
       userProfile: {
         lore: currentLore,

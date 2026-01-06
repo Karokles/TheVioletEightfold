@@ -17,9 +17,24 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-// CORS configuration - allow all origins for testing, with proper headers
+// CORS configuration - restrict to allowed origins in production
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:3000']; // Default to localhost for development
+
 app.use(cors({
-  origin: true, // Allow all origins for testing flexibility
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.) in development
+    if (!origin && process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    // Allow if origin is in allowed list or if no origin check needed
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -27,8 +42,13 @@ app.use(cors({
 app.use(express.json());
 
 // Initialize OpenAI
+if (!process.env.OPENAI_API_KEY) {
+  console.error('ERROR: OPENAI_API_KEY environment variable is not set');
+  console.error('The server will start but API calls will fail.');
+}
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || '', // Will fail gracefully if not set
 });
 
 // Simple in-memory user store (for MVP - replace with database later)
@@ -96,7 +116,7 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ ok: true });
+  res.json({ status: 'ok' });
 });
 
 // Login endpoint
@@ -132,10 +152,16 @@ app.post('/api/login', (req: Request, res: Response) => {
 // Council endpoint
 app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { userId, messages, userProfile } = (req.body as { userId?: string; messages?: any[]; userProfile?: any }) || {};
+    // Security: Use userId from authenticated user, not from request body
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    
+    const userId = req.user.id; // Server-side validated userId
+    const { messages, userProfile } = (req.body as { messages?: any[]; userProfile?: any }) || {};
 
-    if (!userId || !messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'userId and messages array are required' });
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'messages array is required' });
     }
 
     // Load archetypes and build system prompt
@@ -147,6 +173,11 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       role: (msg.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: String(msg.content),
     }));
+
+    // Validate OpenAI API key before making request
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
 
     // Call OpenAI
     const completion = await openai.chat.completions.create({
@@ -166,7 +197,11 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     res.json({ reply });
   } catch (error: any) {
     console.error('Council API error:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    // Sanitize error messages in production
+    const errorMessage = process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : (error.message || 'Internal server error');
+    res.status(500).json({ error: errorMessage });
   }
 });
 
@@ -263,7 +298,11 @@ app.use((req: Request, res: Response) => {
 // Global error handler
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ error: err.message || 'Internal server error' });
+  // Sanitize error messages in production
+  const errorMessage = process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : (err.message || 'Internal server error');
+  res.status(500).json({ error: errorMessage });
 });
 
 app.listen(PORT, () => {
