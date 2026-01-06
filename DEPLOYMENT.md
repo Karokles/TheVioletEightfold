@@ -21,6 +21,8 @@
 | `ALLOWED_ORIGINS` | ✅ Yes | Comma-separated frontend URLs (e.g., `https://your-app.vercel.app,http://localhost:3000`) |
 | `PORT` | ❌ No | Auto-set by Render |
 
+**Note:** All secrets (JWT_SECRET, OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY) are server-side only and never exposed to frontend builds.
+
 **Generate JWT_SECRET:**
 ```bash
 openssl rand -base64 32

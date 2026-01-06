@@ -168,14 +168,14 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       }
       
       // Explicitly set algorithm to HS256 for consistency
-      const decoded = jwt.verify(token, JWT_SECRET_FINAL, { algorithms: ['HS256'] }) as { userId: string; username: string; iat: number; exp: number };
+      const decoded = jwt.verify(token, JWT_SECRET_FINAL, { algorithms: ['HS256'] }) as { sub: string; username: string; iat: number; exp: number };
       
-      // Find user by userId from JWT claims
-      const user = users.find(u => u.id === decoded.userId);
+      // Find user by sub (user.id) from JWT claims
+      const user = users.find(u => u.id === decoded.sub);
       if (!user) {
         const tokenHash = createHash('sha256').update(token).digest('hex').substring(0, 12);
         const requestPath = req.path || req.url || 'unknown';
-        console.log(`[AUTH] User not found - path: ${requestPath}, userId: ${decoded.userId}, tokenHash: ${tokenHash}`);
+        console.log(`[AUTH] User not found - path: ${requestPath}, userId: ${decoded.sub}, tokenHash: ${tokenHash}`);
         return res.status(401).json({ 
           error: 'unauthorized',
           reason: 'invalid_claims',
@@ -388,6 +388,27 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
   }
 });
 
+// GET /api/me endpoint (protected, returns current user info)
+app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    
+    res.json({
+      userId: req.user.id,
+      username: req.user.username,
+    });
+  } catch (error: any) {
+    console.error('GET /api/me error:', error);
+    res.status(500).json({ 
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message 
+    });
+  }
+});
+
 // Auth debug endpoint (protected, for detailed diagnostics)
 app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -469,7 +490,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     // Explicitly set algorithm to HS256 for consistency
     const token = jwt.sign(
       {
-        userId: user.id,
+        sub: user.id,
         username: user.username,
       },
       JWT_SECRET_FINAL,
@@ -479,6 +500,9 @@ app.post('/api/login', async (req: Request, res: Response) => {
         issuer: 'violet-eightfold',
       }
     );
+    
+    // Log successful login (no secrets)
+    console.log(`[AUTH] Login successful for username: ${user.username}`);
     
     // Note: We no longer store token in-memory (stateless JWT)
     // Legacy: user.token = token; // Removed for stateless auth
@@ -510,6 +534,9 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
+    
+    // Log council request (no secrets)
+    console.log(`[COUNCIL] Request - userId: ${userId}, mode: ${mode}`);
 
     // Load archetypes and build system prompt
     // For now, we'll use a simplified version. In production, load from config files
@@ -539,34 +566,40 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
 
     let reply = completion.choices[0]?.message?.content || '';
 
-    // Persist to Supabase (if configured)
+    // Persist to Supabase (if configured) - best-effort, don't break response
     if (isSupabaseConfigured()) {
-      // Create council session record
-      const sessionId = await createCouncilSession({
-        user_id: userId,
-        mode: mode,
-        topic: mode === 'council' ? messages[0]?.content : undefined,
-        messages: {
-          messages: messages,
-          reply: reply,
-          userProfile: userProfile
+      try {
+        // Create council session record
+        const sessionId = await createCouncilSession({
+          user_id: userId,
+          mode: mode,
+          topic: mode === 'council' ? messages[0]?.content : undefined,
+          messages: {
+            messages: messages,
+            reply: reply,
+            userProfile: userProfile
+          }
+        });
+        
+        // Create lore entry
+        await createLoreEntry({
+          user_id: userId,
+          type: mode === 'direct' ? 'direct' : 'council',
+          content: {
+            messages: messages,
+            reply: reply,
+            archetype: userProfile?.activeArchetype,
+            language: userProfile?.language
+          }
+        });
+        
+        if (sessionId) {
+          console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
         }
-      });
-      
-      // Create lore entry
-      await createLoreEntry({
-        user_id: userId,
-        type: mode === 'direct' ? 'direct' : 'council',
-        content: {
-          messages: messages,
-          reply: reply,
-          archetype: userProfile?.activeArchetype,
-          language: userProfile?.language
-        }
-      });
-      
-      if (sessionId) {
-        console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
+      } catch (error: any) {
+        // Log DB write failure as warning (no secrets)
+        console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);
+        // Don't throw - continue with response
       }
     }
 

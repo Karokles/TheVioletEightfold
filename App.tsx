@@ -129,6 +129,45 @@ export default function App() {
     };
   }, []);
 
+  // Boot verification: check if token is still valid on mount
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const user = getCurrentUser();
+    if (!user) return;
+    
+    // One-time boot verification: call /api/me to verify token
+    const verifyToken = async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        
+        // Normalize token: remove any existing "Bearer " prefix
+        let token = user.token.trim();
+        while (token.startsWith('Bearer ')) {
+          token = token.substring(7).trim();
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/api/me`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        
+        if (!response.ok && response.status === 401) {
+          // Token invalid - clear auth and show login
+          console.warn('[AUTH] Boot verification failed: token invalid');
+          handleAuthError();
+        }
+      } catch (error) {
+        // Network error - don't clear auth, just log
+        console.error('[AUTH] Boot verification error:', error);
+      }
+    };
+    
+    verifyToken();
+  }, [isAuthenticated]);
+
   const toggleLanguage = () => {
     setLanguage(prev => prev === 'EN' ? 'DE' : 'EN');
   };
