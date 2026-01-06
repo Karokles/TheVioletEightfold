@@ -147,7 +147,6 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   };
 
   // --- Scribe Integration Handler ---
-  // Note: Scribe analysis removed for MVP. Can be re-added later with backend support.
   const handleIntegrateAndAdjourn = async () => {
     if (history.length === 0) {
         setIsSessionActive(false);
@@ -156,14 +155,37 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
     setIsIntegrating(true);
 
-    // For now, just close the session without analysis
-    // In the future, this could call a backend endpoint for Scribe analysis
-    setTimeout(() => {
-        setIsIntegrating(false);
-        setIsSessionActive(false);
-        setHistory([]);
-        setTopic('');
-    }, 1500);
+    try {
+      // Convert history to Message format for API
+      const sessionHistory = history
+        .filter(turn => turn.speaker !== 'SYSTEM')
+        .map(turn => ({
+          id: turn.id,
+          role: turn.isUser ? 'user' : 'assistant',
+          content: turn.content,
+          timestamp: Date.now(),
+        }));
+
+      // Call backend integration endpoint
+      const { integrateSession } = await import('../services/aiService');
+      const analysis = await integrateSession(sessionHistory, topic);
+      
+      // Call parent handler with analysis
+      onIntegrate(analysis);
+      
+      // Close session
+      setIsIntegrating(false);
+      setIsSessionActive(false);
+      setHistory([]);
+      setTopic('');
+    } catch (error: any) {
+      console.error('Integration error:', error);
+      // Still close session even if integration fails
+      setIsIntegrating(false);
+      setIsSessionActive(false);
+      setHistory([]);
+      setTopic('');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

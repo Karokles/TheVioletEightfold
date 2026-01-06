@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import jwt from 'jsonwebtoken';
+import { ensureUserExists, createCouncilSession, createLoreEntry, isSupabaseConfigured } from './supabase.js';
 
 const require = createRequire(import.meta.url);
 
@@ -419,7 +420,7 @@ app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Respon
 });
 
 // Login endpoint
-app.post('/api/login', (req: Request, res: Response) => {
+app.post('/api/login', async (req: Request, res: Response) => {
   try {
     const { username, secret } = req.body;
 
@@ -432,6 +433,11 @@ app.post('/api/login', (req: Request, res: Response) => {
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Ensure user exists in Supabase (if configured)
+    if (isSupabaseConfigured()) {
+      await ensureUserExists(user.id, user.username, user.secretHash);
     }
 
     // Generate JWT token (stateless, restart-proof)
@@ -479,6 +485,9 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'messages array is required' });
     }
+    
+    // Determine mode: direct chat (activeArchetype set) or council session
+    const mode = userProfile?.activeArchetype ? 'direct' : 'council';
 
     // Load archetypes and build system prompt
     // For now, we'll use a simplified version. In production, load from config files
@@ -508,7 +517,36 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
 
     let reply = completion.choices[0]?.message?.content || '';
 
-    // Removed automatic [LORE UPDATE] - let the AI decide if it wants to mention breakthroughs naturally
+    // Persist to Supabase (if configured)
+    if (isSupabaseConfigured()) {
+      // Create council session record
+      const sessionId = await createCouncilSession({
+        user_id: userId,
+        mode: mode,
+        topic: mode === 'council' ? messages[0]?.content : undefined,
+        messages: {
+          messages: messages,
+          reply: reply,
+          userProfile: userProfile
+        }
+      });
+      
+      // Create lore entry
+      await createLoreEntry({
+        user_id: userId,
+        type: mode === 'direct' ? 'direct' : 'council',
+        content: {
+          messages: messages,
+          reply: reply,
+          archetype: userProfile?.activeArchetype,
+          language: userProfile?.language
+        }
+      });
+      
+      if (sessionId) {
+        console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
+      }
+    }
 
     res.json({ reply });
   } catch (error: any) {

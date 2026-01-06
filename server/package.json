@@ -10,6 +10,7 @@
     "test:smoke:prod": "node scripts/smoke-test.js https://thevioleteightfold-4224.onrender.com"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.89.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
