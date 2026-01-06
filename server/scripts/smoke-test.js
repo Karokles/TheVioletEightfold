@@ -95,7 +95,25 @@ const tests = [
     },
   },
   {
-    name: 'Auth Debug Endpoint',
+    name: 'Auth Diagnose Endpoint (Public)',
+    fn: async () => {
+      const data = await request('GET', '/auth/diagnose', {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      if (data.verifyResult !== 'ok') {
+        throw new Error(`Expected verifyResult: 'ok', got: '${data.verifyResult}'`);
+      }
+      if (data.authHeaderFormat !== 'bearer') {
+        throw new Error(`Expected authHeaderFormat: 'bearer', got: '${data.authHeaderFormat}'`);
+      }
+      console.log(`   Format: ${data.authHeaderFormat}`);
+      console.log(`   Verify: ${data.verifyResult}`);
+    },
+  },
+  {
+    name: 'Auth Debug Endpoint (Protected)',
     fn: async () => {
       const data = await request('GET', '/api/auth/debug', {
         headers: {
@@ -192,7 +210,13 @@ const tests = [
         if (error.response?.status !== 401) {
           throw new Error(`Expected 401, got ${error.response?.status}`);
         }
-        console.log(`   Correctly rejected invalid token with 401`);
+        // Check for structured error response
+        const errorData = error.response?.data || {};
+        if (errorData.reason) {
+          console.log(`   Correctly rejected with reason: ${errorData.reason}`);
+        } else {
+          console.log(`   Correctly rejected invalid token with 401`);
+        }
       }
     },
   },
