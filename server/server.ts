@@ -99,24 +99,132 @@ interface AuthenticatedRequest extends Request {
 const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
   const authHeader = req.headers?.authorization;
   
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+  // Check if authorization header exists
+  if (!authHeader) {
+    return res.status(401).json({ 
+      error: 'Unauthorized: Missing or invalid token',
+      code: 'MISSING_TOKEN'
+    });
+  }
+  
+  // Normalize header: handle "Bearer Bearer <token>" edge case
+  let normalizedHeader = authHeader.trim();
+  while (normalizedHeader.startsWith('Bearer ')) {
+    normalizedHeader = normalizedHeader.substring(7).trim();
+  }
+  
+  // Check format: must start with "Bearer " after normalization
+  if (!authHeader.startsWith('Bearer ')) {
+    // Try legacy format: just the token without "Bearer "
+    const token = normalizedHeader;
+    if (token.length === 0) {
+      return res.status(401).json({ 
+        error: 'Unauthorized: Missing or invalid token',
+        code: 'MALFORMED_TOKEN'
+      });
+    }
+    
+    // Try lookup without Bearer prefix (legacy support)
+    const user = users.find(u => u.token === token);
+    if (user) {
+      req.user = user;
+      return next();
+    }
+    
+    return res.status(401).json({ 
+      error: 'Unauthorized: Invalid token format',
+      code: 'MALFORMED_TOKEN'
+    });
   }
 
-  const token = authHeader.substring(7);
+  // Extract token (remove "Bearer " prefix)
+  const token = authHeader.substring(7).trim();
+  
+  // Validate token format (should be hex string, 64 chars for 32 bytes)
+  if (token.length === 0) {
+    return res.status(401).json({ 
+      error: 'Unauthorized: Token is empty',
+      code: 'EMPTY_TOKEN'
+    });
+  }
+  
+  // Lookup user by token
   const user = users.find(u => u.token === token);
 
   if (!user) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    // Log for debugging (without exposing token)
+    console.log(`[AUTH] Token validation failed: token length=${token.length}, users with tokens=${users.filter(u => u.token).length}`);
+    return res.status(401).json({ 
+      error: 'Unauthorized: Invalid token',
+      code: 'INVALID_TOKEN',
+      hint: 'Token may have expired due to server restart. Please log in again.'
+    });
   }
 
   req.user = user;
   next();
 };
 
-// Health check endpoint
+// Health check endpoint (public)
 app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
+  const uptime = process.uptime();
+  res.json({ 
+    status: 'ok',
+    uptime: Math.floor(uptime),
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Auth debug endpoint (protected, for diagnostics)
+app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authHeader = req.headers?.authorization || '';
+    
+    // Extract token info without exposing full token
+    const hasBearer = authHeader.startsWith('Bearer ');
+    const tokenLength = hasBearer ? authHeader.substring(7).length : 0;
+    const tokenPrefix = hasBearer && tokenLength > 0 
+      ? authHeader.substring(7, Math.min(15, 7 + tokenLength)) + '...' 
+      : null;
+    
+    // Check token validation result
+    let verificationResult: string;
+    if (!authHeader) {
+      verificationResult = 'missing';
+    } else if (!hasBearer) {
+      verificationResult = 'malformed';
+    } else if (!req.user) {
+      verificationResult = 'invalid_signature';
+    } else {
+      verificationResult = 'ok';
+    }
+    
+    // Get user info (safe - no secrets)
+    const userInfo = req.user ? {
+      userId: req.user.id,
+      username: req.user.username,
+      hasToken: !!req.user.token
+    } : null;
+    
+    res.json({
+      tokenPresent: !!authHeader,
+      tokenLocation: 'header',
+      tokenFormat: hasBearer ? 'Bearer' : 'unknown',
+      tokenLength: tokenLength,
+      tokenPrefix: tokenPrefix, // First few chars for debugging (safe)
+      verificationResult: verificationResult,
+      userInfo: userInfo,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Auth debug error:', error);
+    res.status(500).json({ 
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message 
+    });
+  }
 });
 
 // Login endpoint
