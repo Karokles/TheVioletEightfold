@@ -301,5 +301,53 @@ export const login = async (username: string, secret: string): Promise<{ userId:
   }
 
   return response.json();
-};
+}
+
+// Integration endpoint (for questlog integration)
+export async function integrateSession(
+  sessionHistory: Message[],
+  topic?: string
+): Promise<{ newLoreEntry?: string; updatedQuest?: string; updatedState?: string; newMilestone?: string; newAttribute?: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/integrate`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      sessionHistory: sessionHistory,
+      topic: topic
+    }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'unauthorized' };
+      }
+      
+      const reason = errorData.reason || '';
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
+        const { handleAuthError } = await import('./userService');
+        handleAuthError();
+        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+        throw new Error(message);
+      }
+      
+      const { handleAuthError } = await import('./userService');
+      handleAuthError();
+      throw new Error(errorData.message || 'Session expired. Please sign in again.');
+    }
+    
+    let errorData;
+    try {
+      errorData = await response.json();
+    } catch {
+      errorData = { error: 'Unknown error' };
+    }
+    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
 

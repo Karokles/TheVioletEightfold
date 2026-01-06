@@ -559,6 +559,57 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
   }
 });
 
+// Integration endpoint (for questlog integration)
+app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    
+    const userId = req.user.id;
+    const { sessionHistory, topic } = req.body as { sessionHistory?: any[]; topic?: string };
+    
+    if (!sessionHistory || !Array.isArray(sessionHistory)) {
+      return res.status(400).json({ error: 'sessionHistory array is required' });
+    }
+    
+    // Persist integration to Supabase (if configured)
+    if (isSupabaseConfigured()) {
+      try {
+        await createLoreEntry({
+          user_id: userId,
+          type: 'integration',
+          content: {
+            topic: topic,
+            sessionHistory: sessionHistory,
+            integratedAt: new Date().toISOString()
+          }
+        });
+        console.log(`[SUPABASE] Created integration entry for user ${userId}`);
+      } catch (error: any) {
+        console.error('[SUPABASE] Error persisting integration:', error.message);
+        // Don't fail the request if Supabase write fails
+      }
+    }
+    
+    // Return minimal analysis (can be enhanced later with AI analysis)
+    res.json({
+      newLoreEntry: `Session integrated: ${topic || 'Council session'} - ${sessionHistory.length} exchanges`,
+      updatedQuest: null,
+      updatedState: null,
+      newMilestone: null,
+      newAttribute: null
+    });
+  } catch (error: any) {
+    console.error('Integration API error:', error);
+    res.status(500).json({ 
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message 
+    });
+  }
+});
+
 // Load archetypes config
 function loadArchetypesConfig() {
   try {
