@@ -30,6 +30,29 @@ export const clearCurrentUser = () => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 };
 
+// Auth error handler: clears tokens and triggers logout event
+// This prevents infinite retry loops and provides clean UX
+let authErrorHandler: (() => void) | null = null;
+
+export const setAuthErrorHandler = (handler: () => void) => {
+  authErrorHandler = handler;
+};
+
+export const handleAuthError = () => {
+  console.warn('[AUTH] Authentication error detected, clearing tokens');
+  clearCurrentUser();
+  
+  // Trigger logout event for App.tsx to handle
+  if (authErrorHandler) {
+    authErrorHandler();
+  } else {
+    // Fallback: reload page to force re-login
+    // This is a last resort if handler not set
+    console.warn('[AUTH] No auth error handler set, reloading page');
+    window.location.reload();
+  }
+};
+
 export const getUserScopedKey = (key: string, userId: string): string => {
   return `user_${userId}_${key}`;
 };
@@ -66,4 +89,9 @@ export const saveUserStats = (userId: string, stats: UserStats) => {
   const key = getUserScopedKey('stats', userId);
   localStorage.setItem(key, JSON.stringify(stats));
 };
+
+
+
+
+
 

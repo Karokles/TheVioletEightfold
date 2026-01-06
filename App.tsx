@@ -9,7 +9,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
 import { Language, UserStats, ScribeAnalysis } from './types';
-import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats } from './services/userService';
+import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler } from './services/userService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp } from 'lucide-react';
 
 enum AppMode {
@@ -114,6 +114,20 @@ export default function App() {
       setStats(loadUserStats(user.id));
     }
   };
+
+  const handleAuthError = () => {
+    // Clear auth state and force re-login
+    setIsAuthenticated(false);
+    setHasEntered(false);
+  };
+
+  // Register auth error handler on mount
+  useEffect(() => {
+    setAuthErrorHandler(handleAuthError);
+    return () => {
+      setAuthErrorHandler(() => {}); // Cleanup
+    };
+  }, []);
 
   const toggleLanguage = () => {
     setLanguage(prev => prev === 'EN' ? 'DE' : 'EN');

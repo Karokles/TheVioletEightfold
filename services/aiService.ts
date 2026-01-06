@@ -27,9 +27,16 @@ const getAuthHeaders = () => {
     throw new Error('User not authenticated');
   }
   
+  // Normalize token: remove any existing "Bearer " prefix to prevent double prefix
+  let token = user.token.trim();
+  while (token.startsWith('Bearer ')) {
+    token = token.substring(7).trim();
+  }
+  
+  // Ensure single "Bearer " prefix
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${user.token}`,
+    'Authorization': `Bearer ${token}`,
   };
 };
 
@@ -78,6 +85,13 @@ export const sendMessageToArchetype = async (
   });
 
   if (!response.ok) {
+    // Handle 401 Unauthorized: clear tokens and force re-login
+    if (response.status === 401) {
+      const { handleAuthError } = await import('./userService');
+      handleAuthError();
+      throw new Error('Session expired. Please sign in again.');
+    }
+    
     let errorData;
     try {
       errorData = await response.json();
@@ -131,6 +145,13 @@ export const startCouncilSession = async (
   });
 
   if (!response.ok) {
+    // Handle 401 Unauthorized: clear tokens and force re-login
+    if (response.status === 401) {
+      const { handleAuthError } = await import('./userService');
+      handleAuthError();
+      throw new Error('Session expired. Please sign in again.');
+    }
+    
     let errorData;
     try {
       errorData = await response.json();
@@ -185,6 +206,13 @@ export const sendMessageToCouncil = async (
   });
 
   if (!response.ok) {
+    // Handle 401 Unauthorized: clear tokens and force re-login
+    if (response.status === 401) {
+      const { handleAuthError } = await import('./userService');
+      handleAuthError();
+      throw new Error('Session expired. Please sign in again.');
+    }
+    
     let errorData;
     try {
       errorData = await response.json();
