@@ -96,10 +96,12 @@ export const sendMessageToArchetype = async (
       
       // Check for invalid_* reasons to trigger auto-logout
       const reason = errorData.reason || '';
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
         const { handleAuthError } = await import('./userService');
         handleAuthError();
-        throw new Error('Session expired. Please sign in again.');
+        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+        throw new Error(message);
       }
       
       // Other 401 reasons (malformed, etc.) - still clear token
@@ -172,10 +174,12 @@ export const startCouncilSession = async (
       
       // Check for invalid_* reasons to trigger auto-logout
       const reason = errorData.reason || '';
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
         const { handleAuthError } = await import('./userService');
         handleAuthError();
-        throw new Error('Session expired. Please sign in again.');
+        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+        throw new Error(message);
       }
       
       // Other 401 reasons (malformed, etc.) - still clear token
@@ -249,10 +253,12 @@ export const sendMessageToCouncil = async (
       
       // Check for invalid_* reasons to trigger auto-logout
       const reason = errorData.reason || '';
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token') {
+      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
+      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
         const { handleAuthError } = await import('./userService');
         handleAuthError();
-        throw new Error('Session expired. Please sign in again.');
+        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+        throw new Error(message);
       }
       
       // Other 401 reasons (malformed, etc.) - still clear token

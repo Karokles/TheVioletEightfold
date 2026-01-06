@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import jwt from 'jsonwebtoken';
 
 const require = createRequire(import.meta.url);
 
@@ -15,6 +16,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 dotenv.config();
+
+// JWT Configuration - fail fast if secret missing in production
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('ERROR: JWT_SECRET environment variable is required in production');
+  console.error('Please set JWT_SECRET in your Render environment variables');
+  process.exit(1);
+}
+if (!JWT_SECRET) {
+  console.warn('WARNING: JWT_SECRET not set. Using default for development only.');
+  console.warn('Set JWT_SECRET in production to ensure secure token signing.');
+}
+
+const JWT_SECRET_FINAL = JWT_SECRET || 'dev-secret-change-in-production';
+const JWT_EXPIRY = '7d'; // Tokens expire in 7 days
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -106,7 +122,7 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   if (!authHeader) {
     return res.status(401).json({ 
       error: 'unauthorized',
-      reason: 'missing_token', // Machine-readable reason
+      reason: 'missing_token',
       message: 'Missing or invalid token'
     });
   }
@@ -117,60 +133,84 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
     normalizedHeader = normalizedHeader.substring(7).trim();
   }
   
-  // Check format: must start with "Bearer " after normalization
-  if (!authHeader.startsWith('Bearer ')) {
-    // Try legacy format: just the token without "Bearer "
-    const token = normalizedHeader;
-    if (token.length === 0) {
-      return res.status(401).json({ 
-        error: 'unauthorized',
-        reason: 'malformed_token', // Machine-readable reason
-        message: 'Missing or invalid token'
-      });
-    }
-    
-    // Try lookup without Bearer prefix (legacy support)
-    const user = users.find(u => u.token === token);
-    if (user) {
-      req.user = user;
-      return next();
-    }
-    
-    return res.status(401).json({ 
-      error: 'unauthorized',
-      reason: 'malformed_token', // Machine-readable reason
-      message: 'Invalid token format'
-    });
+  // Extract token
+  let token = '';
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else {
+    // Legacy format: token without "Bearer " prefix
+    token = normalizedHeader;
   }
-
-  // Extract token (remove "Bearer " prefix)
-  const token = authHeader.substring(7).trim();
   
-  // Validate token format (should be hex string, 64 chars for 32 bytes)
   if (token.length === 0) {
     return res.status(401).json({ 
       error: 'unauthorized',
-      reason: 'empty_token', // Machine-readable reason
+      reason: 'empty_token',
       message: 'Token is empty'
     });
   }
   
-  // Lookup user by token
-  const user = users.find(u => u.token === token);
-
-  if (!user) {
-    // Log for debugging (without exposing token)
-    console.log(`[AUTH] Token validation failed: token length=${token.length}, users with tokens=${users.filter(u => u.token).length}`);
+  // Check if token looks like JWT (has 3 dot-separated segments)
+  const isJWT = token.split('.').length === 3;
+  
+  if (isJWT) {
+    // JWT token - verify cryptographically
+    try {
+      if (!JWT_SECRET) {
+        console.error('[AUTH] JWT_SECRET not configured');
+        return res.status(500).json({ 
+          error: 'unauthorized',
+          reason: 'missing_secret',
+          message: 'Server configuration error'
+        });
+      }
+      
+      const decoded = jwt.verify(token, JWT_SECRET_FINAL) as { userId: string; username: string; iat: number; exp: number };
+      
+      // Find user by userId from JWT claims
+      const user = users.find(u => u.id === decoded.userId);
+      if (!user) {
+        return res.status(401).json({ 
+          error: 'unauthorized',
+          reason: 'invalid_claims',
+          message: 'User not found'
+        });
+      }
+      
+      // Attach user to request
+      req.user = user;
+      return next();
+    } catch (error: any) {
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ 
+          error: 'unauthorized',
+          reason: 'expired',
+          message: 'Token has expired. Please sign in again.'
+        });
+      } else if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ 
+          error: 'unauthorized',
+          reason: 'invalid_signature',
+          message: 'Invalid token signature'
+        });
+      } else {
+        console.error('[AUTH] JWT verification error:', error.message);
+        return res.status(401).json({ 
+          error: 'unauthorized',
+          reason: 'invalid_format',
+          message: 'Invalid token format'
+        });
+      }
+    }
+  } else {
+    // Legacy token format - reject with clear message
     return res.status(401).json({ 
       error: 'unauthorized',
-      reason: 'invalid_signature', // Machine-readable reason
-      message: 'Invalid token',
-      hint: 'Token may have expired due to server restart. Please log in again.'
+      reason: 'legacy_token_invalid',
+      message: 'Legacy token format no longer supported. Please sign in again to get a new token.',
+      hint: 'The authentication system has been upgraded. Your old token is no longer valid.'
     });
   }
-
-  req.user = user;
-  next();
 };
 
 // Health check endpoint (public)
@@ -232,8 +272,20 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
       }
     }
     
-    // Verify token (simulate what authenticate middleware does)
-    let verifyResult: 'ok' | 'expired' | 'invalid_signature' | 'invalid_claims' | 'unknown' = 'unknown';
+    // Check if token looks like JWT (has 3 dot-separated segments)
+    const tokenLooksLikeJwt = (() => {
+      if (tokenParse !== 'ok') return false;
+      let token = '';
+      if (authHeaderFormat === 'bearer') {
+        token = authHeader.substring(7).trim();
+      } else {
+        token = authHeader.trim();
+      }
+      return token.split('.').length === 3;
+    })();
+    
+    // Verify token (try JWT first, then legacy)
+    let verifyResult: 'ok' | 'expired' | 'invalid_signature' | 'invalid_format' | 'missing_secret' | 'unknown' = 'unknown';
     if (tokenParse === 'ok') {
       let token = '';
       if (authHeaderFormat === 'bearer') {
@@ -242,18 +294,38 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
         token = authHeader.trim();
       }
       
-      // Lookup in-memory (same as authenticate middleware)
-      const user = users.find(u => u.token === token);
-      if (user) {
-        verifyResult = 'ok';
+      if (tokenLooksLikeJwt) {
+        // Try JWT verification
+        try {
+          if (!JWT_SECRET) {
+            verifyResult = 'missing_secret';
+          } else {
+            const decoded = jwt.verify(token, JWT_SECRET_FINAL);
+            if (decoded) {
+              verifyResult = 'ok';
+            }
+          }
+        } catch (error: any) {
+          if (error.name === 'TokenExpiredError') {
+            verifyResult = 'expired';
+          } else if (error.name === 'JsonWebTokenError') {
+            verifyResult = 'invalid_signature';
+          } else {
+            verifyResult = 'invalid_format';
+          }
+        }
       } else {
-        // Token not found - could be expired (server restart) or invalid
-        // Since we don't have exp claims, we can't distinguish
-        // But if token format is valid, it's likely "expired" (server restart)
-        verifyResult = 'expired';
+        // Legacy token format - check in-memory (for backward compatibility during migration)
+        const user = users.find(u => u.token === token);
+        if (user) {
+          verifyResult = 'ok';
+        } else {
+          // Legacy token not found - likely expired due to restart
+          verifyResult = 'expired';
+        }
       }
     } else if (tokenParse === 'malformed') {
-      verifyResult = 'invalid_signature';
+      verifyResult = 'invalid_format';
     } else {
       verifyResult = 'unknown';
     }
@@ -262,6 +334,7 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
       hasAuthHeader: !!authHeader,
       authHeaderFormat: authHeaderFormat,
       tokenParse: tokenParse,
+      tokenLooksLikeJwt: tokenLooksLikeJwt,
       verifyResult: verifyResult,
       tokenLength: tokenLength,
       timestamp: new Date().toISOString()
@@ -304,7 +377,7 @@ app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Respon
     const userInfo = req.user ? {
       userId: req.user.id,
       username: req.user.username,
-      hasToken: !!req.user.token
+      hasToken: false // JWT tokens are stateless, not stored in-memory
     } : null;
     
     res.json({
@@ -343,9 +416,26 @@ app.post('/api/login', (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate token
-    const token = randomBytes(32).toString('hex');
-    user.token = token;
+    // Generate JWT token (stateless, restart-proof)
+    if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+      console.error('[AUTH] JWT_SECRET required in production');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        username: user.username,
+      },
+      JWT_SECRET_FINAL,
+      {
+        expiresIn: JWT_EXPIRY,
+        issuer: 'violet-eightfold',
+      }
+    );
+    
+    // Note: We no longer store token in-memory (stateless JWT)
+    // Legacy: user.token = token; // Removed for stateless auth
 
     res.json({
       userId: user.id,
