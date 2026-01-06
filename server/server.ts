@@ -170,6 +170,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       // Find user by userId from JWT claims
       const user = users.find(u => u.id === decoded.userId);
       if (!user) {
+        const tokenHash = createHash('sha256').update(token).digest('hex').substring(0, 12);
+        const requestPath = req.path || req.url || 'unknown';
+        console.log(`[AUTH] User not found - path: ${requestPath}, userId: ${decoded.userId}, tokenHash: ${tokenHash}`);
         return res.status(401).json({ 
           error: 'unauthorized',
           reason: 'invalid_claims',
@@ -181,20 +184,27 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       req.user = user;
       return next();
     } catch (error: any) {
+      // Log auth failure with safe details (no secrets, no full token)
+      const tokenHash = createHash('sha256').update(token).digest('hex').substring(0, 12);
+      const tokenLength = token.length;
+      const requestPath = req.path || req.url || 'unknown';
+      
       if (error.name === 'TokenExpiredError') {
+        console.log(`[AUTH] Token expired - path: ${requestPath}, tokenHash: ${tokenHash}, tokenLength: ${tokenLength}`);
         return res.status(401).json({ 
           error: 'unauthorized',
           reason: 'expired',
           message: 'Token has expired. Please sign in again.'
         });
       } else if (error.name === 'JsonWebTokenError') {
+        console.log(`[AUTH] Invalid signature - path: ${requestPath}, tokenHash: ${tokenHash}, tokenLength: ${tokenLength}, error: ${error.message}`);
         return res.status(401).json({ 
           error: 'unauthorized',
           reason: 'invalid_signature',
           message: 'Invalid token signature'
         });
       } else {
-        console.error('[AUTH] JWT verification error:', error.message);
+        console.error(`[AUTH] JWT verification error - path: ${requestPath}, tokenHash: ${tokenHash}, tokenLength: ${tokenLength}, error: ${error.message}`);
         return res.status(401).json({ 
           error: 'unauthorized',
           reason: 'invalid_format',
@@ -225,12 +235,20 @@ app.get('/api/health', (req: Request, res: Response) => {
     // Git not available or not a git repo - use fallback
   }
   
+  // Check Supabase connectivity (non-blocking, non-sensitive)
+  let supabaseStatus = 'not_configured';
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    supabaseStatus = 'configured';
+  }
+  
   res.json({ 
     status: 'ok',
     uptime: Math.floor(uptime),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    commitHash: commitHash
+    commitHash: commitHash,
+    jwtSecretSet: !!process.env.JWT_SECRET,
+    supabaseStatus: supabaseStatus
   });
 });
 
