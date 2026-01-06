@@ -7,6 +7,9 @@ import OpenAI from 'openai';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -102,8 +105,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   // Check if authorization header exists
   if (!authHeader) {
     return res.status(401).json({ 
-      error: 'Unauthorized: Missing or invalid token',
-      code: 'MISSING_TOKEN'
+      error: 'unauthorized',
+      reason: 'missing_token', // Machine-readable reason
+      message: 'Missing or invalid token'
     });
   }
   
@@ -119,8 +123,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
     const token = normalizedHeader;
     if (token.length === 0) {
       return res.status(401).json({ 
-        error: 'Unauthorized: Missing or invalid token',
-        code: 'MALFORMED_TOKEN'
+        error: 'unauthorized',
+        reason: 'malformed_token', // Machine-readable reason
+        message: 'Missing or invalid token'
       });
     }
     
@@ -132,8 +137,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
     }
     
     return res.status(401).json({ 
-      error: 'Unauthorized: Invalid token format',
-      code: 'MALFORMED_TOKEN'
+      error: 'unauthorized',
+      reason: 'malformed_token', // Machine-readable reason
+      message: 'Invalid token format'
     });
   }
 
@@ -143,8 +149,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   // Validate token format (should be hex string, 64 chars for 32 bytes)
   if (token.length === 0) {
     return res.status(401).json({ 
-      error: 'Unauthorized: Token is empty',
-      code: 'EMPTY_TOKEN'
+      error: 'unauthorized',
+      reason: 'empty_token', // Machine-readable reason
+      message: 'Token is empty'
     });
   }
   
@@ -155,8 +162,9 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
     // Log for debugging (without exposing token)
     console.log(`[AUTH] Token validation failed: token length=${token.length}, users with tokens=${users.filter(u => u.token).length}`);
     return res.status(401).json({ 
-      error: 'Unauthorized: Invalid token',
-      code: 'INVALID_TOKEN',
+      error: 'unauthorized',
+      reason: 'invalid_signature', // Machine-readable reason
+      message: 'Invalid token',
       hint: 'Token may have expired due to server restart. Please log in again.'
     });
   }
@@ -168,15 +176,107 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
 // Health check endpoint (public)
 app.get('/api/health', (req: Request, res: Response) => {
   const uptime = process.uptime();
+  // Try to get git commit hash if available (non-blocking)
+  let commitHash = 'unknown';
+  try {
+    const { execSync } = require('node:child_process');
+    commitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', stdio: 'pipe' }).toString().trim();
+  } catch {
+    // Git not available or not a git repo - use fallback
+  }
+  
   res.json({ 
     status: 'ok',
     uptime: Math.floor(uptime),
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    commitHash: commitHash
   });
 });
 
-// Auth debug endpoint (protected, for diagnostics)
+// Auth diagnose endpoint (public, safe - no secrets exposed)
+app.get('/auth/diagnose', (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers?.authorization || '';
+    
+    // Determine auth header format
+    let authHeaderFormat: 'missing' | 'bearer' | 'raw' | 'malformed' = 'missing';
+    if (authHeader) {
+      if (authHeader.startsWith('Bearer ')) {
+        authHeaderFormat = 'bearer';
+      } else if (authHeader.trim().length > 0) {
+        authHeaderFormat = 'raw';
+      } else {
+        authHeaderFormat = 'malformed';
+      }
+    }
+    
+    // Parse token (without exposing it)
+    let tokenParse: 'ok' | 'missing' | 'malformed' = 'missing';
+    let tokenLength = 0;
+    if (authHeaderFormat === 'bearer') {
+      const token = authHeader.substring(7).trim();
+      if (token.length > 0) {
+        tokenParse = 'ok';
+        tokenLength = token.length;
+      } else {
+        tokenParse = 'malformed';
+      }
+    } else if (authHeaderFormat === 'raw') {
+      const token = authHeader.trim();
+      if (token.length > 0) {
+        tokenParse = 'ok';
+        tokenLength = token.length;
+      } else {
+        tokenParse = 'malformed';
+      }
+    }
+    
+    // Verify token (simulate what authenticate middleware does)
+    let verifyResult: 'ok' | 'expired' | 'invalid_signature' | 'invalid_claims' | 'unknown' = 'unknown';
+    if (tokenParse === 'ok') {
+      let token = '';
+      if (authHeaderFormat === 'bearer') {
+        token = authHeader.substring(7).trim();
+      } else {
+        token = authHeader.trim();
+      }
+      
+      // Lookup in-memory (same as authenticate middleware)
+      const user = users.find(u => u.token === token);
+      if (user) {
+        verifyResult = 'ok';
+      } else {
+        // Token not found - could be expired (server restart) or invalid
+        // Since we don't have exp claims, we can't distinguish
+        // But if token format is valid, it's likely "expired" (server restart)
+        verifyResult = 'expired';
+      }
+    } else if (tokenParse === 'malformed') {
+      verifyResult = 'invalid_signature';
+    } else {
+      verifyResult = 'unknown';
+    }
+    
+    res.json({
+      hasAuthHeader: !!authHeader,
+      authHeaderFormat: authHeaderFormat,
+      tokenParse: tokenParse,
+      verifyResult: verifyResult,
+      tokenLength: tokenLength,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Auth diagnose error:', error);
+    res.status(500).json({ 
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message 
+    });
+  }
+});
+
+// Auth debug endpoint (protected, for detailed diagnostics)
 app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const authHeader = req.headers?.authorization || '';
