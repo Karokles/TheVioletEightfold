@@ -17,25 +17,40 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
   const currentArchetypeData = archetypes[activeArchetype];
   const ui = getUIText(language);
 
-  const getInitMessage = (): Message => ({
-        id: `init-${activeArchetype}-${language}`,
-        role: 'model',
-        content: language === 'DE' 
-            ? `Ich bin ${currentArchetypeData.name}. ${currentArchetypeData.role}. Bereit zu dienen.` 
-            : `I am ${currentArchetypeData.name}. ${currentArchetypeData.role}. Ready to assist.`,
-        timestamp: Date.now(),
-        archetypeId: activeArchetype
-  });
+  // AbortController for cancelling in-flight requests when switching archetypes
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const [messages, setMessages] = useState<Message[]>([getInitMessage()]);
+  const getInitMessage = (archetype: ArchetypeId, lang: Language): Message => {
+    const archetypeData = archetypes[archetype];
+    return {
+      id: `init-${archetype}-${lang}`,
+      role: 'model',
+      content: lang === 'DE' 
+          ? `Ich bin ${archetypeData.name}. ${archetypeData.role}. Bereit zu dienen.` 
+          : `I am ${archetypeData.name}. ${archetypeData.role}. Ready to assist.`,
+      timestamp: Date.now(),
+      archetypeId: archetype
+    };
+  };
+
+  const [messages, setMessages] = useState<Message[]>(() => [getInitMessage(activeArchetype, language)]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<ChatStatus>(ChatStatus.IDLE);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Reset messages and cancel any in-flight requests when archetype or language changes
   useEffect(() => {
-    setMessages([getInitMessage()]);
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
+    // Reset messages with new archetype's greeting
+    setMessages([getInitMessage(activeArchetype, language)]);
     setStatus(ChatStatus.IDLE);
+    setInput(''); // Clear input as well
   }, [activeArchetype, language]);
 
   useEffect(() => {
@@ -44,6 +59,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
 
   const handleSend = async () => {
     if (!input.trim() || status === ChatStatus.STREAMING) return;
+
+    // Cancel any previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -58,8 +82,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
 
     try {
       // Build conversation history from existing messages (excluding the init message)
+      // Filter by current archetype to ensure per-archetype isolation
+      const initMsgId = `init-${activeArchetype}-${language}`;
       const conversationHistory: Message[] = messages
-        .filter(msg => msg.id !== getInitMessage().id)
+        .filter(msg => msg.id !== initMsgId && msg.archetypeId === activeArchetype)
         .map(msg => ({
           id: msg.id,
           role: msg.role,
@@ -81,6 +107,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
       let fullText = '';
 
       for await (const chunk of stream) {
+        // Check if request was aborted
+        if (abortController.signal.aborted) {
+          return;
+        }
+
         const text = chunk.text;
         if (text) {
             fullText += text;
@@ -89,8 +120,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
             ));
         }
       }
+      
+      // Clear abort controller on success
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
       setStatus(ChatStatus.IDLE);
     } catch (error: any) {
+      // Ignore abort errors
+      if (error.name === 'AbortError' || abortController.signal.aborted) {
+        return;
+      }
+
       console.error('Chat error:', error);
       const errorMessage = error?.message || error?.toString() || 'Connection error';
       console.error('Full error details:', {
@@ -110,6 +151,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
         archetypeId: activeArchetype
       }]);
       setStatus(ChatStatus.ERROR);
+      
+      // Clear abort controller on error
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 

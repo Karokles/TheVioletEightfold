@@ -43,20 +43,38 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const archetypes = getArchetypes(language);
 
   const parseBufferToTurns = (buffer: string, startIndex: number): DialogueTurn[] => {
-    const parts = buffer.split(/\[\[SPEAKER:\s*([A-Z_]+)\]\]/);
     const turns: DialogueTurn[] = [];
+    
+    // First, extract MODERATOR summary if present
+    const moderatorMatch = buffer.match(/^MODERATOR:\s*(.+?)(?=\n\[\[SPEAKER:|$)/s);
+    if (moderatorMatch) {
+      turns.push({
+        id: `moderator-${startIndex}`,
+        speaker: 'MODERATOR',
+        content: moderatorMatch[1].trim(),
+        isUser: false
+      });
+    }
+    
+    // Extract archetype speakers
+    const parts = buffer.split(/\[\[SPEAKER:\s*([A-Z_]+)\]\]/);
     
     for (let i = 1; i < parts.length; i += 2) {
         const speakerId = parts[i];
-        const content = parts[i+1] || '';
+        let content = parts[i+1] || '';
+        
+        // Remove SOVEREIGN DECISION and NEXT STEPS markers from content (they'll be handled separately)
+        // But keep them in the content for now so they display
+        content = content.trim();
         
         turns.push({
             id: `stream-${startIndex}-${i}`,
             speaker: speakerId, 
-            content: content.trim(),
+            content: content,
             isUser: false
         });
     }
+    
     return turns;
   };
 
