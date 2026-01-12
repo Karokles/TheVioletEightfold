@@ -9,7 +9,18 @@ import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import jwt from 'jsonwebtoken';
-import { ensureUserExists, createCouncilSession, createLoreEntry, isSupabaseConfigured } from './supabase.js';
+import { 
+  ensureUserExists, 
+  createCouncilSession, 
+  createLoreEntry, 
+  isSupabaseConfigured,
+  createQuestLogEntry,
+  getQuestLogEntries,
+  createSoulTimelineEvent,
+  getSoulTimelineEvents,
+  createBreakthrough,
+  getBreakthroughs
+} from './supabase.js';
 
 const require = createRequire(import.meta.url);
 
@@ -705,8 +716,34 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     // Extract reply safely
     let reply = completion?.choices?.[0]?.message?.content || '';
     if (!reply) {
-      console.warn('[COUNCIL] Empty reply from OpenAI', { userId, mode });
+      console.warn('[API] Empty reply from OpenAI', { userId, mode });
       reply = 'I apologize, but I could not generate a response. Please try again.';
+    }
+    
+    // CRITICAL: In DIRECT mode, strip any council structure that might have leaked through
+    if (mode === 'direct') {
+      const originalReply = reply;
+      // Remove any [[SPEAKER:]] tags
+      reply = reply.replace(/\[\[SPEAKER:[^\]]+\]\]/gi, '');
+      // Remove MODERATOR: lines
+      reply = reply.replace(/^MODERATOR:.*$/gmi, '');
+      // Remove SOVEREIGN DECISION: sections
+      reply = reply.replace(/SOVEREIGN DECISION:.*$/gmi, '');
+      // Clean up multiple newlines
+      reply = reply.replace(/\n{3,}/g, '\n\n').trim();
+      
+      // Log if we had to clean the response
+      if (reply !== originalReply) {
+        console.warn('[API] DIRECT mode: Stripped council structure from response', { 
+          userId, 
+          activeArchetype: userProfile?.activeArchetype,
+          originalLength: originalReply.length,
+          cleanedLength: reply.length,
+          hadSpeakerTags: originalReply.includes('[[SPEAKER:'),
+          hadModerator: originalReply.includes('MODERATOR:'),
+          hadSovereignDecision: originalReply.includes('SOVEREIGN DECISION:'),
+        });
+      }
     }
 
     // Persist to Supabase (if configured) - best-effort, don't break response
@@ -757,7 +794,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
   }
 });
 
-// Integration endpoint (for questlog integration)
+// Integration endpoint (for questlog integration) - DEPRECATED: Use /api/meaning/analyze instead
 app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -800,6 +837,342 @@ app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: 
     });
   } catch (error: any) {
     console.error('Integration API error:', error);
+    res.status(500).json({ 
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message 
+    });
+  }
+});
+
+// Meaning Agent endpoint - analyzes session transcript and returns canonical JSON
+app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    
+    const userId = req.user.id;
+    const { 
+      sessionId, 
+      mode, 
+      activeArchetype, 
+      messages, 
+      userLore, 
+      currentQuestState 
+    } = req.body as { 
+      sessionId?: string;
+      mode?: 'single' | 'council';
+      activeArchetype?: string;
+      messages?: Array<{ role: string; content: string; meta?: any }>;
+      userLore?: string;
+      currentQuestState?: { title?: string; state?: string; objective?: string };
+    };
+    
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'messages array is required and cannot be empty' });
+    }
+    
+    // Validate OpenAI API key
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('[MEANING] OpenAI API key not configured');
+      return res.status(500).json({ 
+        error: 'OpenAI API key not configured',
+        message: 'The server is missing the OpenAI API key.'
+      });
+    }
+    
+    // Build transcript text (clean, no speaker tags)
+    const transcript = messages
+      .map(msg => {
+        const role = msg.role === 'user' ? 'USER' : 'ASSISTANT';
+        // Remove any [[SPEAKER:]] tags or MODERATOR text
+        let content = String(msg.content || '');
+        content = content.replace(/\[\[SPEAKER:[^\]]+\]\]/gi, '');
+        content = content.replace(/^MODERATOR:.*$/gmi, '');
+        content = content.replace(/SOVEREIGN DECISION:.*$/gmi, '');
+        content = content.trim();
+        return `${role}: ${content}`;
+      })
+      .join('\n\n');
+    
+    // Build analysis prompt
+    const analysisPrompt = `You are the Meaning Agent. Analyze this conversation transcript and extract meaningful insights.
+
+TRANSCRIPT:
+${transcript}
+
+${userLore ? `USER CONTEXT:\n${userLore}\n` : ''}
+${currentQuestState ? `CURRENT QUEST: ${currentQuestState.title || 'None'}\nCURRENT STATE: ${currentQuestState.state || 'None'}\n` : ''}
+
+Analyze this conversation and return JSON ONLY (no prose, no explanations). Extract:
+
+1. **Questlog Entry**: One meaningful questlog entry summarizing the session's main topic/objective
+2. **Soul Timeline Event**: One significant event or moment from the conversation
+3. **Breakthrough**: One breakthrough or realization (if any occurred, otherwise empty array)
+
+Rules:
+- Return STRICT JSON only (no markdown, no code blocks, no explanations)
+- Never include MODERATOR text or speaker tags
+- Produce minimal but meaningful records: typically 1 quest entry + 1 timeline event + 1 breakthrough per session
+- If session is empty or trivial, return empty arrays
+- Use ISO date strings for createdAt fields
+- Generate unique IDs (use short UUIDs or timestamps)
+
+Return this exact JSON structure:
+{
+  "questLogEntries": [{"id": "...", "createdAt": "...", "title": "...", "content": "...", "tags": [], "relatedArchetypes": [], "sourceSessionId": "..."}],
+  "soulTimelineEvents": [{"id": "...", "createdAt": "...", "label": "...", "summary": "...", "intensity": 5, "tags": [], "sourceSessionId": "..."}],
+  "breakthroughs": [{"id": "...", "createdAt": "...", "title": "...", "insight": "...", "trigger": "...", "action": "...", "tags": [], "sourceSessionId": "..."}],
+  "attributeUpdates": [],
+  "skillUpdates": [],
+  "nextQuestState": null
+}`;
+
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a JSON-only API. Return valid JSON only, no markdown, no explanations.' },
+          { role: 'user', content: analysisPrompt }
+        ],
+        temperature: 0.3, // Lower temperature for more consistent JSON
+        response_format: { type: 'json_object' }, // Force JSON mode
+      });
+    } catch (openaiError: any) {
+      console.error('[MEANING] OpenAI API error:', {
+        status: openaiError?.status,
+        message: openaiError?.message,
+        userId: userId
+      });
+      
+      if (openaiError?.status === 401) {
+        return res.status(500).json({ 
+          error: 'OpenAI API authentication failed',
+          message: 'The OpenAI API key is invalid.'
+        });
+      } else if (openaiError?.status === 429) {
+        return res.status(503).json({ 
+          error: 'OpenAI API rate limit exceeded',
+          message: 'The service is temporarily unavailable. Please try again later.'
+        });
+      } else {
+        const errorMessage = process.env.NODE_ENV === 'production'
+          ? 'AI service error. Please try again later.'
+          : (openaiError?.message || 'OpenAI API error');
+        return res.status(500).json({ 
+          error: 'AI service error',
+          message: errorMessage
+        });
+      }
+    }
+    
+    // Extract and validate JSON response
+    let responseText = completion?.choices?.[0]?.message?.content || '';
+    if (!responseText) {
+      console.warn('[MEANING] Empty response from OpenAI', { userId });
+      return res.status(500).json({ 
+        error: 'Invalid response from AI service',
+        message: 'The AI service returned an empty response.'
+      });
+    }
+    
+    // Clean potential markdown code blocks
+    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    // Parse and validate JSON
+    let analysisResult;
+    try {
+      analysisResult = JSON.parse(responseText);
+    } catch (parseError: any) {
+      console.error('[MEANING] JSON parse error:', {
+        error: parseError.message,
+        responsePreview: responseText.substring(0, 200),
+        userId: userId
+      });
+      return res.status(500).json({ 
+        error: 'Invalid JSON response from AI service',
+        message: 'The AI service returned invalid JSON. Please try again.'
+      });
+    }
+    
+    // Validate structure (ensure required arrays exist)
+    if (!analysisResult.questLogEntries || !Array.isArray(analysisResult.questLogEntries)) {
+      analysisResult.questLogEntries = [];
+    }
+    if (!analysisResult.soulTimelineEvents || !Array.isArray(analysisResult.soulTimelineEvents)) {
+      analysisResult.soulTimelineEvents = [];
+    }
+    if (!analysisResult.breakthroughs || !Array.isArray(analysisResult.breakthroughs)) {
+      analysisResult.breakthroughs = [];
+    }
+    
+    // Add sourceSessionId to all entries if provided
+    if (sessionId) {
+      analysisResult.questLogEntries.forEach((entry: any) => {
+        if (!entry.sourceSessionId) entry.sourceSessionId = sessionId;
+      });
+      analysisResult.soulTimelineEvents.forEach((event: any) => {
+        if (!event.sourceSessionId) event.sourceSessionId = sessionId;
+      });
+      analysisResult.breakthroughs.forEach((breakthrough: any) => {
+        if (!breakthrough.sourceSessionId) breakthrough.sourceSessionId = sessionId;
+      });
+    }
+    
+    // Ensure createdAt fields are ISO strings
+    const now = new Date().toISOString();
+    analysisResult.questLogEntries.forEach((entry: any) => {
+      if (!entry.createdAt) entry.createdAt = now;
+      if (!entry.id) entry.id = `quest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    });
+    analysisResult.soulTimelineEvents.forEach((event: any) => {
+      if (!event.createdAt) event.createdAt = now;
+      if (!event.id) event.id = `timeline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    });
+    analysisResult.breakthroughs.forEach((breakthrough: any) => {
+      if (!breakthrough.createdAt) breakthrough.createdAt = now;
+      if (!breakthrough.id) breakthrough.id = `breakthrough_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    });
+    
+    // Persist to Supabase (if configured) - best-effort, don't break response
+    if (isSupabaseConfigured()) {
+      try {
+        // Persist questlog entries
+        for (const entry of analysisResult.questLogEntries) {
+          await createQuestLogEntry({
+            user_id: userId,
+            title: entry.title,
+            content: entry.content,
+            tags: entry.tags || [],
+            related_archetypes: entry.relatedArchetypes || [],
+            source_session_id: entry.sourceSessionId || sessionId || undefined,
+            created_at: entry.createdAt
+          });
+        }
+        
+        // Persist timeline events
+        for (const event of analysisResult.soulTimelineEvents) {
+          await createSoulTimelineEvent({
+            user_id: userId,
+            label: event.label,
+            summary: event.summary,
+            intensity: event.intensity,
+            tags: event.tags || [],
+            source_session_id: event.sourceSessionId || sessionId || undefined,
+            created_at: event.createdAt
+          });
+        }
+        
+        // Persist breakthroughs
+        for (const breakthrough of analysisResult.breakthroughs) {
+          await createBreakthrough({
+            user_id: userId,
+            title: breakthrough.title,
+            insight: breakthrough.insight,
+            trigger: breakthrough.trigger,
+            action: breakthrough.action,
+            tags: breakthrough.tags || [],
+            source_session_id: breakthrough.sourceSessionId || sessionId || undefined,
+            created_at: breakthrough.createdAt
+          });
+        }
+        
+        console.log(`[MEANING] Persisted ${analysisResult.questLogEntries.length} questlog entries, ${analysisResult.soulTimelineEvents.length} timeline events, ${analysisResult.breakthroughs.length} breakthroughs for user ${userId}`);
+      } catch (error: any) {
+        console.warn(`[SUPABASE] Error persisting meaning analysis for user ${userId}:`, error.message);
+        // Don't fail the request if DB write fails
+      }
+    }
+    
+    console.log(`[MEANING] Analysis complete for user ${userId}`, {
+      questLogEntries: analysisResult.questLogEntries.length,
+      timelineEvents: analysisResult.soulTimelineEvents.length,
+      breakthroughs: analysisResult.breakthroughs.length
+    });
+    
+    res.json(analysisResult);
+  } catch (error: any) {
+    console.error('[MEANING] Analysis error:', error);
+    const errorMessage = process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : (error.message || 'Internal server error');
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+// Get persisted meaning state (questlog, timeline, breakthroughs)
+app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    
+    const userId = req.user.id;
+    
+    // Load from Supabase if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const [questLogEntries, timelineEvents, breakthroughs] = await Promise.all([
+          getQuestLogEntries(userId),
+          getSoulTimelineEvents(userId),
+          getBreakthroughs(userId)
+        ]);
+        
+        // Transform to frontend format
+        const result = {
+          questLogEntries: questLogEntries.map(entry => ({
+            id: entry.id!,
+            createdAt: entry.created_at || new Date().toISOString(),
+            title: entry.title,
+            content: entry.content,
+            tags: entry.tags || [],
+            relatedArchetypes: entry.related_archetypes || [],
+            sourceSessionId: entry.source_session_id
+          })),
+          soulTimelineEvents: timelineEvents.map(event => ({
+            id: event.id!,
+            createdAt: event.created_at || new Date().toISOString(),
+            label: event.label,
+            summary: event.summary,
+            intensity: event.intensity,
+            tags: event.tags || [],
+            sourceSessionId: event.source_session_id
+          })),
+          breakthroughs: breakthroughs.map(bt => ({
+            id: bt.id!,
+            createdAt: bt.created_at || new Date().toISOString(),
+            title: bt.title,
+            insight: bt.insight,
+            trigger: bt.trigger,
+            action: bt.action,
+            tags: bt.tags || [],
+            sourceSessionId: bt.source_session_id
+          }))
+        };
+        
+        console.log(`[MEANING] Loaded state for user ${userId}`, {
+          questLogEntries: result.questLogEntries.length,
+          timelineEvents: result.soulTimelineEvents.length,
+          breakthroughs: result.breakthroughs.length
+        });
+        
+        return res.json(result);
+      } catch (error: any) {
+        console.error('[MEANING] Error loading state from Supabase:', error.message);
+        // Fall through to empty response
+      }
+    }
+    
+    // Return empty state if Supabase not configured or error
+    res.json({
+      questLogEntries: [],
+      soulTimelineEvents: [],
+      breakthroughs: []
+    });
+  } catch (error: any) {
+    console.error('[MEANING] Error loading state:', error);
     res.status(500).json({ 
       error: process.env.NODE_ENV === 'production' 
         ? 'Internal server error' 

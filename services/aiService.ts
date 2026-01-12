@@ -328,7 +328,154 @@ export const login = async (username: string, secret: string): Promise<{ userId:
   return response.json();
 }
 
-// Integration endpoint (for questlog integration)
+// Meaning Agent - analyzes session and returns canonical JSON
+export async function analyzeMeaning(
+  messages: Message[],
+  options?: {
+    sessionId?: string;
+    mode?: 'single' | 'council';
+    activeArchetype?: string;
+    userLore?: string;
+    currentQuestState?: { title?: string; state?: string; objective?: string };
+  }
+): Promise<import('../types').MeaningAnalysisResult> {
+  const user = getCurrentUser();
+  if (!user || !user.id) {
+    throw new Error('User not authenticated');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/meaning/analyze`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      sessionId: options?.sessionId,
+      mode: options?.mode || 'council',
+      activeArchetype: options?.activeArchetype,
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        meta: msg.archetypeId ? { archetypeId: msg.archetypeId } : undefined
+      })),
+      userLore: options?.userLore,
+      currentQuestState: options?.currentQuestState
+    }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'unauthorized' };
+      }
+      
+      const { handleAuthError } = await import('./userService');
+      handleAuthError();
+      const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+      throw new Error(message);
+    }
+    
+    let errorData;
+    try {
+      errorData = await response.json();
+    } catch {
+      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+    console.error('Meaning analysis API error:', errorMsg, 'Status:', response.status);
+    throw new Error(errorMsg);
+  }
+
+  const data = await response.json();
+  
+  // Persist to localStorage as fallback
+  try {
+    const user = getCurrentUser();
+    if (user?.id) {
+      const storageKey = `user_${user.id}_meaning_state`;
+      const existing = localStorage.getItem(storageKey);
+      let existingData: import('../types').MeaningAnalysisResult = {
+        questLogEntries: [],
+        soulTimelineEvents: [],
+        breakthroughs: []
+      };
+      
+      if (existing) {
+        try {
+          existingData = JSON.parse(existing);
+        } catch (e) {
+          console.warn('Failed to parse existing meaning state from localStorage');
+        }
+      }
+      
+      // Merge new data
+      const merged: import('../types').MeaningAnalysisResult = {
+        questLogEntries: [...data.questLogEntries, ...existingData.questLogEntries],
+        soulTimelineEvents: [...data.soulTimelineEvents, ...existingData.soulTimelineEvents],
+        breakthroughs: [...data.breakthroughs, ...existingData.breakthroughs]
+      };
+      
+      localStorage.setItem(storageKey, JSON.stringify(merged));
+    }
+  } catch (e) {
+    console.warn('Failed to persist meaning state to localStorage:', e);
+  }
+  
+  return data;
+}
+
+// Get persisted meaning state
+export async function getMeaningState(): Promise<import('../types').MeaningAnalysisResult> {
+  const user = getCurrentUser();
+  if (!user || !user.id) {
+    return {
+      questLogEntries: [],
+      soulTimelineEvents: [],
+      breakthroughs: []
+    };
+  }
+
+  // Try backend first
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/meaning/state`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      // Also update localStorage as backup
+      try {
+        localStorage.setItem(`user_${user.id}_meaning_state`, JSON.stringify(data));
+      } catch (e) {
+        console.warn('Failed to backup meaning state to localStorage');
+      }
+      return data;
+    }
+  } catch (e) {
+    console.warn('Failed to load meaning state from backend, falling back to localStorage');
+  }
+
+  // Fallback to localStorage
+  try {
+    const storageKey = `user_${user.id}_meaning_state`;
+    const existing = localStorage.getItem(storageKey);
+    if (existing) {
+      return JSON.parse(existing);
+    }
+  } catch (e) {
+    console.warn('Failed to load meaning state from localStorage');
+  }
+
+  return {
+    questLogEntries: [],
+    soulTimelineEvents: [],
+    breakthroughs: []
+  };
+}
+
+// Integration endpoint (for questlog integration) - DEPRECATED: Use analyzeMeaning instead
 export async function integrateSession(
   sessionHistory: Message[],
   topic?: string

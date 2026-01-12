@@ -114,3 +114,65 @@ export interface ScribeAnalysis {
   updatedState?: string; // If the user's emotional state changed
   // Note: newLocation, newCalendarEvent, newTransaction removed for MVP
 }
+
+// --- Meaning Agent / Questlog Types ---
+
+export interface QuestLogEntry {
+  id: string;
+  createdAt: string; // ISO string
+  title: string;
+  content: string;
+  tags?: string[];
+  relatedArchetypes?: string[];
+  sourceSessionId?: string;
+}
+
+export interface SoulTimelineEvent {
+  id: string;
+  createdAt: string; // ISO string
+  label: string;
+  summary: string;
+  intensity?: number; // 1-10
+  tags?: string[];
+  sourceSessionId?: string;
+}
+
+export interface Breakthrough {
+  id: string;
+  createdAt: string; // ISO string
+  title: string;
+  insight: string;
+  trigger?: string; // What led to this breakthrough
+  action?: string; // Recommended action
+  tags?: string[];
+  sourceSessionId?: string;
+}
+
+export interface AttributeUpdate {
+  key: string; // Attribute name
+  delta: number; // Change in level (e.g., +1, -1)
+  reason: string;
+}
+
+export interface SkillUpdate {
+  key: string; // Skill name
+  delta: number;
+  reason: string;
+}
+
+export interface NextQuestState {
+  title: string;
+  state: string; // e.g., "IN_PROGRESS", "COMPLETED", "BLOCKED"
+  objective: string;
+  steps?: string[];
+}
+
+// Canonical Meaning Analysis Result (single source of truth)
+export interface MeaningAnalysisResult {
+  questLogEntries: QuestLogEntry[];
+  soulTimelineEvents: SoulTimelineEvent[];
+  breakthroughs: Breakthrough[];
+  attributeUpdates?: AttributeUpdate[];
+  skillUpdates?: SkillUpdate[];
+  nextQuestState?: NextQuestState;
+}

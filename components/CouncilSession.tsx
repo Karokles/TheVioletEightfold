@@ -164,7 +164,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore));
   };
 
-  // --- Scribe Integration Handler ---
+  // --- Meaning Agent Integration Handler ---
   const handleIntegrateAndAdjourn = async () => {
     if (history.length === 0) {
         setIsSessionActive(false);
@@ -184,9 +184,34 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
           timestamp: Date.now(),
         }));
 
-      // Call backend integration endpoint
-      const { integrateSession } = await import('../services/aiService');
-      const analysis = await integrateSession(sessionHistory, topic);
+      // Call meaning agent endpoint
+      const { analyzeMeaning } = await import('../services/aiService');
+      const meaningResult = await analyzeMeaning(sessionHistory, {
+        mode: 'council',
+        userLore: currentLore,
+        currentQuestState: {
+          title: currentStats.currentQuest,
+          state: currentStats.state
+        }
+      });
+      
+      // Convert MeaningAnalysisResult to ScribeAnalysis for backward compatibility
+      const analysis: ScribeAnalysis = {
+        newLoreEntry: meaningResult.questLogEntries.length > 0 
+          ? meaningResult.questLogEntries[0].content 
+          : undefined,
+        updatedQuest: meaningResult.nextQuestState?.title || undefined,
+        updatedState: meaningResult.nextQuestState?.state || undefined,
+        newMilestone: meaningResult.breakthroughs.length > 0 ? {
+          id: meaningResult.breakthroughs[0].id,
+          title: meaningResult.breakthroughs[0].title,
+          date: new Date(meaningResult.breakthroughs[0].createdAt).toISOString().split('T')[0],
+          description: meaningResult.breakthroughs[0].insight,
+          type: 'BREAKTHROUGH' as const,
+          icon: 'Zap'
+        } : undefined,
+        newAttribute: undefined // Can be enhanced later
+      };
       
       // Call parent handler with analysis
       onIntegrate(analysis);
