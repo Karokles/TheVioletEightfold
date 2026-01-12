@@ -1,0 +1,29 @@
+/* Archetype Theme CSS Variables - Production Safe */
+
+/* Base CSS variables are set inline via React style prop */
+/* This file provides fallbacks and ensures variables are available */
+
+[data-archetype] {
+  /* Variables are set inline via getArchetypeCSSVars() */
+  /* Fallback values if inline styles fail */
+  --archetype-accent: 251, 191, 36; /* amber-400 default */
+  --archetype-accent-strong: 249, 115, 22; /* orange-500 default */
+  --archetype-glow: rgba(251, 191, 36, 0.6);
+  --archetype-ring: rgba(251, 191, 36, 0.8);
+  --archetype-gradient-from: 251, 191, 36;
+  --archetype-gradient-to: 249, 115, 22;
+}
+
+/* Ensure text is never clipped - fix for "half cut" issue */
+[data-archetype] h3 {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+/* Active indicator visibility */
+[data-archetype] button[data-active="true"] {
+  /* Active state handled via inline styles */
+}
+

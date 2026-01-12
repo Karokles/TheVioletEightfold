@@ -4,6 +4,7 @@ import { Message, ChatStatus, Language, EightfoldMode, GuardedState } from '../t
 import { ArchetypeId, getArchetypes, ICON_MAP, getUIText } from '../constants';
 import { sendMessageToArchetype } from '../services/aiService';
 import { Send, Sparkles, Bot } from 'lucide-react';
+import { getArchetypeTheme } from '../theme/archetypeTheme';
 
 interface ChatInterfaceProps {
   activeArchetype: ArchetypeId;
@@ -163,8 +164,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const activeTheme = getArchetypeTheme(activeArchetype);
+  const cssVars = React.useMemo(() => {
+    const theme = getArchetypeTheme(activeArchetype);
+    return {
+      '--archetype-accent': theme.accent,
+      '--archetype-accent-strong': theme.accentStrong,
+      '--archetype-glow': theme.glow,
+      '--archetype-ring': theme.ring,
+      '--archetype-gradient-from': theme.gradientFrom,
+      '--archetype-gradient-to': theme.gradientTo,
+    } as React.CSSProperties;
+  }, [activeArchetype]);
+
   return (
-    <div className="flex-1 flex flex-col h-full w-full relative">
+    <div 
+      className="flex-1 flex flex-col h-full w-full relative"
+      data-archetype={activeArchetype}
+      style={cssVars}
+    >
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 space-y-6 scrollbar-thin">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
@@ -174,11 +192,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           return (
             <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up mb-4 md:mb-6`}>
               <div className={`flex gap-2 md:gap-3 max-w-[90%] md:max-w-[75%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                {/* Avatar - Original Style with Archetype Colors */}
-                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg ${isUser 
-                  ? 'bg-purple-900/40 border-purple-500/30 text-purple-200' 
-                  : `bg-gradient-to-br ${arch?.color || 'from-violet-900 to-indigo-900'} border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]`
-                }`}>
+                {/* Avatar - Uses Archetype Colors via CSS Variables */}
+                <div 
+                  className={`w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg ${isUser 
+                    ? 'bg-purple-900/40 border-purple-500/30 text-purple-200' 
+                    : 'border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]'
+                  }`}
+                  style={!isUser && arch ? {
+                    background: `linear-gradient(to bottom right, rgb(var(--archetype-gradient-from)), rgb(var(--archetype-gradient-to)))`,
+                  } : {}}
+                  data-archetype={!isUser && arch ? arch.id : undefined}
+                >
                   <Icon size={isUser ? 14 : 18} strokeWidth={1.5} />
                 </div>
                 {/* Message Card - Original Style */}
@@ -186,10 +210,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   ? 'bg-purple-600/20 border-purple-500/30 text-purple-50 rounded-tr-none' 
                   : `bg-[#150a26]/70 border-white/10 text-violet-100 rounded-tl-none`
                 }`}>
-                  {/* Archetype Name Label for Model Messages */}
+                  {/* Archetype Name Label for Model Messages - Uses CSS Variables */}
                   {!isUser && arch && (
                     <div className="mb-2 pb-2 border-b border-white/5">
-                      <span className={`text-[10px] font-bold uppercase tracking-widest bg-clip-text text-transparent bg-gradient-to-r ${arch.color} opacity-80`}>
+                      <span 
+                        className="text-[10px] font-bold uppercase tracking-widest opacity-80"
+                        style={{
+                          color: `rgb(var(--archetype-accent))`,
+                        }}
+                        data-archetype={arch.id}
+                      >
                         {arch.name}
                       </span>
                     </div>
@@ -203,12 +233,24 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {streamingContent && (
            <div className="flex justify-start animate-fade-in mb-4 md:mb-6">
              <div className="flex gap-2 md:gap-3 max-w-[90%] md:max-w-[75%] flex-row">
-                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg bg-gradient-to-br ${currentArchetypeData.color} border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]`}>
+                <div 
+                  className="w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]"
+                  style={{
+                    background: `linear-gradient(to bottom right, rgb(var(--archetype-gradient-from)), rgb(var(--archetype-gradient-to)))`,
+                  }}
+                  data-archetype={activeArchetype}
+                >
                   {(() => { const Icon = ICON_MAP[currentArchetypeData.iconName]; return <Icon size={18} strokeWidth={1.5} />; })()}
                 </div>
                 <div className="p-3 md:p-4 rounded-2xl shadow-xl backdrop-blur-md border bg-[#150a26]/70 border-white/10 text-violet-100 rounded-tl-none">
                   <div className="mb-2 pb-2 border-b border-white/5">
-                    <span className={`text-[10px] font-bold uppercase tracking-widest bg-clip-text text-transparent bg-gradient-to-r ${currentArchetypeData.color} opacity-80`}>
+                    <span 
+                      className="text-[10px] font-bold uppercase tracking-widest opacity-80"
+                      style={{
+                        color: `rgb(var(--archetype-accent))`,
+                      }}
+                      data-archetype={activeArchetype}
+                    >
                       {currentArchetypeData.name}
                     </span>
                   </div>

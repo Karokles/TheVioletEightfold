@@ -4,6 +4,7 @@ import { startCouncilSession, sendMessageToCouncil, integrateSession } from '../
 import { getArchetypes, ArchetypeId, ICON_MAP, getUIText } from '../constants';
 import { Play, Sparkles, Send, Download, Save, CheckCircle2, User, RefreshCw, AlertTriangle, Key, ChevronRight, MessageSquare } from 'lucide-react';
 import { Language, UserStats, ScribeAnalysis, EightfoldMode, GuardedState, Message } from '../types';
+import { getArchetypeTheme } from '../theme/archetypeTheme';
 
 interface DialogueTurn {
   id: string;
@@ -285,25 +286,42 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({
                         const isUser = turn.isUser;
                         const archetype = !isUser && turn.speaker in archetypes ? archetypes[turn.speaker as ArchetypeId] : null;
                         const Icon = isUser ? User : (archetype ? ICON_MAP[archetype.iconName] : Sparkles);
+                        const archetypeTheme = archetype ? getArchetypeTheme(archetype.id as ArchetypeId) : null;
+                        const archetypeCssVars = archetypeTheme ? {
+                          '--archetype-accent': archetypeTheme.accent,
+                          '--archetype-accent-strong': archetypeTheme.accentStrong,
+                          '--archetype-glow': archetypeTheme.glow,
+                          '--archetype-ring': archetypeTheme.ring,
+                          '--archetype-gradient-from': archetypeTheme.gradientFrom,
+                          '--archetype-gradient-to': archetypeTheme.gradientTo,
+                        } as React.CSSProperties : {};
 
                         return (
-                            <div key={turn.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-center'} animate-fade-in-up w-full mb-8 md:mb-12`}>
+                            <div 
+                              key={turn.id} 
+                              className={`flex flex-col ${isUser ? 'items-end' : 'items-center'} animate-fade-in-up w-full mb-8 md:mb-12`}
+                              data-archetype={!isUser && archetype ? archetype.id : undefined}
+                              style={archetypeCssVars}
+                            >
                                 <div className={`flex items-center gap-2 md:gap-3 mb-3 opacity-80 ${isUser ? 'flex-row-reverse' : ''}`}>
-                                    {/* Avatar with Archetype Colors - Original Style */}
-                                    <div className={`p-1.5 md:p-2 rounded-lg bg-gradient-to-br ${isUser 
-                                      ? 'from-purple-900 to-slate-900' 
-                                      : (archetype?.color || 'from-slate-600 to-slate-500')
-                                    } border border-white/10 shadow-lg`}>
+                                    {/* Avatar with Archetype Colors - Uses CSS Variables */}
+                                    <div 
+                                      className={`p-1.5 md:p-2 rounded-lg border border-white/10 shadow-lg ${isUser ? 'bg-gradient-to-br from-purple-900 to-slate-900' : ''}`}
+                                      style={!isUser && archetype ? {
+                                        background: `linear-gradient(to bottom right, rgb(var(--archetype-gradient-from)), rgb(var(--archetype-gradient-to)))`,
+                                      } : {}}
+                                    >
                                         <Icon size={14} className="text-white" strokeWidth={1.5} />
                                     </div>
-                                    {/* Speaker Label - Original Style with Gradient */}
-                                    <span className={`text-[9px] md:text-[10px] font-bold tracking-[0.2em] uppercase ${
-                                      isUser 
-                                        ? 'text-purple-300' 
-                                        : archetype 
-                                          ? `text-transparent bg-clip-text bg-gradient-to-r ${archetype.color}`
-                                          : 'text-purple-400/80'
-                                    }`}>
+                                    {/* Speaker Label - Uses CSS Variables */}
+                                    <span 
+                                      className={`text-[9px] md:text-[10px] font-bold tracking-[0.2em] uppercase ${
+                                        isUser ? 'text-purple-300' : ''
+                                      }`}
+                                      style={!isUser && archetype ? {
+                                        color: `rgb(var(--archetype-accent))`,
+                                      } : {}}
+                                    >
                                         {isUser ? (language === 'DE' ? 'ICH' : 'SELF') : (archetype?.name || turn.speaker)}
                                     </span>
                                 </div>

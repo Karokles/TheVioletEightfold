@@ -207,12 +207,24 @@ export default function App() {
                     <X size={24} />
                   </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center max-w-2xl mx-auto w-full">
+              <div 
+                className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center max-w-2xl mx-auto w-full"
+                data-archetype={activeArchetype}
+                style={getArchetypeCSSVars(activeArchetype)}
+              >
                   <div className="mb-12 transform scale-125 md:scale-150 transition-transform">
                       <RoundTable activeArchetype={activeArchetype} onSelectArchetype={setActiveArchetype} language={language} mini={false} />
                   </div>
                   <div className="text-center animate-fade-in-up mt-8">
-                      <h3 className="text-3xl font-bold text-white uppercase tracking-[0.2em] mb-4 bg-clip-text text-transparent bg-gradient-to-r from-purple-100 to-purple-400">{archetypes[activeArchetype].name}</h3>
+                      <h3 
+                        className="text-2xl md:text-3xl font-bold uppercase tracking-[0.2em] mb-4"
+                        style={{
+                          color: `rgb(var(--archetype-accent))`,
+                          textShadow: `0 0 15px var(--archetype-glow)`,
+                        }}
+                      >
+                        {archetypes[activeArchetype].name}
+                      </h3>
                       <p className="text-sm text-purple-300/80 leading-relaxed mb-8 font-light italic">"{archetypes[activeArchetype].description}"</p>
                       <button onClick={() => setShowVoiceSelector(false)} className="w-full py-5 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold rounded-2xl uppercase tracking-widest shadow-xl shadow-purple-900/40 active:scale-95 transition-all">
                         Initialize Synchronicity

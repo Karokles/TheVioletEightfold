@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArchetypeId, getArchetypes, ICON_MAP } from '../constants';
 import { Language } from '../types';
+import { getArchetypeCSSVars, getArchetypeTheme } from '../theme/archetypeTheme';
 
 interface RoundTableProps {
   activeArchetype: ArchetypeId;
@@ -15,10 +16,15 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
   const radius = mini ? 40 : 60; 
   const center = mini ? 50 : 80;
   const activeData = getArchetypes(language)[activeArchetype];
-  const activeColor = activeData.color;
+  const activeTheme = getArchetypeTheme(activeArchetype);
+  const cssVars = getArchetypeCSSVars(activeArchetype);
 
   return (
-    <div className="flex flex-col items-center relative z-10 transition-all duration-700 animate-float transform-gpu">
+    <div 
+      className="flex flex-col items-center relative z-10 transition-all duration-700 animate-float transform-gpu"
+      data-archetype={activeArchetype}
+      style={cssVars}
+    >
       
       {/* Holographic HUD Header - Relative in Flow */}
       {!mini && (
@@ -39,13 +45,19 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
                 {language === 'DE' ? 'AKTIVE SCHNITTSTELLE' : 'ACTIVE INTERFACE'}
             </div>
             
-            {/* Active Name Display - Original Style: Bright Green for Active */}
-            <div className="relative px-6 md:px-8 py-2 group">
+            {/* Active Name Display - Uses Archetype Color */}
+            <div className="relative px-6 md:px-8 py-2.5 md:py-3 group min-h-[2.5rem] md:min-h-[3rem]">
                 {/* Glass Container */}
                 <div className="absolute inset-0 border border-white/10 rounded-xl transform bg-[#0a0510]/80 backdrop-blur-md shadow-lg" />
                 
-                {/* Animated Text - Bright Green like Original */}
-                <h3 className="relative text-xs md:text-sm font-bold tracking-[0.2em] uppercase text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)] whitespace-nowrap z-10 transition-all duration-700">
+                {/* Animated Text - Uses CSS Variable for Archetype Color */}
+                <h3 
+                  className="relative text-xs md:text-sm font-bold tracking-[0.2em] uppercase whitespace-nowrap z-10 transition-all duration-700"
+                  style={{
+                    color: `rgb(var(--archetype-accent))`,
+                    textShadow: `0 0 10px var(--archetype-glow)`,
+                  }}
+                >
                     {activeData.name}
                 </h3>
             </div>
@@ -80,13 +92,24 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
         {/* Central Resonance Core */}
         <div className="absolute z-10 flex items-center justify-center">
            <div className={`${mini ? 'w-8 h-8' : 'w-20 h-20'} rounded-full flex items-center justify-center relative`}>
-               {/* Core Outer Glow */}
-               <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${activeColor} opacity-10 blur-2xl animate-pulse-slow transition-colors duration-700`} />
+               {/* Core Outer Glow - Uses CSS Variable */}
+               <div 
+                 className="absolute inset-0 rounded-full opacity-10 blur-2xl animate-pulse-slow transition-colors duration-700"
+                 style={{
+                   background: `linear-gradient(to bottom right, rgb(var(--archetype-gradient-from)), rgb(var(--archetype-gradient-to)))`,
+                 }}
+               />
                
-               {/* Core Structure - Original Style: Dark with Bright Green Dot */}
+               {/* Core Structure - Dark with Archetype Colored Dot */}
                <div className={`relative w-full h-full rounded-full border border-white/5 bg-[#0a0510]/90 flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-sm overflow-hidden`}>
-                  {/* Inner Energy Source - Bright Green Dot like Original */}
-                  <div className="w-[30%] h-[30%] rounded-full bg-emerald-400 opacity-90 shadow-[0_0_20px_rgba(16,185,129,0.8)] animate-pulse transition-colors duration-700" />
+                  {/* Inner Energy Source - Uses CSS Variable for Archetype Color */}
+                  <div 
+                    className="w-[30%] h-[30%] rounded-full opacity-90 animate-pulse transition-colors duration-700"
+                    style={{
+                      backgroundColor: `rgb(var(--archetype-accent-strong))`,
+                      boxShadow: `0 0 20px var(--archetype-glow)`,
+                    }}
+                  />
                   
                   {/* Grid overlay */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:10px_10px] opacity-30" />
@@ -117,7 +140,7 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
               onClick={() => onSelectArchetype(archetype.id as ArchetypeId)}
               className={`absolute rounded-full flex items-center justify-center transition-all duration-500 group/btn
                 ${isActive 
-                  ? `scale-110 z-20 shadow-[0_0_25px_rgba(16,185,129,0.6)] bg-transparent text-white ring-2 ring-emerald-400/80 border-2 border-white/80 backdrop-blur-sm` 
+                  ? `scale-110 z-20 bg-transparent text-white ring-2 border-2 border-white/80 backdrop-blur-sm` 
                   : 'bg-transparent text-white/70 hover:text-white hover:scale-110 border border-white/20 backdrop-blur-sm hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:border-white/40'
                 }`}
               style={{
@@ -125,21 +148,39 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
                 top: `${y}px`,
                 width: `${mini ? 24 : 40}px`,
                 height: `${mini ? 24 : 40}px`,
+                ...(isActive ? {
+                  boxShadow: `0 0 25px var(--archetype-glow)`,
+                  borderColor: `var(--archetype-ring)`,
+                } : {}),
               }}
               title={archetype.name}
             >
-              {/* Active glow - Bright Green like Original */}
+              {/* Active glow - Uses CSS Variable for Archetype Color */}
               {isActive && (
                 <>
-                  <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-pulse-subtle blur-sm" />
-                  <div className="absolute inset-[-2px] rounded-full border border-emerald-400/40 animate-pulse" />
+                  <div 
+                    className="absolute inset-0 rounded-full animate-pulse-subtle blur-sm"
+                    style={{
+                      backgroundColor: `var(--archetype-glow)`,
+                      opacity: 0.3,
+                    }}
+                  />
+                  <div 
+                    className="absolute inset-[-2px] rounded-full border animate-pulse"
+                    style={{
+                      borderColor: `var(--archetype-ring)`,
+                    }}
+                  />
                 </>
               )}
               
               <Icon 
                 size={mini ? 12 : 20} 
                 strokeWidth={isActive ? 2.5 : 1.5} 
-                className={`relative z-10 transition-transform duration-300 group-hover/btn:scale-110 ${isActive ? 'text-white drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'text-white/70'}`} 
+                className={`relative z-10 transition-transform duration-300 group-hover/btn:scale-110 ${isActive ? 'text-white' : 'text-white/70'}`}
+                style={isActive ? {
+                  filter: `drop-shadow(0 0 8px var(--archetype-glow))`,
+                } : {}}
               />
             </button>
           );
