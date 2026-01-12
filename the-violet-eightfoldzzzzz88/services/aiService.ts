@@ -173,6 +173,12 @@ export const startCouncilSession = async (
 
   // Note: userId is derived server-side from the auth token, not sent in body
   // CRITICAL: Do NOT set activeArchetype - this signals COUNCIL mode
+  
+  // Debug logging (dev only)
+  if (import.meta.env.DEV) {
+    console.log('[COUNCIL SESSION] MODE: COUNCIL', { topic: topic.substring(0, 50) + '...' });
+  }
+  
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -262,6 +268,12 @@ export const sendMessageToCouncil = async (
 
   // Note: userId is derived server-side from the auth token, not sent in body
   // CRITICAL: Do NOT set activeArchetype - this signals COUNCIL mode
+  
+  // Debug logging (dev only)
+  if (import.meta.env.DEV) {
+    console.log('[COUNCIL REPLY] MODE: COUNCIL', { messageCount: messages.length });
+  }
+  
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),
