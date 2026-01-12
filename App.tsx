@@ -4,20 +4,18 @@ import { RoundTable } from './components/RoundTable';
 import { ChatInterface } from './components/ChatInterface';
 import { CouncilSession } from './components/CouncilSession';
 import { StatsInterface } from './components/StatsInterface';
-import { QuestlogInterface } from './components/QuestlogInterface';
 import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
 import { Language, UserStats, ScribeAnalysis } from './types';
 import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler } from './services/userService';
-import { MessageSquare, ScrollText, Globe, LayoutDashboard, BookOpen, X, ChevronUp } from 'lucide-react';
+import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp } from 'lucide-react';
 
 enum AppMode {
   DIRECT_CHAT = 'DIRECT_CHAT',
   COUNCIL_SESSION = 'COUNCIL_SESSION',
   STATS = 'STATS',
-  QUESTLOG = 'QUESTLOG',
 }
 
 // --- Helper for Smart Merging ---
@@ -44,6 +42,7 @@ export default function App() {
   const [currentMode, setCurrentMode] = useState<AppMode>(AppMode.DIRECT_CHAT);
   const [activeArchetype, setActiveArchetype] = useState<ArchetypeId>(ArchetypeId.SOVEREIGN);
   const [language, setLanguage] = useState<Language>('EN');
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0); // Force StatsInterface refresh
   
   // Mobile specific state
   const [showMobileArchetypes, setShowMobileArchetypes] = useState(false);
@@ -105,6 +104,8 @@ export default function App() {
         }
         return newStats;
     });
+    // Trigger StatsInterface refresh to load new meaning data
+    setStatsRefreshKey(prev => prev + 1);
   };
 
   const handleLoginSuccess = () => {
@@ -192,7 +193,6 @@ export default function App() {
     { mode: AppMode.DIRECT_CHAT, icon: MessageSquare, label: ui.DIRECT_COUNSEL },
     { mode: AppMode.COUNCIL_SESSION, icon: ScrollText, label: ui.COUNCIL_SESSION },
     { mode: AppMode.STATS, icon: LayoutDashboard, label: ui.BLUEPRINT },
-    { mode: AppMode.QUESTLOG, icon: BookOpen, label: language === 'DE' ? 'Questlog' : 'Questlog' },
   ];
 
   const hideSidePanel = currentMode !== AppMode.DIRECT_CHAT && currentMode !== AppMode.COUNCIL_SESSION; 
@@ -313,10 +313,7 @@ export default function App() {
              />
            )}
            {currentMode === AppMode.STATS && (
-             <StatsInterface language={language} stats={stats} />
-           )}
-           {currentMode === AppMode.QUESTLOG && (
-             <QuestlogInterface language={language} />
+             <StatsInterface key={statsRefreshKey} language={language} stats={stats} />
            )}
         </div>
       </main>

@@ -1,15 +1,61 @@
 
-import React from 'react';
-import { UserStats, Language } from '../types';
+import React, { useState, useEffect } from 'react';
+import { UserStats, Language, QuestLogEntry, SoulTimelineEvent, Breakthrough } from '../types';
 import { ICON_MAP } from '../constants';
-import { Shield, Zap, Brain, Activity, Target, Lock, Unlock, Database, Trophy, Star } from 'lucide-react';
+import { Shield, Zap, Brain, Activity, Target, Lock, Unlock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, RefreshCw } from 'lucide-react';
+import { getMeaningState } from '../services/aiService';
 
 interface StatsInterfaceProps {
     language: Language;
     stats: UserStats;
+    onRefresh?: () => void; // Optional refresh trigger
 }
 
-export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats }) => {
+export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats, onRefresh }) => {
+  const [questLogEntries, setQuestLogEntries] = useState<QuestLogEntry[]>([]);
+  const [timelineEvents, setTimelineEvents] = useState<SoulTimelineEvent[]>([]);
+  const [breakthroughs, setBreakthroughs] = useState<Breakthrough[]>([]);
+  const [isLoadingMeaning, setIsLoadingMeaning] = useState(true);
+
+  const loadMeaningData = async () => {
+    try {
+      setIsLoadingMeaning(true);
+      const meaningState = await getMeaningState();
+      setQuestLogEntries(meaningState.questLogEntries || []);
+      setTimelineEvents(meaningState.soulTimelineEvents || []);
+      setBreakthroughs(meaningState.breakthroughs || []);
+    } catch (error) {
+      console.error('Failed to load meaning data:', error);
+    } finally {
+      setIsLoadingMeaning(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMeaningData();
+  }, []); // Load on mount - key prop from parent will force remount on integrate
+
+  // Refresh when onRefresh is called
+  useEffect(() => {
+    if (onRefresh) {
+      const refreshHandler = () => loadMeaningData();
+      // This is a simple approach - in a real app you might use a context or event system
+      // For now, we'll rely on component remount or manual refresh
+    }
+  }, [onRefresh]);
+
+  const formatDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString(language === 'DE' ? 'de-DE' : 'en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch {
+      return dateString;
+    }
+  };
   return (
     <div className="flex-1 w-full h-full overflow-y-auto px-6 py-10 relative">
         {/* Background Grid */}
@@ -56,9 +102,39 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats 
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 
-                {/* Column 1: Attributes & Inventory */}
+                {/* Column 1: Attributes, Inventory, Questlog, Breakthroughs */}
                 <div className="space-y-6 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
                     
+                    {/* Questlog Entries */}
+                    <div className="bg-[#150a26]/60 border border-purple-500/10 rounded-xl p-5 backdrop-blur-sm">
+                        <h3 className="text-xs font-bold text-purple-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                            <BookOpen size={14} /> {language === 'DE' ? 'Questlog' : 'Questlog'}
+                        </h3>
+                        <div className="space-y-3 max-h-64 overflow-y-auto">
+                            {questLogEntries.length === 0 ? (
+                                <p className="text-xs text-purple-400/40 italic">
+                                    {language === 'DE' ? 'Keine Einträge' : 'No entries'}
+                                </p>
+                            ) : (
+                                questLogEntries.slice(0, 3).map((entry) => (
+                                    <div key={entry.id} className="group p-3 rounded-lg bg-[#0a0510] border border-white/5 hover:border-purple-500/30 transition-colors">
+                                        <div className="flex items-start justify-between mb-1">
+                                            <h4 className="text-sm font-bold text-white group-hover:text-purple-300 transition-colors">
+                                                {entry.title}
+                                            </h4>
+                                            <span className="text-[9px] text-purple-500/50 uppercase tracking-widest font-mono px-1.5 py-0.5 rounded border border-purple-500/10">
+                                                {formatDate(entry.createdAt)}
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-purple-300/60 leading-relaxed font-light line-clamp-2">
+                                            {entry.content}
+                                        </p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
                     {/* Attributes */}
                     <div className="bg-[#150a26]/60 border border-purple-500/10 rounded-xl p-5 backdrop-blur-sm">
                         <h3 className="text-xs font-bold text-purple-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
@@ -83,6 +159,39 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats 
                         </div>
                     </div>
 
+                    {/* Breakthroughs */}
+                    <div className="bg-[#150a26]/60 border border-purple-500/10 rounded-xl p-5 backdrop-blur-sm">
+                        <h3 className="text-xs font-bold text-purple-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                            <Zap size={14} /> {language === 'DE' ? 'Durchbrüche' : 'Breakthroughs'}
+                        </h3>
+                        <div className="space-y-3 max-h-64 overflow-y-auto">
+                            {breakthroughs.length === 0 ? (
+                                <p className="text-xs text-purple-400/40 italic">
+                                    {language === 'DE' ? 'Keine Durchbrüche' : 'No breakthroughs'}
+                                </p>
+                            ) : (
+                                breakthroughs.slice(0, 3).map((bt) => (
+                                    <div key={bt.id} className="group p-3 rounded-lg bg-amber-900/10 border border-amber-500/20 hover:border-amber-500/40 transition-colors">
+                                        <div className="flex items-start justify-between mb-1">
+                                            <h4 className="text-sm font-bold text-amber-300 group-hover:text-amber-200 transition-colors">
+                                                {bt.title}
+                                            </h4>
+                                            <span className="text-[9px] text-amber-400 bg-amber-900/20 px-1.5 rounded border border-amber-500/20">
+                                                BREAKTHROUGH
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-amber-200/80 leading-relaxed font-light line-clamp-2">
+                                            {bt.insight}
+                                        </p>
+                                        <span className="text-[9px] text-amber-500/50 font-mono mt-1 block">
+                                            {formatDate(bt.createdAt)}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
                     {/* Inventory */}
                     <div className="bg-[#150a26]/60 border border-purple-500/10 rounded-xl p-5 backdrop-blur-sm">
                         <h3 className="text-xs font-bold text-purple-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
@@ -98,7 +207,7 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats 
                     </div>
                 </div>
 
-                {/* Column 2 & 3: Timeline / Milestones */}
+                {/* Column 2 & 3: Timeline / Milestones & Timeline Events */}
                 <div className="md:col-span-2 bg-[#150a26]/60 border border-purple-500/10 rounded-xl p-6 backdrop-blur-sm animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
                     <h3 className="text-xs font-bold text-purple-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                         <Trophy size={14} /> Soul Timeline
@@ -108,7 +217,8 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats 
                         {/* Timeline Line */}
                         <div className="absolute top-2 bottom-2 left-[23px] w-px bg-gradient-to-b from-purple-500/50 via-purple-500/20 to-transparent" />
 
-                        {stats.milestones.map((milestone, idx) => {
+                        {/* Milestones (existing) */}
+                        {stats.milestones.map((milestone) => {
                             const Icon = ICON_MAP[milestone.icon] || Star;
                             return (
                                 <div key={milestone.id} className="relative flex gap-6 group">
@@ -138,6 +248,37 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats 
                                 </div>
                             );
                         })}
+
+                        {/* Timeline Events (from meaning agent) */}
+                        {timelineEvents.map((event) => (
+                            <div key={event.id} className="relative flex gap-6 group">
+                                {/* Icon Node */}
+                                <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
+                                    <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
+                                    <Sparkles size={20} className="text-purple-300" />
+                                </div>
+                                
+                                {/* Content */}
+                                <div className="flex-1 pt-1">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
+                                        <h4 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
+                                            {event.label}
+                                        </h4>
+                                        <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
+                                            {formatDate(event.createdAt)}
+                                        </span>
+                                        {event.intensity && (
+                                            <span className="text-[9px] text-purple-400/60">
+                                                {event.intensity}/10
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-sm text-purple-200/70 leading-relaxed max-w-xl">
+                                        {event.summary}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
 
                         {/* Future Node */}
                         <div className="relative flex gap-6 opacity-50">
