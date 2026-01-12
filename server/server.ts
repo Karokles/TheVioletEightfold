@@ -52,7 +52,13 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Log CORS rejection for debugging (no secrets)
+      console.warn('[CORS] Request blocked', {
+        origin: origin || 'missing',
+        allowedOrigins: allowedOrigins,
+        environment: process.env.NODE_ENV || 'development'
+      });
+      callback(new Error(`CORS: Origin '${origin || 'missing'}' is not allowed. Allowed origins: ${allowedOrigins.join(', ')}`));
     }
   },
   credentials: true,
@@ -550,21 +556,69 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
 
     // Validate OpenAI API key before making request
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OpenAI API key not configured' });
+      console.error('[COUNCIL] OpenAI API key not configured');
+      return res.status(500).json({ 
+        error: 'OpenAI API key not configured',
+        message: 'The server is missing the OpenAI API key. Please contact the administrator.'
+      });
     }
 
-    // Call OpenAI
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // Using gpt-4o-mini as specified
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...conversationHistory,
-      ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-      temperature: 0.7,
-      stream: false,
-    });
+    // Call OpenAI with robust error handling
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini', // Using gpt-4o-mini as specified
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...conversationHistory,
+        ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+        temperature: 0.7,
+        stream: false,
+      });
+    } catch (openaiError: any) {
+      // Handle OpenAI API errors gracefully
+      console.error('[COUNCIL] OpenAI API error:', {
+        status: openaiError?.status,
+        code: openaiError?.code,
+        message: openaiError?.message,
+        userId: userId,
+        mode: mode
+      });
+      
+      // Return user-friendly error messages
+      if (openaiError?.status === 401) {
+        return res.status(500).json({ 
+          error: 'OpenAI API authentication failed',
+          message: 'The OpenAI API key is invalid. Please contact the administrator.'
+        });
+      } else if (openaiError?.status === 429) {
+        return res.status(503).json({ 
+          error: 'OpenAI API rate limit exceeded',
+          message: 'The service is temporarily unavailable due to rate limits. Please try again later.'
+        });
+      } else if (openaiError?.status === 500 || openaiError?.status === 502 || openaiError?.status === 503) {
+        return res.status(503).json({ 
+          error: 'OpenAI API service unavailable',
+          message: 'The AI service is temporarily unavailable. Please try again later.'
+        });
+      } else {
+        // Generic error - sanitize in production
+        const errorMessage = process.env.NODE_ENV === 'production'
+          ? 'AI service error. Please try again later.'
+          : (openaiError?.message || 'OpenAI API error');
+        return res.status(500).json({ 
+          error: 'AI service error',
+          message: errorMessage
+        });
+      }
+    }
 
-    let reply = completion.choices[0]?.message?.content || '';
+    // Extract reply safely
+    let reply = completion?.choices?.[0]?.message?.content || '';
+    if (!reply) {
+      console.warn('[COUNCIL] Empty reply from OpenAI', { userId, mode });
+      reply = 'I apologize, but I could not generate a response. Please try again.';
+    }
 
     // Persist to Supabase (if configured) - best-effort, don't break response
     if (isSupabaseConfigured()) {

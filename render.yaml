@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: violet-eightfold-backend
+    env: node
+    buildCommand: cd server && npm install && npm run build
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        fromService:
+          type: web
+          name: violet-eightfold-backend
+          property: port
+      - key: JWT_SECRET
+        sync: false
+        # Set this in Render Dashboard → Environment → JWT_SECRET
+        # Generate with: openssl rand -base64 32
+      - key: OPENAI_API_KEY
+        sync: false
+        # Set this in Render Dashboard → Environment → OPENAI_API_KEY
+      - key: ALLOWED_ORIGINS
+        sync: false
+        # Set this in Render Dashboard → Environment → ALLOWED_ORIGINS
+        # Example: https://your-app.vercel.app,http://localhost:3000
+      - key: SUPABASE_URL
+        sync: false
+        optional: true
+        # Optional: Set if using Supabase
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+        optional: true
+        # Optional: Set if using Supabase
+    healthCheckPath: /api/health
+    plan: starter
+
