@@ -16,7 +16,13 @@ const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Startup log
+console.log('[STARTUP] Initializing server...');
+console.log('[STARTUP] Node version:', process.version);
+console.log('[STARTUP] Environment:', process.env.NODE_ENV || 'development');
+
 dotenv.config();
+console.log('[STARTUP] Environment variables loaded');
 
 // JWT Configuration - fail fast if secret missing in production
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -49,7 +55,9 @@ const JWT_SECRET_FINAL = JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_EXPIRY = '7d'; // Tokens expire in 7 days
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+// Parse PORT as number (Render sets this automatically)
+const PORT = Number(process.env.PORT) || 3001;
+console.log('[STARTUP] Server will listen on port:', PORT);
 
 // Middleware
 // CORS configuration - restrict to allowed origins in production
@@ -247,8 +255,17 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 };
 
-// Health check endpoint (public)
+// Fast health check endpoint (public) - must respond quickly for Render
 app.get('/api/health', (req: Request, res: Response) => {
+  // Return immediately - no blocking operations
+  res.status(200).json({ 
+    status: 'ok',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Detailed health check endpoint (public) - for diagnostics
+app.get('/api/health/detailed', (req: Request, res: Response) => {
   const uptime = process.uptime();
   // Try to get git commit hash if available (non-blocking)
   let commitHash = 'unknown';
@@ -845,8 +862,13 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({ error: errorMessage });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+// Start server - bind to 0.0.0.0 for Render (required for external access)
+console.log('[STARTUP] Starting server...');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('='.repeat(80));
+  console.log(`[STARTUP] ✅ Server running on port ${PORT}`);
+  console.log(`[STARTUP] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[STARTUP] Health check: http://0.0.0.0:${PORT}/api/health`);
+  console.log('='.repeat(80));
 });
 
