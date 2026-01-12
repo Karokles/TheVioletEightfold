@@ -623,8 +623,8 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
     
-    // Log council request (no secrets)
-    console.log(`[COUNCIL] Request - userId: ${userId}, mode: ${mode}`);
+    // Log council request (no secrets) - CRITICAL for debugging mode detection
+    console.log(`[COUNCIL] Request - userId: ${userId}, mode: ${mode}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
 
     // Load archetypes and build system prompt
     // For now, we'll use a simplified version. In production, load from config files
@@ -825,14 +825,17 @@ function buildCouncilSystemPrompt(userProfile: any): string {
     const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
     const systemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
     
-    let directChatPrompt = `${systemPrompt}\n\nCRITICAL INSTRUCTIONS:
+    let directChatPrompt = `${systemPrompt}\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE EXACTLY:
 - You are speaking DIRECTLY to the user in a one-on-one conversation.
 - Respond ONLY as ${archetypeName}. 
 - Do NOT simulate other archetypes or create a council dialogue.
 - Do NOT use the [[SPEAKER:]] format - just respond naturally as ${archetypeName}.
+- Do NOT use "MODERATOR:" or any moderator-style introduction.
+- Do NOT format your response with speaker tags or multiple voices.
 - This is a direct conversation, not a council session.
 - Be authentic to your archetype's voice and perspective.
-- Do not mention other archetypes unless the user asks about them.`;
+- Do not mention other archetypes unless the user asks about them.
+- Your response must be plain text, as if you are ${archetypeName} speaking directly to the user.`;
 
     // Add user profile context if provided
     if (userProfile && userProfile.lore) {
@@ -866,25 +869,22 @@ Instructions:
 
 CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
 
-1. Start with a brief MODERATOR SUMMARY (1-2 lines) that sets the context:
-   MODERATOR: [Brief summary of the topic and the council's initial stance]
+1. Do NOT use "MODERATOR:" or generic moderator-style introductions. The greeting is the first compression—the Reductive Protocol applies.
 
-2. Then, each archetype speaks in turn using this format (Use the ID in the header, not the translated name):
+2. Each archetype speaks in turn using this format (Use the ID in the header, not the translated name):
    [[SPEAKER: ARCHETYPE_ID]]
-   [Their vivid, character-appropriate response - be specific, not generic]
+   [Their vivid, character-appropriate response - be specific, not generic, sharp and decisive]
 
 3. After all archetypes have spoken, end with:
    SOVEREIGN DECISION:
-   [The final ruling or synthesis from The Sovereign - be decisive and clear]
+   [The final ruling or synthesis from The Sovereign - be decisive and clear, in the Sovereign's authoritative tone]
 
    NEXT STEPS:
    - [Action item 1]
    - [Action item 2]
    - [Action item 3]
 
-Example Output:
-MODERATOR: The council convenes to address the user's question about career direction. Tension between security and passion is evident.
-
+Example Output (Original Style - Reductive Protocol):
 [[SPEAKER: WARRIOR]]
 We need action. Analysis paralysis serves no one. Choose a path and commit.
 
@@ -910,7 +910,10 @@ NEXT STEPS:
 
 Valid Archetype IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLORER, ALCHEMIST
 
-IMPORTANT: Make responses vivid, specific, and character-appropriate. Avoid generic advice.`;
+IMPORTANT: 
+- Make responses vivid, specific, and character-appropriate. Avoid generic therapy-moderator fluff.
+- Keep it short and sharp, like the original example ("greeting is the first compression… Reductive Protocol…").
+- The Sovereign's tone should be authoritative and decisive, not generic.`;
 
   // Add user profile context if provided
   if (userProfile && userProfile.lore) {
