@@ -49,8 +49,13 @@ export const sendMessageToArchetype = async (
   conversationHistory?: Message[]
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
-  if (!user) {
+  if (!user || !user.id) {
     throw new Error('User not authenticated');
+  }
+
+  // Validate message is not empty
+  if (!message || !message.trim()) {
+    throw new Error('Message cannot be empty');
   }
 
   // Build conversation history - include previous messages if provided
@@ -67,6 +72,11 @@ export const sendMessageToArchetype = async (
         content: message,
         timestamp: Date.now(),
       }];
+
+  // Ensure messages array is not empty
+  if (!messages || messages.length === 0) {
+    throw new Error('Messages array cannot be empty');
+  }
 
   // For direct chat, use the council endpoint with activeArchetype set
   // This tells the server to use only that archetype's prompt
