@@ -180,6 +180,11 @@ interface AuthenticatedRequest extends Request {
 }
 
 const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
+  // Skip authentication for OPTIONS requests (preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  
   // Try multiple header formats: Authorization, x-auth-token
   let token = '';
   const authHeader = req.headers?.authorization;
