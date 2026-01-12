@@ -82,6 +82,12 @@ export const sendMessageToArchetype = async (
   // For direct chat, use the council endpoint with activeArchetype set
   // This tells the server to use only that archetype's prompt (DIRECT mode)
   // Note: userId is derived server-side from the auth token, not sent in body
+  
+  // Debug logging (dev only)
+  if (import.meta.env.DEV) {
+    console.log('[DIRECT CHAT] MODE: SINGLE', { archetypeId, message: message.substring(0, 50) + '...' });
+  }
+  
   const response = await fetch(`${API_BASE_URL}/api/council`, {
     method: 'POST',
     headers: getAuthHeaders(),

@@ -107,6 +107,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       let fullContent = '';
       
       // Stream response from backend (returns { text: string } chunks)
+      // CRITICAL: In DIRECT mode, response is plain text - NO [[SPEAKER]] parsing
       for await (const chunk of stream) {
         // Check if request was aborted
         if (abortController.signal.aborted) {
@@ -117,6 +118,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         if (text) {
           fullContent += text;
           setStreamingContent(fullContent);
+        }
+      }
+      
+      // Validate response is plain text (no council structure in direct mode)
+      // Log warning if council structure detected (dev only)
+      if (import.meta.env.DEV) {
+        if (fullContent.includes('[[SPEAKER:') || fullContent.includes('MODERATOR:') || fullContent.includes('SOVEREIGN DECISION:')) {
+          console.warn('[DIRECT CHAT] WARNING: Response contains council structure!', {
+            hasSpeakerTags: fullContent.includes('[[SPEAKER:'),
+            hasModerator: fullContent.includes('MODERATOR:'),
+            hasSovereignDecision: fullContent.includes('SOVEREIGN DECISION:'),
+            archetype: activeArchetype,
+          });
         }
       }
 

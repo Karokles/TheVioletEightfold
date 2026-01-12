@@ -623,12 +623,13 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
     
-    // Log council request (no secrets) - CRITICAL for debugging mode detection
-    console.log(`[COUNCIL] Request - userId: ${userId}, mode: ${mode}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
+    // Log request (no secrets) - CRITICAL for debugging mode detection
+    console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
 
-    // Load archetypes and build system prompt
-    // For now, we'll use a simplified version. In production, load from config files
-    const systemPrompt = buildCouncilSystemPrompt(userProfile);
+    // Build system prompt - COMPLETELY SEPARATE for direct vs council
+    const systemPrompt = mode === 'direct' 
+      ? buildDirectChatPrompt(userProfile)
+      : buildCouncilSystemPrompt(userProfile);
 
     // Build conversation history
     const conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = messages.map((msg: any) => ({
@@ -646,6 +647,9 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     }
 
     // Call OpenAI with robust error handling
+    // Use lower temperature for direct mode to enforce single voice
+    const temperature = mode === 'direct' ? 0.5 : 0.7;
+    
     let completion;
     try {
       completion = await openai.chat.completions.create({
@@ -654,9 +658,12 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
           { role: 'system', content: systemPrompt },
           ...conversationHistory,
         ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-        temperature: 0.7,
+        temperature: temperature,
         stream: false,
       });
+      
+      // Log mode and temperature for debugging
+      console.log(`[API] OpenAI call - mode: ${mode.toUpperCase()}, temperature: ${temperature}, promptLength: ${systemPrompt.length}`);
     } catch (openaiError: any) {
       // Handle OpenAI API errors gracefully
       console.error('[COUNCIL] OpenAI API error:', {
@@ -814,36 +821,85 @@ function loadArchetypesConfig() {
 }
 
 // Helper function to build system prompt
-function buildCouncilSystemPrompt(userProfile: any): string {
+// COMPLETELY SEPARATE prompt builder for DIRECT CHAT mode
+function buildDirectChatPrompt(userProfile: any): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
   const activeArchetype = userProfile?.activeArchetype;
 
-  // If activeArchetype is set, this is a DIRECT CHAT - only that archetype should respond
-  if (activeArchetype && archetypesConfig[activeArchetype]) {
-    const archetypeConfig = archetypesConfig[activeArchetype];
-    const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
-    const systemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
-    
-    let directChatPrompt = `${systemPrompt}\n\nCRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE EXACTLY:
-- You are speaking DIRECTLY to the user in a one-on-one conversation.
-- Respond ONLY as ${archetypeName}. 
-- Do NOT simulate other archetypes or create a council dialogue.
-- Do NOT use the [[SPEAKER:]] format - just respond naturally as ${archetypeName}.
-- Do NOT use "MODERATOR:" or any moderator-style introduction.
-- Do NOT format your response with speaker tags or multiple voices.
-- This is a direct conversation, not a council session.
-- Be authentic to your archetype's voice and perspective.
-- Do not mention other archetypes unless the user asks about them.
-- Your response must be plain text, as if you are ${archetypeName} speaking directly to the user.`;
-
-    // Add user profile context if provided
-    if (userProfile && userProfile.lore) {
-      return `${directChatPrompt}\n\n[USER PSYCHOLOGICAL PROFILE & BACKGROUND]\n${userProfile.lore}\n\nIntegrate this context into your understanding of the user. DO NOT recite these facts explicitly unless relevant. Use them to "relate for yourself" and shape your advice/tone.`;
-    }
-
-    return directChatPrompt;
+  if (!activeArchetype || !archetypesConfig[activeArchetype]) {
+    // Fallback if archetype not found
+    return 'You are a helpful assistant. Respond directly to the user in a natural, conversational way.';
   }
+
+  const archetypeConfig = archetypesConfig[activeArchetype];
+  const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
+  const baseSystemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
+  
+  // Clean the base prompt - remove any council references
+  const cleanedPrompt = baseSystemPrompt
+    .replace(/council/gi, 'internal guidance')
+    .replace(/other archetypes/gi, 'other perspectives')
+    .replace(/weigh the inputs from other/gi, 'consider different perspectives');
+  
+  // STRICT DIRECT MODE PROMPT - NO COUNCIL STRUCTURE ALLOWED
+  const directChatPrompt = `${cleanedPrompt}
+
+═══════════════════════════════════════════════════════════════
+CRITICAL: SINGLE VOICE MODE - YOU MUST FOLLOW THESE RULES EXACTLY
+═══════════════════════════════════════════════════════════════
+
+YOU ARE IN SINGLE VOICE MODE. This means:
+
+1. YOU ARE THE ONLY VOICE SPEAKING
+   - You are ${archetypeName} and ONLY ${archetypeName}
+   - NO other archetypes may speak
+   - NO council dialogue
+   - NO multi-voice discussion
+
+2. FORBIDDEN FORMATS - DO NOT USE:
+   ❌ [[SPEAKER: ANYTHING]]
+   ❌ MODERATOR: or any moderator introduction
+   ❌ SOVEREIGN DECISION:
+   ❌ NEXT STEPS: (unless you're offering YOUR OWN next steps)
+   ❌ Multiple archetype names or voices
+   ❌ Council structure or format
+
+3. REQUIRED FORMAT:
+   ✅ Plain, natural text
+   ✅ Speak as ${archetypeName} directly to the user
+   ✅ Use "I" not "we"
+   ✅ Offer YOUR OWN conclusions and next steps (if any)
+   ✅ Stay fully in character as ${archetypeName}
+
+4. EXAMPLES OF WRONG RESPONSES (DO NOT DO THIS):
+   ❌ "[[SPEAKER: ALCHEMIST]] The shadow work requires..."
+   ❌ "MODERATOR: The council convenes..."
+   ❌ "SOVEREIGN DECISION: We will..."
+   ❌ Multiple paragraphs with different archetype voices
+
+5. EXAMPLES OF CORRECT RESPONSES (DO THIS):
+   ✅ "The shadow work requires deep honesty. I see patterns that need transformation. Here's what I suggest: [your direct advice]"
+   ✅ "As ${archetypeName}, I believe [your perspective]. The path forward is [your conclusion]."
+
+REMEMBER: You are ${archetypeName} speaking ONE-ON-ONE with the user. No council. No other voices. Just you.`;
+
+  // Add user profile context if provided
+  if (userProfile && userProfile.lore) {
+    return `${directChatPrompt}
+
+[USER PSYCHOLOGICAL PROFILE & BACKGROUND]
+${userProfile.lore}
+
+Integrate this context into your understanding. DO NOT recite these facts explicitly unless relevant. Use them to shape your advice and tone as ${archetypeName}.`;
+  }
+
+  return directChatPrompt;
+}
+
+function buildCouncilSystemPrompt(userProfile: any): string {
+  const archetypesConfig = loadArchetypesConfig();
+  const language = userProfile?.language || 'EN';
 
   // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
   const basePrompt = `You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
