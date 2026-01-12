@@ -287,17 +287,41 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({
                         const Icon = isUser ? User : (archetype ? ICON_MAP[archetype.iconName] : Sparkles);
 
                         return (
-                            <div key={turn.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-center'} animate-fade-in-up w-full`}>
-                                <div className={`flex items-center gap-3 mb-3 opacity-60 ${isUser ? 'flex-row-reverse' : ''}`}>
-                                    <div className={`p-1.5 rounded-lg bg-gradient-to-br ${isUser ? 'from-purple-900 to-slate-900' : (archetype?.color || 'from-slate-600 to-slate-500')} border border-white/5 shadow-sm`}>
-                                        <Icon size={12} className="text-white" />
+                            <div key={turn.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-center'} animate-fade-in-up w-full mb-8 md:mb-12`}>
+                                <div className={`flex items-center gap-2 md:gap-3 mb-3 opacity-80 ${isUser ? 'flex-row-reverse' : ''}`}>
+                                    {/* Avatar with Archetype Colors - Original Style */}
+                                    <div className={`p-1.5 md:p-2 rounded-lg bg-gradient-to-br ${isUser 
+                                      ? 'from-purple-900 to-slate-900' 
+                                      : (archetype?.color || 'from-slate-600 to-slate-500')
+                                    } border border-white/10 shadow-lg`}>
+                                        <Icon size={14} className="text-white" strokeWidth={1.5} />
                                     </div>
-                                    <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-purple-400/80">
+                                    {/* Speaker Label - Original Style with Gradient */}
+                                    <span className={`text-[9px] md:text-[10px] font-bold tracking-[0.2em] uppercase ${
+                                      isUser 
+                                        ? 'text-purple-300' 
+                                        : archetype 
+                                          ? `text-transparent bg-clip-text bg-gradient-to-r ${archetype.color}`
+                                          : 'text-purple-400/80'
+                                    }`}>
                                         {isUser ? (language === 'DE' ? 'ICH' : 'SELF') : (archetype?.name || turn.speaker)}
                                     </span>
                                 </div>
-                                <div className={`relative max-w-2xl p-7 rounded-2xl border backdrop-blur-md ${isUser ? 'bg-purple-900/10 border-purple-500/20 text-right rounded-tr-none' : 'bg-[#0f0716]/60 border-white/5 text-center shadow-lg rounded-tl-none'}`}>
-                                    <p className="text-base md:text-lg leading-relaxed font-serif tracking-wide opacity-90 whitespace-pre-wrap">{turn.content}</p>
+                                {/* Message Card - Original Style */}
+                                <div className={`relative max-w-[95%] md:max-w-2xl p-5 md:p-7 rounded-2xl border backdrop-blur-md ${isUser 
+                                  ? 'bg-purple-900/10 border-purple-500/20 text-right rounded-tr-none' 
+                                  : `bg-[#0f0716]/70 border-white/10 text-center shadow-lg rounded-tl-none`
+                                }`}>
+                                    {/* Decorative Corner Accents for Archetypes */}
+                                    {!isUser && archetype && (
+                                        <>
+                                            <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-white/20" />
+                                            <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-white/20" />
+                                            <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-white/20" />
+                                            <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-white/20" />
+                                        </>
+                                    )}
+                                    <p className="text-sm md:text-base lg:text-lg leading-relaxed font-serif tracking-wide opacity-90 whitespace-pre-wrap">{turn.content}</p>
                                 </div>
                             </div>
                         );

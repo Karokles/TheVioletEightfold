@@ -11,9 +11,9 @@ interface RoundTableProps {
 
 export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelectArchetype, mini = false, language }) => {
   const archetypes = Object.values(getArchetypes(language));
-  // Reduced dimensions to fix out-of-bounds issue
-  const radius = mini ? 40 : 65; 
-  const center = mini ? 50 : 90;
+  // Responsive dimensions
+  const radius = mini ? 40 : 60; 
+  const center = mini ? 50 : 80;
   const activeData = getArchetypes(language)[activeArchetype];
   const activeColor = activeData.color;
 
@@ -39,15 +39,13 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
                 {language === 'DE' ? 'AKTIVE SCHNITTSTELLE' : 'ACTIVE INTERFACE'}
             </div>
             
-            {/* Active Name Display */}
-            <div className="relative px-8 py-2 group">
-                {/* Background Glow */}
-                <div className={`absolute inset-0 bg-gradient-to-r ${activeColor} blur-lg opacity-20 group-hover:opacity-30 transition-opacity duration-700 animate-pulse-subtle`} />
+            {/* Active Name Display - Original Style: Bright Green for Active */}
+            <div className="relative px-6 md:px-8 py-2 group">
                 {/* Glass Container */}
-                <div className="absolute inset-0 border border-purple-500/20 rounded-xl transform bg-[#0f0716]/60 backdrop-blur-md shadow-lg" />
+                <div className="absolute inset-0 border border-white/10 rounded-xl transform bg-[#0a0510]/80 backdrop-blur-md shadow-lg" />
                 
-                {/* Animated Gradient Text */}
-                <h3 className={`relative text-sm font-bold tracking-[0.2em] uppercase bg-clip-text text-transparent bg-gradient-to-r ${activeColor} drop-shadow-[0_0_10px_rgba(255,255,255,0.2)] whitespace-nowrap z-10 transition-all duration-700`}>
+                {/* Animated Text - Bright Green like Original */}
+                <h3 className="relative text-xs md:text-sm font-bold tracking-[0.2em] uppercase text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)] whitespace-nowrap z-10 transition-all duration-700">
                     {activeData.name}
                 </h3>
             </div>
@@ -61,8 +59,8 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
         </div>
       )}
 
-      {/* Table Container - Resized */}
-      <div className={`relative ${mini ? 'w-[100px] h-[100px]' : 'w-[180px] h-[180px]'} flex items-center justify-center group perspective-500`}>
+      {/* Table Container - Responsive Sizing */}
+      <div className={`relative ${mini ? 'w-[100px] h-[100px]' : 'w-[160px] h-[160px] md:w-[180px] md:h-[180px]'} flex items-center justify-center group perspective-500`}>
         
         {/* Animated Background Rings */}
         <div className="absolute inset-0 pointer-events-none transform-gpu">
@@ -85,10 +83,10 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
                {/* Core Outer Glow */}
                <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${activeColor} opacity-10 blur-2xl animate-pulse-slow transition-colors duration-700`} />
                
-               {/* Core Structure */}
-               <div className={`relative w-full h-full rounded-full border border-purple-500/10 bg-black/60 flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-sm overflow-hidden`}>
-                  {/* Inner Energy Source */}
-                  <div className={`w-[30%] h-[30%] rounded-full bg-gradient-to-br ${activeColor} opacity-90 shadow-[0_0_20px_currentColor] animate-pulse-glow transition-colors duration-700`} />
+               {/* Core Structure - Original Style: Dark with Bright Green Dot */}
+               <div className={`relative w-full h-full rounded-full border border-white/5 bg-[#0a0510]/90 flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-sm overflow-hidden`}>
+                  {/* Inner Energy Source - Bright Green Dot like Original */}
+                  <div className="w-[30%] h-[30%] rounded-full bg-emerald-400 opacity-90 shadow-[0_0_20px_rgba(16,185,129,0.8)] animate-pulse transition-colors duration-700" />
                   
                   {/* Grid overlay */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:10px_10px] opacity-30" />
@@ -119,8 +117,8 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
               onClick={() => onSelectArchetype(archetype.id as ArchetypeId)}
               className={`absolute rounded-full flex items-center justify-center transition-all duration-500 group/btn
                 ${isActive 
-                  ? `scale-110 z-20 shadow-[0_0_25px_rgba(139,92,246,0.5)] bg-[#0f0716] text-white ring-1 ring-white/50 border border-transparent` 
-                  : 'bg-violet-900/20 text-purple-400/70 hover:bg-violet-800/60 hover:text-purple-100 hover:scale-110 border border-purple-500/10 backdrop-blur-sm hover:shadow-[0_0_15px_rgba(139,92,246,0.2)] hover:border-purple-500/30'
+                  ? `scale-110 z-20 shadow-[0_0_25px_rgba(16,185,129,0.6)] bg-transparent text-white ring-2 ring-emerald-400/80 border-2 border-white/80 backdrop-blur-sm` 
+                  : 'bg-transparent text-white/70 hover:text-white hover:scale-110 border border-white/20 backdrop-blur-sm hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:border-white/40'
                 }`}
               style={{
                 left: `${x}px`,
@@ -130,10 +128,19 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
               }}
               title={archetype.name}
             >
-              {/* Inner active glow */}
-              {isActive && <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${archetype.color} opacity-20 animate-pulse-subtle`} />}
+              {/* Active glow - Bright Green like Original */}
+              {isActive && (
+                <>
+                  <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-pulse-subtle blur-sm" />
+                  <div className="absolute inset-[-2px] rounded-full border border-emerald-400/40 animate-pulse" />
+                </>
+              )}
               
-              <Icon size={mini ? 12 : 20} strokeWidth={isActive ? 2 : 1.5} className="relative z-10 transition-transform duration-300 group-hover/btn:scale-110" />
+              <Icon 
+                size={mini ? 12 : 20} 
+                strokeWidth={isActive ? 2.5 : 1.5} 
+                className={`relative z-10 transition-transform duration-300 group-hover/btn:scale-110 ${isActive ? 'text-white drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'text-white/70'}`} 
+              />
             </button>
           );
         })}

@@ -172,26 +172,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           const Icon = isUser ? Bot : (arch ? ICON_MAP[arch.iconName] : Bot);
           
           return (
-            <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
-              <div className={`flex gap-3 max-w-[85%] md:max-w-[70%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center border shadow-lg ${isUser ? 'bg-purple-900 border-purple-500/50 text-purple-200' : `bg-gradient-to-br ${arch?.color || 'from-violet-900 to-indigo-900'} border-white/20 text-white`}`}>
-                  <Icon size={16} />
+            <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up mb-4 md:mb-6`}>
+              <div className={`flex gap-2 md:gap-3 max-w-[90%] md:max-w-[75%] ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                {/* Avatar - Original Style with Archetype Colors */}
+                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg ${isUser 
+                  ? 'bg-purple-900/40 border-purple-500/30 text-purple-200' 
+                  : `bg-gradient-to-br ${arch?.color || 'from-violet-900 to-indigo-900'} border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]`
+                }`}>
+                  <Icon size={isUser ? 14 : 18} strokeWidth={1.5} />
                 </div>
-                <div className={`p-4 rounded-2xl shadow-xl backdrop-blur-md border ${isUser ? 'bg-purple-600/20 border-purple-500/30 text-purple-50 rounded-tr-none' : 'bg-[#150a26]/60 border-white/5 text-violet-100 rounded-tl-none'}`}>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                {/* Message Card - Original Style */}
+                <div className={`p-3 md:p-4 rounded-2xl shadow-xl backdrop-blur-md border ${isUser 
+                  ? 'bg-purple-600/20 border-purple-500/30 text-purple-50 rounded-tr-none' 
+                  : `bg-[#150a26]/70 border-white/10 text-violet-100 rounded-tl-none`
+                }`}>
+                  {/* Archetype Name Label for Model Messages */}
+                  {!isUser && arch && (
+                    <div className="mb-2 pb-2 border-b border-white/5">
+                      <span className={`text-[10px] font-bold uppercase tracking-widest bg-clip-text text-transparent bg-gradient-to-r ${arch.color} opacity-80`}>
+                        {arch.name}
+                      </span>
+                    </div>
+                  )}
+                  <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                 </div>
               </div>
             </div>
           );
         })}
         {streamingContent && (
-           <div className="flex justify-start animate-fade-in">
-             <div className="flex gap-3 max-w-[85%] md:max-w-[70%] flex-row">
-                <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center border shadow-lg bg-gradient-to-br ${currentArchetypeData.color} border-white/20 text-white`}>
-                  {(() => { const Icon = ICON_MAP[currentArchetypeData.iconName]; return <Icon size={16} />; })()}
+           <div className="flex justify-start animate-fade-in mb-4 md:mb-6">
+             <div className="flex gap-2 md:gap-3 max-w-[90%] md:max-w-[75%] flex-row">
+                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 flex items-center justify-center border shadow-lg bg-gradient-to-br ${currentArchetypeData.color} border-white/30 text-white shadow-[0_0_15px_rgba(0,0,0,0.3)]`}>
+                  {(() => { const Icon = ICON_MAP[currentArchetypeData.iconName]; return <Icon size={18} strokeWidth={1.5} />; })()}
                 </div>
-                <div className="p-4 rounded-2xl shadow-xl backdrop-blur-md border bg-[#150a26]/60 border-white/5 text-violet-100 rounded-tl-none">
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{streamingContent}</p>
+                <div className="p-3 md:p-4 rounded-2xl shadow-xl backdrop-blur-md border bg-[#150a26]/70 border-white/10 text-violet-100 rounded-tl-none">
+                  <div className="mb-2 pb-2 border-b border-white/5">
+                    <span className={`text-[10px] font-bold uppercase tracking-widest bg-clip-text text-transparent bg-gradient-to-r ${currentArchetypeData.color} opacity-80`}>
+                      {currentArchetypeData.name}
+                    </span>
+                  </div>
+                  <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{streamingContent}</p>
                 </div>
              </div>
            </div>
@@ -207,7 +228,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       <div className="p-4 md:p-6 bg-[#0f0716]/80 backdrop-blur-xl border-t border-purple-900/30">
-        <div className="max-w-4xl mx-auto flex gap-3 items-center">
+        <div className="max-w-4xl mx-auto flex gap-2 md:gap-3 items-center">
           <div className="flex-1 relative">
             <input 
               type="text"
@@ -220,18 +241,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 }
               }}
               placeholder={ui.INPUT_PLACEHOLDER}
-              className="w-full bg-[#150a26] border border-purple-500/20 rounded-xl px-5 py-3.5 text-sm text-white placeholder-purple-400/30 focus:border-purple-500 outline-none transition-all shadow-inner"
+              className="w-full bg-[#150a26] border border-purple-500/20 rounded-xl px-4 md:px-5 py-3 md:py-3.5 text-sm md:text-base text-white placeholder-purple-400/30 focus:border-purple-500 outline-none transition-all shadow-inner"
             />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 pointer-events-none opacity-20">
-                <span className="text-[10px] font-mono">⌘ ↵</span>
+            <div className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 pointer-events-none opacity-20">
+                <span className="text-[9px] md:text-[10px] font-mono">⌘ ↵</span>
             </div>
           </div>
           <button 
             onClick={handleSend}
             disabled={!input.trim() || status !== ChatStatus.IDLE}
-            className="w-12 h-12 flex items-center justify-center bg-purple-600 hover:bg-purple-500 text-white rounded-xl shadow-lg shadow-purple-900/20 disabled:opacity-20 transition-all duration-300 active:scale-95"
+            className="w-11 h-11 md:w-12 md:h-12 flex items-center justify-center bg-purple-600 hover:bg-purple-500 text-white rounded-xl shadow-lg shadow-purple-900/20 disabled:opacity-20 transition-all duration-300 active:scale-95 shrink-0"
           >
-            <Send size={18} />
+            <Send size={16} className="md:w-[18px] md:h-[18px]" />
           </button>
         </div>
       </div>
