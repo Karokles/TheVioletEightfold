@@ -242,3 +242,11 @@ The app is mobile-responsive! Friends can:
 - Edit `server/server.ts` → `users` array
 - Restart backend
 
+
+
+
+
+
+
+
+

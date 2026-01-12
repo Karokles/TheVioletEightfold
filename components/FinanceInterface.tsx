@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { FinanceState, Language, Transaction } from '../types';
-import { getUIText } from '../constants';
+import { getUIText } from '../config/loader';
 import { Wallet, TrendingUp, TrendingDown, Coins, Plus, ArrowUpRight, ArrowDownLeft, X, Trash2, Edit2, Save } from 'lucide-react';
 
 interface FinanceInterfaceProps {

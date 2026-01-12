@@ -68,3 +68,6 @@ node scripts/smoke-test.js https://thevioleteightfold-4224.onrender.com
 - **401 errors**: Check that test user credentials are correct
 - **Connection errors**: Verify server is running and URL is correct
 
+
+
+

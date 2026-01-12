@@ -148,3 +148,6 @@
 - **401 with reason "missing_token"**: No Authorization header sent
 - **CORS errors**: ALLOWED_ORIGINS doesn't include frontend domain
 
+
+
+

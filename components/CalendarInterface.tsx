@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CalendarEvent, Language } from '../types';
-import { getUIText } from '../constants';
+import { getUIText } from '../config/loader';
 import { ChevronLeft, ChevronRight, Clock, MapPin, CheckCircle, Circle, Plus, AlertCircle, X, Trash2, Edit2, ArrowLeft } from 'lucide-react';
 
 interface CalendarInterfaceProps {
