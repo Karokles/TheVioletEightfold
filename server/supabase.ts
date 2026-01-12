@@ -201,6 +201,7 @@ export interface SoulTimelineEvent {
   label: string;
   summary: string;
   intensity?: number;
+  type?: string; // e.g., "BREAKTHROUGH", "BENCHMARK", "REALIZATION", "EVENT"
   tags?: string[];
   source_session_id?: string;
   created_at?: string;

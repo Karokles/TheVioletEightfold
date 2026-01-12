@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { UserStats, Language, QuestLogEntry, SoulTimelineEvent, Breakthrough } from '../types';
 import { ICON_MAP } from '../constants';
 import { Shield, Zap, Brain, Activity, Target, Lock, Unlock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, RefreshCw } from 'lucide-react';
@@ -16,6 +16,35 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
   const [timelineEvents, setTimelineEvents] = useState<SoulTimelineEvent[]>([]);
   const [breakthroughs, setBreakthroughs] = useState<Breakthrough[]>([]);
   const [isLoadingMeaning, setIsLoadingMeaning] = useState(true);
+
+  // Derive breakthroughs from timeline events (single source of truth)
+  const breakthroughTimelineEvents = timelineEvents.filter(e => e.type === 'BREAKTHROUGH');
+  
+  // Also load from breakthroughs array for backward compatibility
+  // Merge both sources, deduplicate by id
+  const allBreakthroughs = useMemo(() => {
+    const fromTimeline = breakthroughTimelineEvents.map(event => ({
+      id: event.id,
+      createdAt: event.createdAt,
+      title: event.label,
+      insight: event.summary,
+      trigger: undefined,
+      action: undefined,
+      tags: event.tags,
+      sourceSessionId: event.sourceSessionId
+    }));
+    
+    const fromArray = breakthroughs;
+    const merged = [...fromTimeline, ...fromArray];
+    
+    // Deduplicate by id
+    const seen = new Set<string>();
+    return merged.filter(bt => {
+      if (seen.has(bt.id)) return false;
+      seen.add(bt.id);
+      return true;
+    });
+  }, [breakthroughTimelineEvents, breakthroughs]);
 
   const loadMeaningData = async () => {
     try {
@@ -165,12 +194,12 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                             <Zap size={14} /> {language === 'DE' ? 'Durchbrüche' : 'Breakthroughs'}
                         </h3>
                         <div className="space-y-3 max-h-64 overflow-y-auto">
-                            {breakthroughs.length === 0 ? (
+                            {allBreakthroughs.length === 0 ? (
                                 <p className="text-xs text-purple-400/40 italic">
                                     {language === 'DE' ? 'Keine Durchbrüche' : 'No breakthroughs'}
                                 </p>
                             ) : (
-                                breakthroughs.slice(0, 3).map((bt) => (
+                                allBreakthroughs.slice(0, 3).map((bt) => (
                                     <div key={bt.id} className="group p-3 rounded-lg bg-amber-900/10 border border-amber-500/20 hover:border-amber-500/40 transition-colors">
                                         <div className="flex items-start justify-between mb-1">
                                             <h4 className="text-sm font-bold text-amber-300 group-hover:text-amber-200 transition-colors">
@@ -250,35 +279,45 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                         })}
 
                         {/* Timeline Events (from meaning agent) */}
-                        {timelineEvents.map((event) => (
-                            <div key={event.id} className="relative flex gap-6 group">
-                                {/* Icon Node */}
-                                <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
-                                    <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
-                                    <Sparkles size={20} className="text-purple-300" />
-                                </div>
-                                
-                                {/* Content */}
-                                <div className="flex-1 pt-1">
-                                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
-                                        <h4 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
-                                            {event.label}
-                                        </h4>
-                                        <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
-                                            {formatDate(event.createdAt)}
-                                        </span>
-                                        {event.intensity && (
-                                            <span className="text-[9px] text-purple-400/60">
-                                                {event.intensity}/10
-                                            </span>
+                        {timelineEvents.map((event) => {
+                            const isBreakthrough = event.type === 'BREAKTHROUGH';
+                            return (
+                                <div key={event.id} className="relative flex gap-6 group">
+                                    {/* Icon Node */}
+                                    <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
+                                        <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
+                                        {isBreakthrough ? (
+                                            <Zap size={20} className="text-amber-300" />
+                                        ) : (
+                                            <Sparkles size={20} className="text-purple-300" />
                                         )}
                                     </div>
-                                    <p className="text-sm text-purple-200/70 leading-relaxed max-w-xl">
-                                        {event.summary}
-                                    </p>
+                                    
+                                    {/* Content */}
+                                    <div className="flex-1 pt-1">
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
+                                            <h4 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
+                                                {event.label}
+                                            </h4>
+                                            <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
+                                                {formatDate(event.createdAt)}
+                                            </span>
+                                            {isBreakthrough && (
+                                                <span className="text-[9px] text-amber-400 bg-amber-900/20 px-1.5 rounded border border-amber-500/20">BREAKTHROUGH</span>
+                                            )}
+                                            {event.intensity && !isBreakthrough && (
+                                                <span className="text-[9px] text-purple-400/60">
+                                                    {event.intensity}/10
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-purple-200/70 leading-relaxed max-w-xl">
+                                            {event.summary}
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
 
                         {/* Future Node */}
                         <div className="relative flex gap-6 opacity-50">

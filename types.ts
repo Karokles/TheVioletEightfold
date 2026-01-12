@@ -133,6 +133,7 @@ export interface SoulTimelineEvent {
   label: string;
   summary: string;
   intensity?: number; // 1-10
+  type?: string; // e.g., "BREAKTHROUGH", "BENCHMARK", "REALIZATION", "EVENT"
   tags?: string[];
   sourceSessionId?: string;
 }

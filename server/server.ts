@@ -922,12 +922,18 @@ Rules:
 Return this exact JSON structure:
 {
   "questLogEntries": [{"id": "...", "createdAt": "...", "title": "...", "content": "...", "tags": [], "relatedArchetypes": [], "sourceSessionId": "..."}],
-  "soulTimelineEvents": [{"id": "...", "createdAt": "...", "label": "...", "summary": "...", "intensity": 5, "tags": [], "sourceSessionId": "..."}],
+  "soulTimelineEvents": [{"id": "...", "createdAt": "...", "label": "...", "summary": "...", "intensity": 5, "type": "EVENT", "tags": [], "sourceSessionId": "..."}],
   "breakthroughs": [{"id": "...", "createdAt": "...", "title": "...", "insight": "...", "trigger": "...", "action": "...", "tags": [], "sourceSessionId": "..."}],
   "attributeUpdates": [],
   "skillUpdates": [],
   "nextQuestState": null
-}`;
+}
+
+IMPORTANT: If you identify a breakthrough, you MUST:
+1. Include it in the "breakthroughs" array
+2. ALSO include a corresponding entry in "soulTimelineEvents" with type: "BREAKTHROUGH"
+3. The timeline event should have the same title/label as the breakthrough title
+4. This ensures breakthroughs appear in both the timeline and the breakthroughs panel.`;
 
     let completion;
     try {
@@ -1008,6 +1014,19 @@ Return this exact JSON structure:
       analysisResult.breakthroughs = [];
     }
     
+    // Ensure all timeline events have required fields
+    analysisResult.soulTimelineEvents.forEach((event: any) => {
+      if (!event.label) event.label = 'Timeline Event';
+      if (!event.summary) event.summary = '';
+      if (!event.type) event.type = 'EVENT';
+    });
+    
+    // Ensure all breakthroughs have required fields
+    analysisResult.breakthroughs.forEach((bt: any) => {
+      if (!bt.title) bt.title = 'Breakthrough';
+      if (!bt.insight) bt.insight = '';
+    });
+    
     // Add sourceSessionId to all entries if provided
     if (sessionId) {
       analysisResult.questLogEntries.forEach((entry: any) => {
@@ -1021,19 +1040,47 @@ Return this exact JSON structure:
       });
     }
     
-    // Ensure createdAt fields are ISO strings
+    // Normalize meaning result: ensure breakthroughs also appear as timeline events
     const now = new Date().toISOString();
+    
+    // Ensure createdAt fields are ISO strings and generate IDs
     analysisResult.questLogEntries.forEach((entry: any) => {
       if (!entry.createdAt) entry.createdAt = now;
       if (!entry.id) entry.id = `quest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     });
+    
     analysisResult.soulTimelineEvents.forEach((event: any) => {
       if (!event.createdAt) event.createdAt = now;
       if (!event.id) event.id = `timeline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      if (!event.type) event.type = 'EVENT'; // Default type
     });
+    
     analysisResult.breakthroughs.forEach((breakthrough: any) => {
       if (!breakthrough.createdAt) breakthrough.createdAt = now;
       if (!breakthrough.id) breakthrough.id = `breakthrough_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Ensure breakthrough also appears as timeline event with type BREAKTHROUGH
+      const existingTimelineEvent = analysisResult.soulTimelineEvents.find(
+        (e: any) => e.label === breakthrough.title || e.id === breakthrough.id
+      );
+      
+      if (!existingTimelineEvent) {
+        // Create corresponding timeline event for this breakthrough
+        analysisResult.soulTimelineEvents.push({
+          id: breakthrough.id, // Use same ID to link them
+          createdAt: breakthrough.createdAt,
+          label: breakthrough.title,
+          summary: breakthrough.insight,
+          type: 'BREAKTHROUGH',
+          intensity: 10, // Breakthroughs are high intensity
+          tags: breakthrough.tags || [],
+          sourceSessionId: breakthrough.sourceSessionId
+        });
+      } else {
+        // Update existing timeline event to mark it as breakthrough
+        existingTimelineEvent.type = 'BREAKTHROUGH';
+        existingTimelineEvent.intensity = 10;
+      }
     });
     
     // Persist to Supabase (if configured) - best-effort, don't break response
@@ -1059,6 +1106,7 @@ Return this exact JSON structure:
             label: event.label,
             summary: event.summary,
             intensity: event.intensity,
+            type: event.type || 'EVENT',
             tags: event.tags || [],
             source_session_id: event.sourceSessionId || sessionId || undefined,
             created_at: event.createdAt
@@ -1137,6 +1185,7 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             label: event.label,
             summary: event.summary,
             intensity: event.intensity,
+            type: event.type || 'EVENT',
             tags: event.tags || [],
             sourceSessionId: event.source_session_id
           })),

@@ -409,11 +409,20 @@ export async function analyzeMeaning(
         }
       }
       
-      // Merge new data
+      // Merge new data with deduplication by id
+      const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
+        const seen = new Set<string>();
+        return arr.filter(item => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+      };
+      
       const merged: import('../types').MeaningAnalysisResult = {
-        questLogEntries: [...data.questLogEntries, ...existingData.questLogEntries],
-        soulTimelineEvents: [...data.soulTimelineEvents, ...existingData.soulTimelineEvents],
-        breakthroughs: [...data.breakthroughs, ...existingData.breakthroughs]
+        questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
+        soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
+        breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs])
       };
       
       localStorage.setItem(storageKey, JSON.stringify(merged));
