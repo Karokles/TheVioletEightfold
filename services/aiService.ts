@@ -136,8 +136,13 @@ export const startCouncilSession = async (
   currentLore: string
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
-  if (!user) {
+  if (!user || !user.id) {
     throw new Error('User not authenticated');
+  }
+
+  // Validate topic is not empty
+  if (!topic || !topic.trim()) {
+    throw new Error('Topic cannot be empty');
   }
 
   const messages: Message[] = [
@@ -213,8 +218,13 @@ export const sendMessageToCouncil = async (
   currentLore: string
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
-  if (!user) {
+  if (!user || !user.id) {
     throw new Error('User not authenticated');
+  }
+
+  // Validate message is not empty
+  if (!message || !message.trim()) {
+    throw new Error('Message cannot be empty');
   }
 
   // Add the new user message to history
@@ -227,6 +237,11 @@ export const sendMessageToCouncil = async (
       timestamp: Date.now(),
     },
   ];
+
+  // Ensure messages array is not empty
+  if (!messages || messages.length === 0) {
+    throw new Error('Messages array cannot be empty');
+  }
 
   // Note: userId is derived server-side from the auth token, not sent in body
   const response = await fetch(`${API_BASE_URL}/api/council`, {

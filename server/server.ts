@@ -21,8 +21,23 @@ dotenv.config();
 // JWT Configuration - fail fast if secret missing in production
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('='.repeat(80));
   console.error('ERROR: JWT_SECRET environment variable is required in production');
-  console.error('Please set JWT_SECRET in your Render environment variables');
+  console.error('='.repeat(80));
+  console.error('');
+  console.error('To fix this issue:');
+  console.error('1. Go to Render Dashboard → Your Service → Environment');
+  console.error('2. Add environment variable: JWT_SECRET');
+  console.error('3. Generate a secure value with: openssl rand -base64 32');
+  console.error('4. Set the value (minimum 32 characters recommended)');
+  console.error('5. Save and redeploy your service');
+  console.error('');
+  console.error('Example:');
+  console.error('  Variable: JWT_SECRET');
+  console.error('  Value: <paste output from: openssl rand -base64 32>');
+  console.error('');
+  console.error('Without JWT_SECRET, the server cannot authenticate users securely.');
+  console.error('='.repeat(80));
   process.exit(1);
 }
 if (!JWT_SECRET) {
@@ -534,8 +549,19 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     const userId = req.user.id; // Server-side validated userId
     const { messages, userProfile } = (req.body as { messages?: any[]; userProfile?: any }) || {};
 
+    // Validate messages array exists and is not empty
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'messages array is required' });
+      return res.status(400).json({ 
+        error: 'messages array is required',
+        message: 'Request body must include a non-empty messages array'
+      });
+    }
+
+    if (messages.length === 0) {
+      return res.status(400).json({ 
+        error: 'messages array cannot be empty',
+        message: 'At least one message is required'
+      });
     }
     
     // Determine mode: direct chat (activeArchetype set) or council session
