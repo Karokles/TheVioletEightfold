@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 type NextFunction = (err?: any) => void;
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
 import { createHash, randomBytes } from 'node:crypto';
 import OpenAI from 'openai';
@@ -61,33 +61,67 @@ console.log('[STARTUP] Server will listen on port:', PORT);
 
 // Middleware
 // CORS configuration - restrict to allowed origins in production
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['http://localhost:3000']; // Default to localhost for development
+const parseAllowedOrigins = (): string[] => {
+  const defaultOrigins = ['http://localhost:3000', 'http://localhost:5173'];
+  
+  if (process.env.ALLOWED_ORIGINS) {
+    const parsed = process.env.ALLOWED_ORIGINS.split(',')
+      .map(origin => origin.trim())
+      .filter(origin => origin.length > 0);
+    
+    // Merge with defaults, remove duplicates
+    return Array.from(new Set([...defaultOrigins, ...parsed]));
+  }
+  
+  return defaultOrigins;
+};
 
-app.use(cors({
+const allowedOrigins = parseAllowedOrigins();
+
+// Log allowed origins on startup (no secrets)
+console.log('[STARTUP] CORS allowed origins:', allowedOrigins.join(', '));
+
+// CORS options - credentials: false (no cookies, only JWT in Authorization header)
+const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.) in development
+    // Allow requests with no origin (mobile apps, Postman, etc.) in development only
     if (!origin && process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
-    // Allow if origin is in allowed list or if no origin check needed
-    if (!origin || allowedOrigins.includes(origin)) {
+    
+    // In production, require origin
+    if (!origin) {
+      return callback(new Error('CORS: Origin header is required in production'));
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       // Log CORS rejection for debugging (no secrets)
       console.warn('[CORS] Request blocked', {
-        origin: origin || 'missing',
+        origin: origin,
         allowedOrigins: allowedOrigins,
         environment: process.env.NODE_ENV || 'development'
       });
-      callback(new Error(`CORS: Origin '${origin || 'missing'}' is not allowed. Allowed origins: ${allowedOrigins.join(', ')}`));
+      callback(new Error(`CORS: Origin '${origin}' is not allowed. Allowed origins: ${allowedOrigins.join(', ')}`));
     }
   },
-  credentials: true,
+  credentials: false, // No cookies, only JWT in Authorization header
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
-}));
+  exposedHeaders: [],
+  maxAge: 86400, // 24 hours - cache preflight requests
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+// Apply CORS middleware BEFORE all routes
+app.use(cors(corsOptions));
+
+// Explicit OPTIONS handler for all routes (preflight requests)
+app.options('*', cors(corsOptions));
+
 app.use(express.json());
 
 // Initialize OpenAI

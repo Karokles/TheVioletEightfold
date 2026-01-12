@@ -58,7 +58,7 @@ aB3xY9mK2pL8qR5tW7vN4jH6fG1dS0cE2bA9zX8yU6iO3pL5mN7k
 | `NODE_ENV` | `production` | Literal value |
 | `JWT_SECRET` | `<paste from Step 1>` | Generated with `openssl rand -base64 32` |
 | `OPENAI_API_KEY` | `sk-...` | From https://platform.openai.com/api-keys |
-| `ALLOWED_ORIGINS` | `https://your-app.vercel.app,http://localhost:3000` | Your Vercel frontend URL + localhost |
+| `ALLOWED_ORIGINS` | `https://the-violet-eightfold42.vercel.app` | Your exact Vercel frontend URL (no trailing slash). Default dev origins (localhost:3000, localhost:5173) are automatically included. |
 
 ### Optional Variables (Can skip if not using Supabase):
 
