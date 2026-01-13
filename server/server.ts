@@ -219,7 +219,7 @@ const users: User[] = [
   {
     id: 'tuana',
     username: 'tuana',
-    secretHash: createHash('sha256').update('dolphin').digest('hex'),
+    secretHash: createHash('sha256').update('bosphorus').digest('hex'),
   },
 ];
 

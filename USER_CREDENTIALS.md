@@ -18,7 +18,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 | `galja` | `kalmykia` |
 | `benjamin` | `tragwerk` |
 | `anna` | `amethyst` |
-| `tuana` | `dolphin` |
+| `tuana` | `bosphorus` |
 
 ## Usage
 
@@ -50,5 +50,5 @@ These credentials are defined in `server/server.ts` (lines 156-220).
 - The password for `galja` is `kalmykia` - a reference to the Republic of Kalmykia, the only region in Europe with a Buddhist majority population.
 - The password for `benjamin` is `tragwerk` - a reference to structural engineering (Tragwerk = load-bearing structure in German), fitting for a civil engineer.
 - The password for `anna` is `amethyst` - a reference to the purple gemstone, fitting for The Violet Eightfold app's purple theme.
-- The password for `tuana` is `dolphin` - a reference to the Turkish meaning of the name Tuana, which means dolphin.
+- The password for `tuana` is `bosphorus` - a reference to the Bosphorus strait in Istanbul, Turkey, connecting to the Turkish origin of the name Tuana.
 
