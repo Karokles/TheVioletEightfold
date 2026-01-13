@@ -216,6 +216,11 @@ const users: User[] = [
     username: 'anna',
     secretHash: createHash('sha256').update('amethyst').digest('hex'),
   },
+  {
+    id: 'tuana',
+    username: 'tuana',
+    secretHash: createHash('sha256').update('dolphin').digest('hex'),
+  },
 ];
 
 // Authentication middleware

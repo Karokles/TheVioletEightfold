@@ -18,6 +18,7 @@ This file contains the test user credentials for The Violet Eightfold app.
 | `galja` | `kalmykia` |
 | `benjamin` | `tragwerk` |
 | `anna` | `amethyst` |
+| `tuana` | `dolphin` |
 
 ## Usage
 
@@ -41,7 +42,7 @@ To log in as selma:
 
 ## Location in Code
 
-These credentials are defined in `server/server.ts` (lines 156-214).
+These credentials are defined in `server/server.ts` (lines 156-220).
 
 **Notes**:
 - The password for `sophia` is `know-thyself` - a reference to the Socratic maxim "γνῶθι σεαυτόν" (know thyself), fitting for a wisdom-seeking user named after the Greek word for wisdom.
@@ -49,4 +50,5 @@ These credentials are defined in `server/server.ts` (lines 156-214).
 - The password for `galja` is `kalmykia` - a reference to the Republic of Kalmykia, the only region in Europe with a Buddhist majority population.
 - The password for `benjamin` is `tragwerk` - a reference to structural engineering (Tragwerk = load-bearing structure in German), fitting for a civil engineer.
 - The password for `anna` is `amethyst` - a reference to the purple gemstone, fitting for The Violet Eightfold app's purple theme.
+- The password for `tuana` is `dolphin` - a reference to the Turkish meaning of the name Tuana, which means dolphin.
 
