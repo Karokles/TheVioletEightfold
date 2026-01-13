@@ -181,6 +181,41 @@ const users: User[] = [
     username: 'friend5',
     secretHash: createHash('sha256').update('friend5-test-secret').digest('hex'),
   },
+  {
+    id: 'sophia',
+    username: 'sophia',
+    secretHash: createHash('sha256').update('know-thyself').digest('hex'),
+  },
+  {
+    id: 'isabell',
+    username: 'isabell',
+    secretHash: createHash('sha256').update('ceylon').digest('hex'),
+  },
+  {
+    id: 'dorothee',
+    username: 'dorothee',
+    secretHash: createHash('sha256').update('schattengarten').digest('hex'),
+  },
+  {
+    id: 'serigne',
+    username: 'serigne',
+    secretHash: createHash('sha256').update('cher-amadu').digest('hex'),
+  },
+  {
+    id: 'galja',
+    username: 'galja',
+    secretHash: createHash('sha256').update('kalmykia').digest('hex'),
+  },
+  {
+    id: 'benjamin',
+    username: 'benjamin',
+    secretHash: createHash('sha256').update('tragwerk').digest('hex'),
+  },
+  {
+    id: 'anna',
+    username: 'anna',
+    secretHash: createHash('sha256').update('amethyst').digest('hex'),
+  },
 ];
 
 // Authentication middleware

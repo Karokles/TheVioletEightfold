@@ -258,3 +258,5 @@ CREATE INDEX idx_breakthroughs_created ON breakthroughs(created_at DESC);
 - ✅ No secrets committed
 - ✅ Backward compatible: still works with existing ScribeAnalysis flow
 
+
+
