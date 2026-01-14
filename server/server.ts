@@ -202,11 +202,6 @@ const users: User[] = [
     secretHash: createHash('sha256').update('cher-amadu').digest('hex'),
   },
   {
-    id: 'galja',
-    username: 'galja',
-    secretHash: createHash('sha256').update('kalmykia').digest('hex'),
-  },
-  {
     id: 'benjamin',
     username: 'benjamin',
     secretHash: createHash('sha256').update('tragwerk').digest('hex'),
@@ -215,11 +210,6 @@ const users: User[] = [
     id: 'anna',
     username: 'anna',
     secretHash: createHash('sha256').update('amethyst').digest('hex'),
-  },
-  {
-    id: 'tuana',
-    username: 'tuana',
-    secretHash: createHash('sha256').update('bosphorus').digest('hex'),
   },
 ];
 
