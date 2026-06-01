@@ -15,6 +15,8 @@ This app is now structured so local development can run without paid API, databa
 - `PAYMENT_ENABLED`: keeps payment checks server-side; currently blocked until credentials/budget exist.
 - `AUTH_STRICT_MODE`: requires `JWT_SECRET` when true; local mode can run with a development-only fallback.
 - `USAGE_LIMITS_ENABLED`: enforces in-memory weekly limits in no-budget mode.
+- `DEBUG_ENDPOINTS_ENABLED`: exposes diagnostic endpoints locally/staging; keep false in production unless explicitly protected.
+- `LOCAL_AUTH_ENABLED`: enables the hardcoded local test-user login; keep false outside local development.
 
 ## Feature Status
 
@@ -27,6 +29,26 @@ This app is now structured so local development can run without paid API, databa
 - Payment/paywall entitlement checks: mocked safely via `/api/payment/status`; blocked until credentials/budget exist.
 - Usage limits: working without budget now with in-memory counters; requires database later for production-grade enforcement.
 - Strict auth: working without budget now when disabled locally; blocked until `JWT_SECRET` exists when `AUTH_STRICT_MODE=true`.
+- Debug endpoints: working without budget now in local/staging; disabled safely when `DEBUG_ENDPOINTS_ENABLED=false`.
+- Local test-user auth: working without budget now in local mode; blocked outside local unless explicitly enabled.
+
+## No-Budget Smoke Test
+
+With the backend already running locally, run:
+
+```bash
+cd server
+npm run test:no-budget
+```
+
+The smoke test verifies:
+
+- `/api/health` responds.
+- `/api/runtime/status` reports local no-budget mode.
+- Local test-user login works only when `LOCAL_AUTH_ENABLED=true`.
+- `/api/council` returns `provider: "mock"`.
+- `/api/meaning/analyze` returns `provider: "mock"`.
+- `/api/payment/status` stays mocked/disabled.
 
 ## Safe Connection Path
 

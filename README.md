@@ -49,6 +49,8 @@ AI_PROVIDER_ENABLED=false
 DATABASE_ENABLED=false
 PAYMENT_ENABLED=false
 AUTH_STRICT_MODE=false
+DEBUG_ENDPOINTS_ENABLED=true
+LOCAL_AUTH_ENABLED=true
 ```
 
 4. Start the backend server:
@@ -57,6 +59,11 @@ npm run dev
 ```
 
 The server will run on `http://localhost:3001` by default.
+
+To verify local no-budget mode while the backend is running:
+```bash
+npm run test:no-budget
+```
 
 ### Frontend Setup
 

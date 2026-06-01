@@ -44,7 +44,9 @@ console.log('[STARTUP] Feature flags:', {
   databaseEnabled: runtimeConfig.databaseEnabled,
   paymentEnabled: runtimeConfig.paymentEnabled,
   authStrictMode: runtimeConfig.authStrictMode,
-  usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+  usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+  debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+  localAuthEnabled: runtimeConfig.localAuthEnabled
 });
 for (const warning of getCredentialWarnings()) {
   console.warn(`[CONFIG] ${warning}`);
@@ -421,6 +423,14 @@ const enforceUsageLimit = (
   return true;
 };
 
+const requireDebugEndpoint = (req: Request, res: Response, next: NextFunction): void | Response => {
+  if (runtimeConfig.debugEndpointsEnabled) {
+    return next();
+  }
+
+  return res.status(404).json({ error: 'Route not found' });
+};
+
 // Fast health check endpoint (public) - must respond quickly for Render
 app.get('/api/health', (req: Request, res: Response) => {
   // Return immediately - no blocking operations
@@ -431,7 +441,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 // Detailed health check endpoint (public) - for diagnostics
-app.get('/api/health/detailed', (req: Request, res: Response) => {
+app.get('/api/health/detailed', requireDebugEndpoint, (req: Request, res: Response) => {
   const uptime = process.uptime();
   // Try to get git commit hash if available (non-blocking)
   let commitHash = 'unknown';
@@ -465,13 +475,15 @@ app.get('/api/health/detailed', (req: Request, res: Response) => {
       databaseEnabled: runtimeConfig.databaseEnabled,
       paymentEnabled: runtimeConfig.paymentEnabled,
       authStrictMode: runtimeConfig.authStrictMode,
-      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+      debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+      localAuthEnabled: runtimeConfig.localAuthEnabled
     },
     serviceReadiness
   });
 });
 
-app.get('/api/runtime/status', (req: Request, res: Response) => {
+app.get('/api/runtime/status', requireDebugEndpoint, (req: Request, res: Response) => {
   res.json({
     environment: runtimeConfig.appEnvironment,
     modes: {
@@ -484,7 +496,9 @@ app.get('/api/runtime/status', (req: Request, res: Response) => {
       databaseEnabled: runtimeConfig.databaseEnabled,
       paymentEnabled: runtimeConfig.paymentEnabled,
       authStrictMode: runtimeConfig.authStrictMode,
-      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+      debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+      localAuthEnabled: runtimeConfig.localAuthEnabled
     },
     services: {
       ai: serviceReadiness.ai ? 'requires paid service later: connected' : 'mocked safely',
@@ -502,7 +516,7 @@ app.get('/api/runtime/status', (req: Request, res: Response) => {
 });
 
 // Auth health endpoint (for auth-specific diagnostics)
-app.get('/api/auth/health', (req: Request, res: Response) => {
+app.get('/api/auth/health', requireDebugEndpoint, (req: Request, res: Response) => {
   let build = 'unknown';
   try {
     const { execSync } = require('node:child_process');
@@ -520,7 +534,7 @@ app.get('/api/auth/health', (req: Request, res: Response) => {
 });
 
 // Auth diagnose endpoint (public, safe - no secrets exposed)
-app.get('/auth/diagnose', (req: Request, res: Response) => {
+app.get('/auth/diagnose', requireDebugEndpoint, (req: Request, res: Response) => {
   try {
     const authHeader = req.headers?.authorization || '';
     
@@ -656,7 +670,7 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
 });
 
 // Auth debug endpoint (protected, for detailed diagnostics)
-app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/auth/debug', requireDebugEndpoint, authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const authHeader = req.headers?.authorization || '';
     
@@ -709,6 +723,13 @@ app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Respon
 // Login endpoint
 app.post('/api/login', async (req: Request, res: Response) => {
   try {
+    if (!runtimeConfig.localAuthEnabled) {
+      return res.status(503).json({
+        error: 'local_auth_disabled',
+        message: 'Local test-user login is disabled in this runtime mode. Configure a production auth provider before accepting real users.'
+      });
+    }
+
     const { username, secret } = req.body;
 
     if (!username || !secret) {

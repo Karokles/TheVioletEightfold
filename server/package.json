@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test:smoke": "node scripts/smoke-test.js",
+    "test:no-budget": "node scripts/no-budget-smoke-test.js",
     "test:smoke:prod": "node scripts/smoke-test.js https://thevioleteightfold-4224.onrender.com"
   },
   "dependencies": {
