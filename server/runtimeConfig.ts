@@ -44,7 +44,7 @@ export const runtimeConfig = {
   authStrictMode: readBoolean('AUTH_STRICT_MODE', defaultStrict),
   usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', true),
   debugEndpointsEnabled: readBoolean('DEBUG_ENDPOINTS_ENABLED', appEnvironment !== 'production'),
-  localAuthEnabled: readBoolean('LOCAL_AUTH_ENABLED', appEnvironment === 'local'),
+  localAuthEnabled: readBoolean('LOCAL_AUTH_ENABLED', appEnvironment === 'local' || appEnvironment === 'staging'),
   weeklyFreeInteractions: Number(process.env.WEEKLY_FREE_INTERACTIONS || 25),
   weeklyCouncilSessions: Number(process.env.WEEKLY_COUNCIL_SESSIONS || 5),
   weeklyMeaningAnalyses: Number(process.env.WEEKLY_MEANING_ANALYSES || 10),
