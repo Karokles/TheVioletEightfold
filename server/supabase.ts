@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 
 // Supabase configuration with feature flag
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -7,7 +8,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 
 // Initialize Supabase client if env vars are set
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+if (serviceReadiness.database && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
@@ -16,7 +17,7 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   });
   console.log('[SUPABASE] Client initialized');
 } else {
-  console.warn('[SUPABASE] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. Database features disabled.');
+  console.warn(`[SUPABASE] Database disabled. DATABASE_ENABLED=${runtimeConfig.databaseEnabled}, credentials=${runtimeConfig.hasDatabaseCredentials}.`);
 }
 
 export const getSupabaseClient = () => {

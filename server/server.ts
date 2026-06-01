@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 type NextFunction = (err?: any) => void;
 import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -21,6 +21,8 @@ import {
   createBreakthrough,
   getBreakthroughs
 } from './supabase.js';
+import { getCredentialWarnings, runtimeConfig, serviceReadiness } from './runtimeConfig.js';
+import { createMockCouncilReply, createMockMeaningResult } from './mockAi.js';
 
 const require = createRequire(import.meta.url);
 
@@ -35,9 +37,22 @@ console.log('[STARTUP] Environment:', process.env.NODE_ENV || 'development');
 dotenv.config();
 console.log('[STARTUP] Environment variables loaded');
 
-// JWT Configuration - fail fast if secret missing in production
+// Runtime mode and credential checks. Missing paid-service credentials must fail safely.
+console.log('[STARTUP] App environment:', runtimeConfig.appEnvironment);
+console.log('[STARTUP] Feature flags:', {
+  aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+  databaseEnabled: runtimeConfig.databaseEnabled,
+  paymentEnabled: runtimeConfig.paymentEnabled,
+  authStrictMode: runtimeConfig.authStrictMode,
+  usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+});
+for (const warning of getCredentialWarnings()) {
+  console.warn(`[CONFIG] ${warning}`);
+}
+
+// JWT Configuration - strict mode protects staging/production without crashing health checks.
 const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+if (!JWT_SECRET && runtimeConfig.authStrictMode) {
   console.error('='.repeat(80));
   console.error('ERROR: JWT_SECRET environment variable is required in production');
   console.error('='.repeat(80));
@@ -55,11 +70,10 @@ if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
   console.error('');
   console.error('Without JWT_SECRET, the server cannot authenticate users securely.');
   console.error('='.repeat(80));
-  process.exit(1);
+  console.error('[AUTH] Auth-protected endpoints will return a safe configuration error until JWT_SECRET is set.');
 }
-if (!JWT_SECRET) {
-  console.warn('WARNING: JWT_SECRET not set. Using default for development only.');
-  console.warn('Set JWT_SECRET in production to ensure secure token signing.');
+if (!JWT_SECRET && !runtimeConfig.authStrictMode) {
+  console.warn('[AUTH] JWT_SECRET not set. Using local development secret because AUTH_STRICT_MODE=false.');
 }
 
 const JWT_SECRET_FINAL = JWT_SECRET || 'dev-secret-change-in-production';
@@ -135,15 +149,15 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
-// Initialize OpenAI
-if (!process.env.OPENAI_API_KEY) {
-  console.error('ERROR: OPENAI_API_KEY environment variable is not set');
-  console.error('The server will start but API calls will fail.');
+// Initialize OpenAI only when both the feature flag and credentials are present.
+const openai = serviceReadiness.ai
+  ? new OpenAI({ apiKey: runtimeConfig.openAiApiKey })
+  : null;
+if (openai) {
+  console.log('[AI] OpenAI provider enabled');
+} else {
+  console.warn('[AI] OpenAI provider disabled. AI endpoints will return safe mock responses.');
 }
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '', // Will fail gracefully if not set
-});
 
 // Simple in-memory user store (for MVP - replace with database later)
 interface User {
@@ -267,7 +281,7 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   if (isJWT) {
     // JWT token - verify cryptographically
     try {
-      if (!JWT_SECRET) {
+      if (!JWT_SECRET && runtimeConfig.authStrictMode) {
         console.error('[AUTH] JWT_SECRET not configured');
         return res.status(500).json({ 
           error: 'unauthorized',
@@ -335,6 +349,78 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 };
 
+type UsageBucket = {
+  week: string;
+  interactions: number;
+  councilSessions: number;
+  meaningAnalyses: number;
+};
+
+const usageBuckets = new Map<string, UsageBucket>();
+
+const getWeekKey = () => {
+  const now = new Date();
+  const firstDayOfYear = Date.UTC(now.getUTCFullYear(), 0, 1);
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const week = Math.ceil(((today - firstDayOfYear) / 86400000 + 1) / 7);
+  return `${now.getUTCFullYear()}-W${week}`;
+};
+
+const getUsageBucket = (userId: string): UsageBucket => {
+  const week = getWeekKey();
+  const existing = usageBuckets.get(userId);
+  if (existing?.week === week) {
+    return existing;
+  }
+
+  const fresh = { week, interactions: 0, councilSessions: 0, meaningAnalyses: 0 };
+  usageBuckets.set(userId, fresh);
+  return fresh;
+};
+
+const enforceUsageLimit = (
+  req: AuthenticatedRequest,
+  res: Response,
+  type: 'interaction' | 'council' | 'meaning'
+): boolean => {
+  if (!runtimeConfig.usageLimitsEnabled || !req.user) {
+    return true;
+  }
+
+  const usage = getUsageBucket(req.user.id);
+  const current = type === 'meaning'
+    ? usage.meaningAnalyses
+    : type === 'council'
+      ? usage.councilSessions
+      : usage.interactions;
+  const limit = type === 'meaning'
+    ? runtimeConfig.weeklyMeaningAnalyses
+    : type === 'council'
+      ? runtimeConfig.weeklyCouncilSessions
+      : runtimeConfig.weeklyFreeInteractions;
+
+  if (current >= limit) {
+    res.status(429).json({
+      error: 'usage_limit_reached',
+      message: 'Weekly free usage limit reached. Real entitlement checks can be connected when payments are enabled.',
+      limit,
+      usage: current,
+      resetWindow: usage.week
+    });
+    return false;
+  }
+
+  if (type === 'meaning') {
+    usage.meaningAnalyses += 1;
+  } else if (type === 'council') {
+    usage.councilSessions += 1;
+  } else {
+    usage.interactions += 1;
+  }
+
+  return true;
+};
+
 // Fast health check endpoint (public) - must respond quickly for Render
 app.get('/api/health', (req: Request, res: Response) => {
   // Return immediately - no blocking operations
@@ -358,18 +444,60 @@ app.get('/api/health/detailed', (req: Request, res: Response) => {
   
   // Check Supabase connectivity (non-blocking, non-sensitive)
   let supabaseStatus = 'not_configured';
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (serviceReadiness.database) {
     supabaseStatus = 'configured';
+  } else if (runtimeConfig.databaseEnabled) {
+    supabaseStatus = 'missing_credentials';
+  } else {
+    supabaseStatus = 'disabled';
   }
   
   res.json({ 
     status: 'ok',
     uptime: Math.floor(uptime),
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
+    environment: runtimeConfig.appEnvironment,
     commitHash: commitHash,
     jwtSecretSet: !!process.env.JWT_SECRET,
-    supabaseStatus: supabaseStatus
+    supabaseStatus: supabaseStatus,
+    featureFlags: {
+      aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+      databaseEnabled: runtimeConfig.databaseEnabled,
+      paymentEnabled: runtimeConfig.paymentEnabled,
+      authStrictMode: runtimeConfig.authStrictMode,
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+    },
+    serviceReadiness
+  });
+});
+
+app.get('/api/runtime/status', (req: Request, res: Response) => {
+  res.json({
+    environment: runtimeConfig.appEnvironment,
+    modes: {
+      local: runtimeConfig.isLocal,
+      staging: runtimeConfig.isStaging,
+      production: runtimeConfig.isProduction
+    },
+    featureFlags: {
+      aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+      databaseEnabled: runtimeConfig.databaseEnabled,
+      paymentEnabled: runtimeConfig.paymentEnabled,
+      authStrictMode: runtimeConfig.authStrictMode,
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled
+    },
+    services: {
+      ai: serviceReadiness.ai ? 'requires paid service later: connected' : 'mocked safely',
+      database: serviceReadiness.database ? 'requires paid service later: connected' : 'working without budget now',
+      payment: serviceReadiness.payment ? 'requires paid service later: connected' : 'blocked until credentials/budget exist',
+      auth: serviceReadiness.auth ? 'working without budget now' : 'blocked until credentials/budget exist'
+    },
+    credentialsPresent: {
+      ai: !!runtimeConfig.openAiApiKey,
+      database: runtimeConfig.hasDatabaseCredentials,
+      payment: runtimeConfig.hasPaymentCredentials,
+      jwtSecret: !!runtimeConfig.jwtSecret
+    }
   });
 });
 
@@ -454,7 +582,7 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
       if (tokenLooksLikeJwt) {
         // Try JWT verification
         try {
-          if (!JWT_SECRET) {
+          if (!JWT_SECRET && runtimeConfig.authStrictMode) {
             verifyResult = 'missing_secret';
           } else {
             const decoded = jwt.verify(token, JWT_SECRET_FINAL);
@@ -600,7 +728,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     }
 
     // Generate JWT token (stateless, restart-proof)
-    if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+    if (!JWT_SECRET && runtimeConfig.authStrictMode) {
       console.error('[AUTH] JWT_SECRET required in production');
       return res.status(500).json({ error: 'Server configuration error' });
     }
@@ -663,6 +791,12 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
+    if (!enforceUsageLimit(req, res, 'interaction')) {
+      return;
+    }
+    if (mode === 'council' && !enforceUsageLimit(req, res, 'council')) {
+      return;
+    }
     
     // Log request (no secrets) - CRITICAL for debugging mode detection
     console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
@@ -678,12 +812,17 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       content: String(msg.content),
     }));
 
-    // Validate OpenAI API key before making request
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('[COUNCIL] OpenAI API key not configured');
-      return res.status(500).json({ 
-        error: 'OpenAI API key not configured',
-        message: 'The server is missing the OpenAI API key. Please contact the administrator.'
+    if (!openai) {
+      const reply = createMockCouncilReply({
+        mode,
+        activeArchetype: userProfile?.activeArchetype,
+        language: userProfile?.language,
+        topic: messages[messages.length - 1]?.content
+      });
+      return res.json({
+        reply,
+        provider: 'mock',
+        serviceStatus: runtimeConfig.aiProviderEnabled ? 'missing_credentials' : 'disabled'
       });
     }
 
@@ -875,6 +1014,23 @@ app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: 
   }
 });
 
+app.get('/api/payment/status', authenticate, (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  res.json({
+    userId: req.user.id,
+    provider: 'mock',
+    status: serviceReadiness.payment ? 'ready_to_connect' : 'disabled',
+    entitlement: 'free',
+    featureStatus: runtimeConfig.paymentEnabled
+      ? 'blocked until credentials/budget exist'
+      : 'mocked safely',
+    message: 'Payment checks are server-side and mocked until a real provider and webhook secret are configured.'
+  });
+});
+
 // Meaning Agent endpoint - analyzes session transcript and returns canonical JSON
 app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -902,13 +1058,16 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages array is required and cannot be empty' });
     }
+
+    if (!enforceUsageLimit(req, res, 'meaning')) {
+      return;
+    }
     
-    // Validate OpenAI API key
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('[MEANING] OpenAI API key not configured');
-      return res.status(500).json({ 
-        error: 'OpenAI API key not configured',
-        message: 'The server is missing the OpenAI API key.'
+    if (!openai) {
+      return res.json({
+        ...createMockMeaningResult(),
+        provider: 'mock',
+        serviceStatus: runtimeConfig.aiProviderEnabled ? 'missing_credentials' : 'disabled'
       });
     }
     

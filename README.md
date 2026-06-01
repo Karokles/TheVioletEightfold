@@ -17,10 +17,14 @@ An AI-powered personal governance application that simulates an inner council of
 - **Authentication**: Simple token-based auth (MVP)
 - **Storage**: localStorage (per-user scoped) - ready for backend migration
 
+## No-Budget Production-Prep Mode
+
+The app can run locally without paid API, database, storage, or payment credentials. Backend feature flags keep AI, database, and payment providers disabled by default, while returning safe mock responses through server-side adapters. See [NO_BUDGET_PRODUCTION_PREP.md](./NO_BUDGET_PRODUCTION_PREP.md).
+
 ## Prerequisites
 
 - Node.js 18+ and npm
-- OpenAI API key
+- No API key is required for local no-budget development
 
 ## Setup Instructions
 
@@ -38,9 +42,13 @@ npm install
 
 3. Create a `.env` file in the `server/` directory:
 ```env
-OPENAI_API_KEY=your-openai-api-key-here
 PORT=3001
 NODE_ENV=development
+APP_ENV=local
+AI_PROVIDER_ENABLED=false
+DATABASE_ENABLED=false
+PAYMENT_ENABLED=false
+AUTH_STRICT_MODE=false
 ```
 
 4. Start the backend server:
