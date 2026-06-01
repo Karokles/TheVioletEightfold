@@ -194,6 +194,12 @@ export default function App() {
     frontendEnvironment === 'production' ||
     currentHostname === 'the-violet-eightfold42.vercel.app' ||
     apiBaseUrl.toLowerCase().includes('thevioleteightfold-4224');
+  const showLocalMarker =
+    !showProductionMarker &&
+    (frontendEnvironment === 'local' ||
+      currentHostname === 'localhost' ||
+      currentHostname === '127.0.0.1' ||
+      apiBaseUrl.toLowerCase().includes('localhost'));
 
   // Navigation Items Config (removed treasury, map, calendar)
   const navItems = [
@@ -354,6 +360,12 @@ export default function App() {
       {showProductionMarker && (
         <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200 shadow-[0_0_18px_rgba(52,211,153,0.12)] backdrop-blur-md pointer-events-none">
           Production
+        </div>
+      )}
+
+      {showLocalMarker && (
+        <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-sky-300/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-sky-200 shadow-[0_0_18px_rgba(56,189,248,0.12)] backdrop-blur-md pointer-events-none">
+          Local
         </div>
       )}
 
