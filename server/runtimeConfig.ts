@@ -27,6 +27,11 @@ const readEnvironment = (): AppEnvironment => {
     return explicit;
   }
 
+  const renderBranch = process.env.RENDER_GIT_BRANCH?.trim().toLowerCase();
+  if (renderBranch === 'staging') {
+    return 'staging';
+  }
+
   return process.env.NODE_ENV === 'production' ? 'production' : 'local';
 };
 
