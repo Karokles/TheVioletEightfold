@@ -187,6 +187,14 @@ export default function App() {
 
   const ui = getUIText(language);
   const activeArchetypeData = getArchetypes(language)[activeArchetype];
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
+  const frontendEnvironment = (import.meta.env.VITE_APP_ENV || import.meta.env.VITE_ENVIRONMENT || '').toLowerCase();
+  const currentHostname = typeof window === 'undefined' ? '' : window.location.hostname.toLowerCase();
+  const showStagingMarker =
+    frontendEnvironment === 'staging' ||
+    apiBaseUrl.toLowerCase().includes('stage') ||
+    currentHostname.includes('staging') ||
+    currentHostname.includes('git-staging');
 
   // Navigation Items Config (removed treasury, map, calendar)
   const navItems = [
@@ -343,6 +351,12 @@ export default function App() {
              );
          })}
       </div>
+
+      {showStagingMarker && (
+        <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-amber-300/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(251,191,36,0.12)] backdrop-blur-md pointer-events-none">
+          Staging
+        </div>
+      )}
 
       {/* --- MOBILE ARCHETYPE OVERLAY --- */}
       {showMobileArchetypes && (
