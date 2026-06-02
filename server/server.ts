@@ -841,6 +841,43 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       content: String(msg.content),
     }));
 
+    const persistCouncilExchange = async (reply: string) => {
+      // Best-effort persistence: database issues must not break no-budget/mock responses.
+      if (!isSupabaseConfigured()) {
+        return;
+      }
+
+      try {
+        const sessionId = await createCouncilSession({
+          user_id: userId,
+          mode: mode,
+          topic: mode === 'council' ? messages[0]?.content : undefined,
+          messages: {
+            messages: messages,
+            reply: reply,
+            userProfile: userProfile
+          }
+        });
+
+        await createLoreEntry({
+          user_id: userId,
+          type: mode === 'direct' ? 'direct' : 'council',
+          content: {
+            messages: messages,
+            reply: reply,
+            archetype: userProfile?.activeArchetype,
+            language: userProfile?.language
+          }
+        });
+
+        if (sessionId) {
+          console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
+        }
+      } catch (error: any) {
+        console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);
+      }
+    };
+
     if (!openai) {
       const reply = createMockCouncilReply({
         mode,
@@ -848,6 +885,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         language: userProfile?.language,
         topic: messages[messages.length - 1]?.content
       });
+      await persistCouncilExchange(reply);
       return res.json({
         reply,
         provider: 'mock',
@@ -944,42 +982,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       }
     }
 
-    // Persist to Supabase (if configured) - best-effort, don't break response
-    if (isSupabaseConfigured()) {
-      try {
-        // Create council session record
-        const sessionId = await createCouncilSession({
-          user_id: userId,
-          mode: mode,
-          topic: mode === 'council' ? messages[0]?.content : undefined,
-          messages: {
-            messages: messages,
-            reply: reply,
-            userProfile: userProfile
-          }
-        });
-        
-        // Create lore entry
-        await createLoreEntry({
-          user_id: userId,
-          type: mode === 'direct' ? 'direct' : 'council',
-          content: {
-            messages: messages,
-            reply: reply,
-            archetype: userProfile?.activeArchetype,
-            language: userProfile?.language
-          }
-        });
-        
-        if (sessionId) {
-          console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
-        }
-      } catch (error: any) {
-        // Log DB write failure as warning (no secrets)
-        console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);
-        // Don't throw - continue with response
-      }
-    }
+    await persistCouncilExchange(reply);
 
     res.json({ reply });
   } catch (error: any) {
