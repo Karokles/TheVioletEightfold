@@ -121,6 +121,7 @@ export default function App() {
 
   const handleAuthError = () => {
     // Clear auth state and force re-login
+    clearCurrentUser();
     setIsAuthenticated(false);
     setHasEntered(false);
   };
@@ -160,6 +161,9 @@ export default function App() {
     
     // One-time boot verification: call /api/me to verify token
     const verifyToken = async () => {
+      const maxAttempts = 3;
+      const retryDelayMs = 700;
+
       try {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
         
@@ -169,17 +173,29 @@ export default function App() {
           token = token.substring(7).trim();
         }
         
-        const response = await fetch(`${API_BASE_URL}/api/me`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-        
-        if (!response.ok && response.status === 401) {
-          // Token invalid - clear auth and show login
-          console.warn('[AUTH] Boot verification failed: token invalid');
-          handleAuthError();
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const response = await fetch(`${API_BASE_URL}/api/me`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (response.ok) {
+            return;
+          }
+
+          if (response.status !== 401 || attempt === maxAttempts) {
+            if (response.status === 401) {
+              console.warn('[AUTH] Boot verification failed: token invalid after retries');
+              handleAuthError();
+            } else {
+              console.warn(`[AUTH] Boot verification returned HTTP ${response.status}; keeping session for retry on next action.`);
+            }
+            return;
+          }
+
+          await new Promise(resolve => window.setTimeout(resolve, retryDelayMs));
         }
       } catch (error) {
         // Network error - don't clear auth, just log

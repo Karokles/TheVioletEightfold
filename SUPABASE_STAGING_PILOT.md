@@ -25,7 +25,7 @@ Required Render staging variables:
 
 - `APP_ENV=staging`
 - `DATABASE_ENABLED=true`
-- `SUPABASE_AUTH_ENABLED=true`
+- `SUPABASE_AUTH_ENABLED=true` or unset in staging, where it defaults to enabled when Supabase credentials exist
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `AI_PROVIDER_ENABLED=false`

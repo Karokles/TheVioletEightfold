@@ -46,7 +46,7 @@ export const runtimeConfig = {
   aiProviderEnabled: readBoolean('AI_PROVIDER_ENABLED', false),
   databaseEnabled: readBoolean('DATABASE_ENABLED', false),
   paymentEnabled: readBoolean('PAYMENT_ENABLED', false),
-  supabaseAuthEnabled: readBoolean('SUPABASE_AUTH_ENABLED', false),
+  supabaseAuthEnabled: readBoolean('SUPABASE_AUTH_ENABLED', appEnvironment === 'staging'),
   authStrictMode: readBoolean('AUTH_STRICT_MODE', defaultStrict),
   usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', true),
   debugEndpointsEnabled: readBoolean('DEBUG_ENDPOINTS_ENABLED', appEnvironment !== 'production'),
