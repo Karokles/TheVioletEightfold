@@ -121,16 +121,11 @@ console.log('[STARTUP] CORS allowed origins:', allowedOrigins.join(', '));
 // CORS options - credentials: false (no cookies, only JWT in Authorization header)
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.) in development only
-    if (!origin && process.env.NODE_ENV !== 'production') {
+    // Requests without Origin are not browser CORS requests (Render health checks, curl, server clients).
+    if (!origin) {
       return callback(null, true);
     }
-    
-    // In production, require origin
-    if (!origin) {
-      return callback(new Error('CORS: Origin header is required in production'));
-    }
-    
+
     // Check if origin is in allowed list
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
