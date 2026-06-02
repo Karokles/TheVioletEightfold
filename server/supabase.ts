@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 
 // Supabase configuration with feature flag
@@ -29,6 +30,25 @@ export const getSupabaseClient = () => {
 
 export const isSupabaseConfigured = () => {
   return !!supabaseClient;
+};
+
+export const getSupabaseAuthUser = async (accessToken: string): Promise<SupabaseAuthUser | null> => {
+  if (!isSupabaseConfigured() || !serviceReadiness.supabaseAuth) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient().auth.getUser(accessToken);
+    if (error) {
+      console.warn('[SUPABASE_AUTH] Token verification failed:', error.message);
+      return null;
+    }
+
+    return data.user || null;
+  } catch (error: any) {
+    console.warn('[SUPABASE_AUTH] Error verifying token:', error.message);
+    return null;
+  }
 };
 
 // User management

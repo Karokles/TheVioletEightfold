@@ -15,6 +15,7 @@ import {
   createCouncilMessages,
   CouncilMessageRecord,
   createLoreEntry, 
+  getSupabaseAuthUser,
   isSupabaseConfigured,
   createQuestLogEntry,
   getQuestLogEntries,
@@ -44,8 +45,9 @@ console.log('[STARTUP] App environment:', runtimeConfig.appEnvironment);
 console.log('[STARTUP] Feature flags:', {
   aiProviderEnabled: runtimeConfig.aiProviderEnabled,
   databaseEnabled: runtimeConfig.databaseEnabled,
-  paymentEnabled: runtimeConfig.paymentEnabled,
-  authStrictMode: runtimeConfig.authStrictMode,
+    paymentEnabled: runtimeConfig.paymentEnabled,
+    supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled,
+    authStrictMode: runtimeConfig.authStrictMode,
   usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
   debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
   localAuthEnabled: runtimeConfig.localAuthEnabled
@@ -241,7 +243,27 @@ interface AuthenticatedRequest extends Request {
   body: Request['body'];
 }
 
-const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
+const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Promise<boolean> => {
+  const authUser = await getSupabaseAuthUser(token);
+  if (!authUser) {
+    return false;
+  }
+
+  const username = authUser.email || authUser.user_metadata?.display_name || authUser.id;
+  const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
+
+  await ensureUserExists(authUser.id, username, secretHash);
+
+  req.user = {
+    id: authUser.id,
+    username,
+    secretHash,
+  };
+
+  return true;
+};
+
+const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void | Response> => {
   // Skip authentication for OPTIONS requests (preflight)
   if (req.method === 'OPTIONS') {
     return next();
@@ -317,6 +339,13 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       req.user = user;
       return next();
     } catch (error: any) {
+      if (serviceReadiness.supabaseAuth) {
+        const attached = await attachSupabaseUser(req, token);
+        if (attached) {
+          return next();
+        }
+      }
+
       // Log auth failure with safe details (no secrets, no full token)
       const tokenHash = createHash('sha256').update(token).digest('hex').substring(0, 12);
       const tokenLength = token.length;
@@ -482,7 +511,8 @@ app.get('/api/health/detailed', requireDebugEndpoint, (req: Request, res: Respon
       authStrictMode: runtimeConfig.authStrictMode,
       usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
       debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
-      localAuthEnabled: runtimeConfig.localAuthEnabled
+      localAuthEnabled: runtimeConfig.localAuthEnabled,
+      supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled
     },
     serviceReadiness
   });
@@ -503,17 +533,20 @@ app.get('/api/runtime/status', requireDebugEndpoint, (req: Request, res: Respons
       authStrictMode: runtimeConfig.authStrictMode,
       usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
       debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
-      localAuthEnabled: runtimeConfig.localAuthEnabled
+      localAuthEnabled: runtimeConfig.localAuthEnabled,
+      supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled
     },
     services: {
       ai: serviceReadiness.ai ? 'requires paid service later: connected' : 'mocked safely',
       database: serviceReadiness.database ? 'requires paid service later: connected' : 'working without budget now',
+      supabaseAuth: serviceReadiness.supabaseAuth ? 'working without budget now: staging auth connected' : 'mocked safely',
       payment: serviceReadiness.payment ? 'requires paid service later: connected' : 'blocked until credentials/budget exist',
       auth: serviceReadiness.auth ? 'working without budget now' : 'blocked until credentials/budget exist'
     },
     credentialsPresent: {
       ai: !!runtimeConfig.openAiApiKey,
       database: runtimeConfig.hasDatabaseCredentials,
+      supabaseAuth: serviceReadiness.supabaseAuth,
       payment: runtimeConfig.hasPaymentCredentials,
       jwtSecret: !!runtimeConfig.jwtSecret
     }
@@ -663,6 +696,7 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
     res.json({
       userId: req.user.id,
       username: req.user.username,
+      authProvider: users.some(user => user.id === req.user?.id) ? 'local' : 'supabase',
     });
   } catch (error: any) {
     console.error('GET /api/me error:', error);

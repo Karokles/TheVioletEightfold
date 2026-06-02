@@ -10,14 +10,14 @@ This document records the current database pilot for The Violet Eightfold. The g
 | Staging | Enabled only through Render environment variables | Test real Supabase writes with mock AI and no payment provider. |
 | Production | Disabled until explicitly prepared | Keep launch surface stable while the staging schema is still being validated. |
 
-The frontend does not talk directly to Supabase. All database writes go through the backend so service role credentials stay server-side.
+The frontend may talk directly to Supabase Auth using the publishable key. All app data writes still go through the backend so service role credentials stay server-side.
 
 ## Current Staging Project
 
 - Project: `the-violet-eightfold-staging`
 - URL: `https://xoniejusrizilmgptugs.supabase.co`
 - Provider usage: Supabase Free staging pilot
-- Auth provider: not enabled yet
+- Auth provider: Supabase Auth prepared for staging email/password testing
 - Storage: not enabled yet
 - Edge Functions: not enabled yet
 
@@ -25,6 +25,7 @@ Required Render staging variables:
 
 - `APP_ENV=staging`
 - `DATABASE_ENABLED=true`
+- `SUPABASE_AUTH_ENABLED=true`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `AI_PROVIDER_ENABLED=false`
@@ -32,6 +33,13 @@ Required Render staging variables:
 - `LOCAL_AUTH_ENABLED=true`
 - `AUTH_STRICT_MODE=false`
 - `USAGE_LIMITS_ENABLED=true`
+
+Required Vercel staging variables:
+
+- `VITE_API_BASE_URL`
+- `VITE_AUTH_MODE=supabase`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 ## Tables
 
@@ -51,7 +59,9 @@ Required Render staging variables:
 
 ## What Writes Today
 
-Login writes or updates one row in `users`.
+Local test-user login writes or updates one row in `users`.
+
+Supabase Auth sign-in creates or updates the matching `users` row through the backend when a protected API route is called.
 
 `POST /api/council` writes:
 
@@ -63,7 +73,7 @@ These writes are best effort. If Supabase is disabled or unavailable, the endpoi
 
 ## Safety Rules
 
-- No frontend route may require Supabase credentials.
+- Frontend Supabase Auth may use only the publishable key.
 - `SUPABASE_SERVICE_ROLE_KEY` belongs only in backend provider settings such as Render, never in Vercel or frontend `.env` files.
 - AI remains mocked unless `AI_PROVIDER_ENABLED=true` and a real API key exists.
 - Payment remains disabled unless `PAYMENT_ENABLED=true` and a real payment adapter exists.
@@ -73,7 +83,20 @@ These writes are best effort. If Supabase is disabled or unavailable, the endpoi
 
 1. Deploy the `staging` branch to Render and Vercel.
 2. Open the staging frontend.
-3. Log in with the staging test user.
+3. Create a staging account with email and password.
+4. Confirm the email address.
+5. Sign in with the confirmed account.
+6. Send one council or direct archetype message.
+7. In Supabase Table Editor, check:
+   - `auth.users` contains the confirmed user.
+   - `users` contains the Supabase user id.
+   - `council_sessions` contains a new session.
+   - `council_messages` contains the individual message rows.
+   - `lore_entries` contains the exchange summary.
+
+Fallback test:
+
+3. Log in with the staging test user while `LOCAL_AUTH_ENABLED=true`.
 4. Send one council or direct archetype message.
 5. In Supabase Table Editor, check:
    - `users` contains the user id.

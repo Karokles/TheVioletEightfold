@@ -46,6 +46,7 @@ export const runtimeConfig = {
   aiProviderEnabled: readBoolean('AI_PROVIDER_ENABLED', false),
   databaseEnabled: readBoolean('DATABASE_ENABLED', false),
   paymentEnabled: readBoolean('PAYMENT_ENABLED', false),
+  supabaseAuthEnabled: readBoolean('SUPABASE_AUTH_ENABLED', false),
   authStrictMode: readBoolean('AUTH_STRICT_MODE', defaultStrict),
   usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', true),
   debugEndpointsEnabled: readBoolean('DEBUG_ENDPOINTS_ENABLED', appEnvironment !== 'production'),
@@ -62,6 +63,7 @@ export const runtimeConfig = {
 export const serviceReadiness = {
   ai: runtimeConfig.aiProviderEnabled && !!runtimeConfig.openAiApiKey,
   database: runtimeConfig.databaseEnabled && runtimeConfig.hasDatabaseCredentials,
+  supabaseAuth: runtimeConfig.supabaseAuthEnabled && runtimeConfig.hasDatabaseCredentials,
   payment: runtimeConfig.paymentEnabled && runtimeConfig.hasPaymentCredentials,
   auth: !runtimeConfig.authStrictMode || !!runtimeConfig.jwtSecret,
 };
@@ -77,6 +79,9 @@ export const getCredentialWarnings = (): string[] => {
   }
   if (runtimeConfig.paymentEnabled && !runtimeConfig.hasPaymentCredentials) {
     warnings.push('PAYMENT_ENABLED=true but PAYMENT_PROVIDER_SECRET is missing. Payment routes are disabled.');
+  }
+  if (runtimeConfig.supabaseAuthEnabled && !runtimeConfig.hasDatabaseCredentials) {
+    warnings.push('SUPABASE_AUTH_ENABLED=true but Supabase credentials are missing. Supabase Auth token verification is disabled.');
   }
   if (runtimeConfig.authStrictMode && !runtimeConfig.jwtSecret) {
     warnings.push('AUTH_STRICT_MODE=true but JWT_SECRET is missing. Login/protected auth will fail safely.');
