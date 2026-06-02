@@ -9,8 +9,9 @@ import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
 import { Language, UserStats, ScribeAnalysis } from './types';
-import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler } from './services/userService';
-import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp } from 'lucide-react';
+import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser } from './services/userService';
+import { signOutSupabase } from './services/supabaseAuth';
+import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut } from 'lucide-react';
 
 enum AppMode {
   DIRECT_CHAT = 'DIRECT_CHAT',
@@ -124,6 +125,24 @@ export default function App() {
     setHasEntered(false);
   };
 
+  const handleLogout = async () => {
+    await signOutSupabase();
+    clearCurrentUser();
+    setIsAuthenticated(false);
+    setHasEntered(false);
+    setLore('');
+    setStats({
+      title: '',
+      level: '',
+      state: '',
+      currentQuest: '',
+      attributes: [],
+      milestones: [],
+      inventory: [],
+      calendarEvents: [],
+    });
+  };
+
   // Register auth error handler on mount
   useEffect(() => {
     setAuthErrorHandler(handleAuthError);
@@ -182,7 +201,19 @@ export default function App() {
 
   // Show landing screen if not entered
   if (!hasEntered) {
-    return <LandingScreen onEnter={() => setHasEntered(true)} />;
+    return (
+      <div className="relative min-h-screen bg-violet-950">
+        <button
+          onClick={handleLogout}
+          className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-lg border border-purple-400/25 bg-[#0f0716]/80 px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-purple-200 shadow-lg shadow-black/20 backdrop-blur-md transition-all hover:border-purple-300/50 hover:bg-purple-900/40"
+          title="Logout"
+        >
+          <LogOut size={15} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
+        <LandingScreen onEnter={() => setHasEntered(true)} />
+      </div>
+    );
   }
 
   const ui = getUIText(language);
@@ -259,6 +290,15 @@ export default function App() {
                 <span className={language === 'EN' ? 'text-white' : 'text-purple-500/70'}>EN</span>
                 <span className="text-purple-700/50">|</span>
                 <span className={language === 'DE' ? 'text-white' : 'text-purple-500/70'}>DE</span>
+            </button>
+
+            <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-950/40 border border-purple-500/20 text-xs font-bold text-purple-200 hover:bg-red-950/40 hover:border-red-400/40 hover:text-red-100 transition-all duration-300"
+                title="Logout"
+            >
+                <LogOut size={14} className="text-purple-400" />
+                <span className="hidden sm:inline uppercase tracking-[0.12em]">Logout</span>
             </button>
 
             {/* Desktop Navigation (Hidden on Mobile) */}
