@@ -12,6 +12,8 @@ import jwt from 'jsonwebtoken';
 import { 
   ensureUserExists, 
   createCouncilSession, 
+  createCouncilMessages,
+  CouncilMessageRecord,
   createLoreEntry, 
   isSupabaseConfigured,
   createQuestLogEntry,
@@ -848,6 +850,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       }
 
       try {
+        const responseProvider = openai ? 'real' : 'mock';
         const sessionId = await createCouncilSession({
           user_id: userId,
           mode: mode,
@@ -858,6 +861,36 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
             userProfile: userProfile
           }
         });
+
+        if (sessionId) {
+          const persistedMessages: CouncilMessageRecord[] = messages
+            .filter((msg: any) => msg?.content)
+            .map((msg: any, index: number) => ({
+              session_id: sessionId,
+              user_id: userId,
+              role: msg.role === 'user'
+                ? 'user'
+                : msg.role === 'system'
+                  ? 'system'
+                  : 'assistant',
+              archetype_id: msg.archetypeId || null,
+              content: String(msg.content),
+              sequence_index: index,
+              provider: responseProvider
+            }));
+
+          persistedMessages.push({
+            session_id: sessionId,
+            user_id: userId,
+            role: 'assistant',
+            archetype_id: mode === 'direct' ? userProfile?.activeArchetype || null : null,
+            content: reply,
+            sequence_index: persistedMessages.length,
+            provider: responseProvider
+          });
+
+          await createCouncilMessages(persistedMessages);
+        }
 
         await createLoreEntry({
           user_id: userId,
@@ -871,7 +904,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         });
 
         if (sessionId) {
-          console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
+          console.log(`[SUPABASE] Created session ${sessionId} with message rows for user ${userId}`);
         }
       } catch (error: any) {
         console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);

@@ -102,6 +102,38 @@ export const createCouncilSession = async (session: CouncilSession): Promise<str
   }
 };
 
+// Council messages
+export interface CouncilMessageRecord {
+  id?: string;
+  session_id: string;
+  user_id: string;
+  role: 'user' | 'assistant' | 'system' | 'model';
+  archetype_id?: string | null;
+  content: string;
+  sequence_index: number;
+  token_count?: number | null;
+  provider?: 'mock' | 'real' | 'disabled' | 'planned';
+  created_at?: string;
+}
+
+export const createCouncilMessages = async (messages: CouncilMessageRecord[]): Promise<void> => {
+  if (!isSupabaseConfigured() || messages.length === 0) {
+    return;
+  }
+
+  try {
+    const { error } = await getSupabaseClient()
+      .from('council_messages')
+      .insert(messages as any);
+
+    if (error) {
+      console.error('[SUPABASE] Error creating council messages:', error.message);
+    }
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in createCouncilMessages:', error.message);
+  }
+};
+
 // Lore entries
 export interface LoreEntry {
   id?: string;
