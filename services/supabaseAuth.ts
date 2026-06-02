@@ -30,6 +30,21 @@ export type SupabaseAuthResult = {
   displayName?: string;
 };
 
+const getDisplayNameFromSession = (session: Session): string | undefined => {
+  const metadata = session.user.user_metadata || {};
+  const candidate =
+    metadata.display_name ||
+    metadata.name ||
+    metadata.full_name ||
+    metadata.preferred_username;
+
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate.trim();
+  }
+
+  return session.user.email?.split('@')[0] || undefined;
+};
+
 const toAuthResult = (session: Session | null): SupabaseAuthResult => {
   if (!session?.access_token || !session.user?.id) {
     throw new Error('No active Supabase session returned.');
@@ -39,7 +54,7 @@ const toAuthResult = (session: Session | null): SupabaseAuthResult => {
     userId: session.user.id,
     token: session.access_token,
     email: session.user.email || undefined,
-    displayName: session.user.user_metadata?.display_name || session.user.email || undefined,
+    displayName: getDisplayNameFromSession(session),
   };
 };
 

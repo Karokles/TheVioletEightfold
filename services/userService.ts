@@ -26,6 +26,10 @@ export const getCurrentUser = (): User | null => {
 export const setCurrentUser = (userId: string, token: string, displayName?: string) => {
   localStorage.setItem(USER_ID_KEY, userId);
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+  setCurrentUserDisplayName(displayName);
+};
+
+export const setCurrentUserDisplayName = (displayName?: string) => {
   if (displayName?.trim()) {
     localStorage.setItem(USER_DISPLAY_NAME_KEY, displayName.trim());
   } else {

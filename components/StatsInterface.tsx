@@ -4,7 +4,8 @@ import { UserStats, Language, QuestLogEntry, SoulTimelineEvent, Breakthrough } f
 import { ICON_MAP } from '../constants';
 import { Shield, Zap, Brain, Activity, Target, Lock, Unlock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, RefreshCw } from 'lucide-react';
 import { getMeaningState } from '../services/aiService';
-import { getCurrentUser } from '../services/userService';
+import { getSupabaseSession } from '../services/supabaseAuth';
+import { getCurrentUser, setCurrentUserDisplayName } from '../services/userService';
 
 interface StatsInterfaceProps {
     language: Language;
@@ -14,7 +15,11 @@ interface StatsInterfaceProps {
 
 export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats, onRefresh }) => {
   const currentUser = getCurrentUser();
-  const displayName = currentUser?.displayName || currentUser?.id || (language === 'DE' ? 'Unbekannt' : 'Unknown');
+  const isUuid = (value?: string) => Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
+  const initialDisplayName = currentUser?.displayName && !isUuid(currentUser.displayName)
+    ? currentUser.displayName
+    : '';
+  const [displayName, setDisplayName] = useState(initialDisplayName);
   const [questLogEntries, setQuestLogEntries] = useState<QuestLogEntry[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<SoulTimelineEvent[]>([]);
   const [breakthroughs, setBreakthroughs] = useState<Breakthrough[]>([]);
@@ -67,6 +72,32 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
     loadMeaningData();
   }, []); // Load on mount - key prop from parent will force remount on integrate
 
+  useEffect(() => {
+    if (displayName) {
+      return;
+    }
+
+    let isMounted = true;
+    const loadDisplayName = async () => {
+      try {
+        const session = await getSupabaseSession();
+        if (!isMounted || !session?.displayName) {
+          return;
+        }
+
+        setDisplayName(session.displayName);
+        setCurrentUserDisplayName(session.displayName);
+      } catch (error) {
+        console.warn('Failed to load Supabase display name:', error);
+      }
+    };
+
+    loadDisplayName();
+    return () => {
+      isMounted = false;
+    };
+  }, [displayName]);
+
   // Refresh when onRefresh is called
   useEffect(() => {
     if (onRefresh) {
@@ -112,7 +143,7 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                     <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.08)]">
                         <Sparkles size={12} className="text-amber-300" />
                         <span>{language === 'DE' ? 'Blueprint von' : 'Blueprint of'}</span>
-                        <span className="max-w-[180px] truncate text-white">{displayName}</span>
+                        <span className="max-w-[180px] truncate text-white">{displayName || (language === 'DE' ? 'Unbekannt' : 'Unknown')}</span>
                     </div>
                     <div className="flex flex-col md:flex-row md:items-center gap-2">
                         <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-white uppercase tracking-widest">
