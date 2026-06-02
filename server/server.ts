@@ -89,7 +89,15 @@ console.log('[STARTUP] Server will listen on port:', PORT);
 // Middleware
 // CORS configuration - restrict to allowed origins in production
 const parseAllowedOrigins = (): string[] => {
-  const defaultOrigins = ['http://localhost:3000', 'http://localhost:5173'];
+  const defaultOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://the-violet-eightfold.vercel.app',
+    'https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app',
+    'https://the-violet-eightfold42.vercel.app',
+    'https://the-violet-eightfold42-git-main-the-violet-eightfolds-projects.vercel.app',
+    'https://the-violet-eightfold42-5s9100y9a-the-violet-eightfolds-projects.vercel.app',
+  ];
   
   if (process.env.ALLOWED_ORIGINS) {
     const parsed = process.env.ALLOWED_ORIGINS.split(',')

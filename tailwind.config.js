@@ -7,6 +7,24 @@ export default {
     "./App.tsx",
     "./index.tsx",
   ],
+  safelist: [
+    'from-amber-400',
+    'to-orange-500',
+    'from-red-500',
+    'to-rose-600',
+    'from-blue-400',
+    'to-indigo-500',
+    'from-pink-500',
+    'to-fuchsia-500',
+    'from-purple-400',
+    'to-violet-500',
+    'from-teal-400',
+    'to-emerald-500',
+    'from-green-400',
+    'to-lime-500',
+    'from-slate-500',
+    'to-zinc-600',
+  ],
   theme: {
     extend: {
       colors: {

@@ -190,11 +190,23 @@ export default function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
   const frontendEnvironment = (import.meta.env.VITE_APP_ENV || import.meta.env.VITE_ENVIRONMENT || '').toLowerCase();
   const currentHostname = typeof window === 'undefined' ? '' : window.location.hostname.toLowerCase();
+  const showProductionMarker =
+    frontendEnvironment === 'production' ||
+    currentHostname === 'the-violet-eightfold42.vercel.app' ||
+    apiBaseUrl.toLowerCase().includes('thevioleteightfold-4224');
   const showStagingMarker =
-    frontendEnvironment === 'staging' ||
-    apiBaseUrl.toLowerCase().includes('stage') ||
-    currentHostname.includes('staging') ||
-    currentHostname.includes('git-staging');
+    !showProductionMarker &&
+    (frontendEnvironment === 'staging' ||
+      apiBaseUrl.toLowerCase().includes('stage') ||
+      currentHostname.includes('staging') ||
+      currentHostname.includes('git-staging'));
+  const showLocalMarker =
+    !showProductionMarker &&
+    !showStagingMarker &&
+    (frontendEnvironment === 'local' ||
+      currentHostname === 'localhost' ||
+      currentHostname === '127.0.0.1' ||
+      apiBaseUrl.toLowerCase().includes('localhost'));
 
   // Navigation Items Config (removed treasury, map, calendar)
   const navItems = [
@@ -355,6 +367,18 @@ export default function App() {
       {showStagingMarker && (
         <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-amber-300/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(251,191,36,0.12)] backdrop-blur-md pointer-events-none">
           Staging
+        </div>
+      )}
+
+      {showProductionMarker && (
+        <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200 shadow-[0_0_18px_rgba(52,211,153,0.12)] backdrop-blur-md pointer-events-none">
+          Production
+        </div>
+      )}
+
+      {showLocalMarker && (
+        <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-sky-300/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-sky-200 shadow-[0_0_18px_rgba(56,189,248,0.12)] backdrop-blur-md pointer-events-none">
+          Local
         </div>
       )}
 

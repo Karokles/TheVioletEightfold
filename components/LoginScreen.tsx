@@ -40,10 +40,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
         {/* Logo/Title */}
         <div className="text-center mb-12 animate-fade-in">
           <div className="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
-            <div className="absolute inset-0 bg-purple-500/20 rounded-full blur-md animate-pulse-slow" />
-            <div className="w-full h-full border border-purple-500/30 rounded-full animate-spin-slow" />
-            <div className="absolute w-[70%] h-[70%] border border-purple-400/50 rounded-full rotate-45" />
-            <div className="absolute w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)] animate-pulse-slow" />
+            <div className="absolute inset-0 bg-purple-500/35 rounded-full blur-md animate-pulse-slow" />
+            <div className="w-full h-full border border-purple-400/60 rounded-full animate-spin-slow" />
+            <div className="absolute w-[70%] h-[70%] border border-purple-300/80 rounded-full rotate-45" />
+            <div className="absolute w-3 h-3 bg-white rounded-full shadow-[0_0_16px_rgba(255,255,255,0.95)] animate-pulse-slow" />
           </div>
           <h1 className="text-3xl font-bold tracking-[0.2em] bg-clip-text text-transparent bg-gradient-to-r from-purple-100 via-fuchsia-200 to-purple-100 uppercase mb-2">
             {ui.APP_TITLE}
