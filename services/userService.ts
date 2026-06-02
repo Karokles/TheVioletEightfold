@@ -3,31 +3,40 @@ import { getLoreTemplate, getStatsTemplate } from '../config/loader';
 
 const AUTH_TOKEN_KEY = 'vc_auth_token';
 const USER_ID_KEY = 'vc_user_id';
+const USER_DISPLAY_NAME_KEY = 'vc_user_display_name';
 
 export interface User {
   id: string;
   token: string;
+  displayName?: string;
 }
 
 export const getCurrentUser = (): User | null => {
   const userId = localStorage.getItem(USER_ID_KEY);
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const displayName = localStorage.getItem(USER_DISPLAY_NAME_KEY) || undefined;
   
   if (!userId || !token) {
     return null;
   }
   
-  return { id: userId, token };
+  return { id: userId, token, displayName };
 };
 
-export const setCurrentUser = (userId: string, token: string) => {
+export const setCurrentUser = (userId: string, token: string, displayName?: string) => {
   localStorage.setItem(USER_ID_KEY, userId);
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+  if (displayName?.trim()) {
+    localStorage.setItem(USER_DISPLAY_NAME_KEY, displayName.trim());
+  } else {
+    localStorage.removeItem(USER_DISPLAY_NAME_KEY);
+  }
 };
 
 export const clearCurrentUser = () => {
   localStorage.removeItem(USER_ID_KEY);
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(USER_DISPLAY_NAME_KEY);
 };
 
 // Auth error handler: clears tokens and triggers logout event

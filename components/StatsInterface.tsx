@@ -4,6 +4,7 @@ import { UserStats, Language, QuestLogEntry, SoulTimelineEvent, Breakthrough } f
 import { ICON_MAP } from '../constants';
 import { Shield, Zap, Brain, Activity, Target, Lock, Unlock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, RefreshCw } from 'lucide-react';
 import { getMeaningState } from '../services/aiService';
+import { getCurrentUser } from '../services/userService';
 
 interface StatsInterfaceProps {
     language: Language;
@@ -12,6 +13,8 @@ interface StatsInterfaceProps {
 }
 
 export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats, onRefresh }) => {
+  const currentUser = getCurrentUser();
+  const displayName = currentUser?.displayName || currentUser?.id || (language === 'DE' ? 'Unbekannt' : 'Unknown');
   const [questLogEntries, setQuestLogEntries] = useState<QuestLogEntry[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<SoulTimelineEvent[]>([]);
   const [breakthroughs, setBreakthroughs] = useState<Breakthrough[]>([]);
@@ -106,6 +109,11 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                 </div>
 
                 <div className="flex-1 text-center md:text-left space-y-2">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.08)]">
+                        <Sparkles size={12} className="text-amber-300" />
+                        <span>{language === 'DE' ? 'Blueprint von' : 'Blueprint of'}</span>
+                        <span className="max-w-[180px] truncate text-white">{displayName}</span>
+                    </div>
                     <div className="flex flex-col md:flex-row md:items-center gap-2">
                         <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-white uppercase tracking-widest">
                             {stats.title}

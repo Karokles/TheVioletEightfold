@@ -27,6 +27,7 @@ export type SupabaseAuthResult = {
   userId: string;
   token: string;
   email?: string;
+  displayName?: string;
 };
 
 const toAuthResult = (session: Session | null): SupabaseAuthResult => {
@@ -38,6 +39,7 @@ const toAuthResult = (session: Session | null): SupabaseAuthResult => {
     userId: session.user.id,
     token: session.access_token,
     email: session.user.email || undefined,
+    displayName: session.user.user_metadata?.display_name || session.user.email || undefined,
   };
 };
 

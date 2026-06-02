@@ -42,11 +42,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
         return;
       }
 
-      const authResult = formMode === 'signIn'
-        ? await signInWithEmail(email, secret)
-        : await localLogin(username, secret);
-
-      setCurrentUser(authResult.userId, authResult.token);
+      if (formMode === 'signIn') {
+        const authResult = await signInWithEmail(email, secret);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || email);
+      } else {
+        const authResult = await localLogin(username, secret);
+        setCurrentUser(authResult.userId, authResult.token, username);
+      }
       onLoginSuccess();
     } catch (err: any) {
       setError(err.message || ui.LOGIN_ERROR);
