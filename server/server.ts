@@ -16,7 +16,9 @@ import {
   CouncilMessageRecord,
   createLoreEntry, 
   getSupabaseAuthUser,
+  getUserProfile,
   isSupabaseConfigured,
+  upsertUserProfile,
   createQuestLogEntry,
   getQuestLogEntries,
   createSoulTimelineEvent,
@@ -250,9 +252,23 @@ const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Pro
   }
 
   const username = authUser.email || authUser.user_metadata?.display_name || authUser.id;
+  const displayName = authUser.user_metadata?.display_name
+    || authUser.user_metadata?.name
+    || authUser.user_metadata?.full_name
+    || authUser.user_metadata?.preferred_username
+    || authUser.email?.split('@')[0]
+    || authUser.id;
   const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
 
   await ensureUserExists(authUser.id, username, secretHash);
+  const existingProfile = await getUserProfile(authUser.id);
+  await upsertUserProfile({
+    user_id: authUser.id,
+    display_name: existingProfile?.display_name || displayName,
+    language: existingProfile?.language || null,
+    active_archetype: existingProfile?.active_archetype || null,
+    preferences: existingProfile?.preferences || {}
+  });
 
   req.user = {
     id: authUser.id,
@@ -704,6 +720,72 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
       error: process.env.NODE_ENV === 'production' 
         ? 'Internal server error' 
         : error.message 
+    });
+  }
+});
+
+app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const profile = await getUserProfile(req.user.id);
+    res.json({
+      userId: req.user.id,
+      displayName: profile?.display_name || req.user.username,
+      language: profile?.language || null,
+      activeArchetype: profile?.active_archetype || null,
+      preferences: profile?.preferences || {}
+    });
+  } catch (error: any) {
+    console.error('GET /api/profile error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message
+    });
+  }
+});
+
+app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const { displayName, language, activeArchetype, preferences } = req.body as {
+      displayName?: string;
+      language?: string;
+      activeArchetype?: string | null;
+      preferences?: Record<string, unknown>;
+    };
+
+    const safeDisplayName = typeof displayName === 'string' ? displayName.trim().slice(0, 80) : undefined;
+    const safeLanguage = language === 'DE' || language === 'EN' ? language : undefined;
+    const safeActiveArchetype = typeof activeArchetype === 'string' ? activeArchetype.trim().slice(0, 64) : null;
+
+    const profile = await upsertUserProfile({
+      user_id: req.user.id,
+      display_name: safeDisplayName || req.user.username,
+      language: safeLanguage || null,
+      active_archetype: safeActiveArchetype,
+      preferences: preferences && typeof preferences === 'object' ? preferences : {}
+    });
+
+    res.json({
+      userId: req.user.id,
+      displayName: profile?.display_name || safeDisplayName || req.user.username,
+      language: profile?.language || safeLanguage || null,
+      activeArchetype: profile?.active_archetype || safeActiveArchetype,
+      preferences: profile?.preferences || {}
+    });
+  } catch (error: any) {
+    console.error('PUT /api/profile error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message
     });
   }
 });

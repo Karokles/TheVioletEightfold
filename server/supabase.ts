@@ -87,6 +87,70 @@ export const ensureUserExists = async (userId: string, username: string, secretH
   }
 };
 
+// User profiles
+export interface UserProfileRecord {
+  user_id: string;
+  display_name?: string | null;
+  language?: string | null;
+  active_archetype?: string | null;
+  preferences?: any;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getUserProfile = async (userId: string): Promise<UserProfileRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching user profile:', error.message);
+      return null;
+    }
+
+    return data ? (data as UserProfileRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUserProfile:', error.message);
+    return null;
+  }
+};
+
+export const upsertUserProfile = async (profile: UserProfileRecord): Promise<UserProfileRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .upsert({
+        ...profile,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error upserting user profile:', error.message);
+      return null;
+    }
+
+    return (data as UserProfileRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in upsertUserProfile:', error.message);
+    return null;
+  }
+};
+
 // Council sessions
 export interface CouncilSession {
   id?: string;

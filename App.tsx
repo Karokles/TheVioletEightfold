@@ -10,7 +10,8 @@ import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
 import { Language, UserStats, ScribeAnalysis } from './types';
 import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser } from './services/userService';
-import { signOutSupabase } from './services/supabaseAuth';
+import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
+import { getProfile } from './services/profileService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut } from 'lucide-react';
 
 enum AppMode {
@@ -109,14 +110,18 @@ export default function App() {
     setStatsRefreshKey(prev => prev + 1);
   };
 
-  const handleLoginSuccess = () => {
-    setIsAuthenticated(true);
-    // Reload user data after login
+  const loadSignedInUserState = async () => {
+    await getProfile();
     const user = getCurrentUser();
     if (user) {
       setLore(loadUserLore(user.id));
       setStats(loadUserStats(user.id));
     }
+  };
+
+  const handleLoginSuccess = async () => {
+    setIsAuthenticated(true);
+    await loadSignedInUserState();
   };
 
   const handleAuthError = () => {
@@ -151,6 +156,34 @@ export default function App() {
       setAuthErrorHandler(() => {}); // Cleanup
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+    const hydrateSupabaseRedirect = async () => {
+      try {
+        const session = await getSupabaseSession();
+        if (!isMounted || !session) {
+          return;
+        }
+
+        const { setCurrentUser } = await import('./services/userService');
+        setCurrentUser(session.userId, session.token, session.displayName || session.email);
+        setIsAuthenticated(true);
+        await loadSignedInUserState();
+      } catch (error) {
+        console.warn('[AUTH] Supabase redirect hydration skipped:', error);
+      }
+    };
+
+    hydrateSupabaseRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated]);
 
   // Boot verification: check if token is still valid on mount
   useEffect(() => {

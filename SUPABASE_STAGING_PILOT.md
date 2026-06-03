@@ -46,7 +46,7 @@ Required Vercel staging variables:
 | Table | Current status | Notes |
 | --- | --- | --- |
 | `users` | Working in staging | Upserted on local test-user login. |
-| `user_profiles` | Prepared | Intended for durable profile preferences and archetype state. |
+| `user_profiles` | Working in staging | Stores display name, language, active archetype, and profile preferences. |
 | `council_sessions` | Working in staging | Stores one container row per council or direct chat exchange. |
 | `council_messages` | Working in staging | Stores individual message rows linked to a session. |
 | `lore_entries` | Working in staging | Stores summarized structured content for later retrieval. |
@@ -62,6 +62,8 @@ Required Vercel staging variables:
 Local test-user login writes or updates one row in `users`.
 
 Supabase Auth sign-in creates or updates the matching `users` row through the backend when a protected API route is called.
+
+`GET /api/profile` and `PUT /api/profile` read and update the authenticated user's `user_profiles` row.
 
 `POST /api/council` writes:
 
@@ -90,6 +92,7 @@ These writes are best effort. If Supabase is disabled or unavailable, the endpoi
 7. In Supabase Table Editor, check:
    - `auth.users` contains the confirmed user.
    - `users` contains the Supabase user id.
+   - `user_profiles` contains the display name.
    - `council_sessions` contains a new session.
    - `council_messages` contains the individual message rows.
    - `lore_entries` contains the exchange summary.
@@ -106,8 +109,8 @@ Fallback test:
 
 ## Next Steps
 
-1. Add durable `user_profiles` reads and writes.
-2. Decide whether existing local UI state should migrate into staging persistence gradually or stay local until auth is hardened.
-3. Add export/delete service interfaces before production data collection.
-4. Add audit events for login, council writes, export requests, and deletion requests.
-5. Review RLS policies before any browser-side Supabase access is introduced.
+1. Decide whether existing local UI state should migrate into staging persistence gradually or stay local until auth is hardened.
+2. Add export/delete service interfaces before production data collection.
+3. Add audit events for login, council writes, profile updates, export requests, and deletion requests.
+4. Review RLS policies before any browser-side Supabase data access is introduced.
+5. Optionally disable `LOCAL_AUTH_ENABLED` on staging after Supabase Auth is verified.
