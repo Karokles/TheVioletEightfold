@@ -782,6 +782,21 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     });
   } catch (error: any) {
     console.error('PUT /api/profile error:', error);
+    if (req.user) {
+      const fallbackDisplayName = typeof req.body?.displayName === 'string' && req.body.displayName.trim()
+        ? req.body.displayName.trim().slice(0, 80)
+        : req.user.username;
+
+      return res.json({
+        userId: req.user.id,
+        displayName: fallbackDisplayName,
+        language: req.body?.language === 'DE' || req.body?.language === 'EN' ? req.body.language : null,
+        activeArchetype: typeof req.body?.activeArchetype === 'string' ? req.body.activeArchetype : null,
+        preferences: {},
+        persistenceStatus: 'failed_safe_fallback'
+      });
+    }
+
     res.status(500).json({
       error: process.env.NODE_ENV === 'production'
         ? 'Internal server error'
