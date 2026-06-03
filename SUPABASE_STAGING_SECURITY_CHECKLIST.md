@@ -81,3 +81,9 @@ After the SQL check passes, implement a small data model v1 migration plan:
 3. Add audit event writes for profile update, login success, council write, export request, and deletion request.
 4. Add DSGVO export/delete service endpoints behind auth.
 5. Only after that, decide whether local test login should be disabled on staging.
+
+## Follow-Up Migration
+
+After this checklist passes, run [supabase/staging_data_model_v1.sql](supabase/staging_data_model_v1.sql) in the staging SQL editor.
+
+This follow-up normalizes profile data by treating `display_name`, `active_archetype`, and `preferences` as the canonical fields. It backfills them from older fields such as `public_name`, `archetype_preference`, and `settings`, but does not delete those older fields yet.
