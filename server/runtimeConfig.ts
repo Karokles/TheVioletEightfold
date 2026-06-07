@@ -60,6 +60,7 @@ export const runtimeConfig = {
   weeklyMeaningAnalyses: Number(process.env.WEEKLY_MEANING_ANALYSES || 10),
   offlineOnlyIdentifiers: process.env.OFFLINE_ONLY_IDENTIFIERS || '',
   founderAccessIdentifiers: process.env.FOUNDER_ACCESS_IDENTIFIERS || '',
+  adminIdentifiers: process.env.ADMIN_IDENTIFIERS || '',
   jwtSecret: process.env.JWT_SECRET,
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',

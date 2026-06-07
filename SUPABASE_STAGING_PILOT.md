@@ -35,6 +35,7 @@ Required Render staging variables:
 - `USAGE_LIMITS_ENABLED=true`
 - `FOUNDER_ACCESS_IDENTIFIERS` for accounts that should bypass usage caps, e.g. `lionceau*`
 - `OFFLINE_ONLY_IDENTIFIERS` for personal accounts that should keep sensitive app state local and skip database persistence, e.g. `lionceau*`
+- `ADMIN_IDENTIFIERS` for accounts allowed to open the in-app admin console, e.g. `lionceau*`
 
 Required Vercel staging variables:
 
@@ -68,6 +69,10 @@ Supabase Auth sign-in creates or updates the matching `users` row through the ba
 `GET /api/profile` and `PUT /api/profile` read and update the authenticated user's `user_profiles` row.
 
 Accounts matched by `OFFLINE_ONLY_IDENTIFIERS` do not write app data to Supabase. Their lore, cycle, blueprint, communication preferences, and meaning state stay browser-local. The backend still authenticates the request and returns safe responses, but skips profile, council, lore, and meaning persistence.
+
+Accounts matched by `ADMIN_IDENTIFIERS` can call protected admin endpoints. The admin console lists Supabase-backed accounts and can set `free`, `founder`, or `blocked`, per-account weekly limits, and offline-only persistence. These markers are stored in `user_profiles.preferences.admin`.
+
+The OpenAI key must stay only on the backend provider, for example Render. Do not add `OPENAI_API_KEY` to Vercel or any `VITE_*` variable; frontend variables are browser-visible.
 
 `POST /api/council` writes:
 

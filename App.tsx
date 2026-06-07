@@ -5,6 +5,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { CouncilSession } from './components/CouncilSession';
 import { StatsInterface } from './components/StatsInterface';
 import { CycleInterface } from './components/CycleInterface';
+import { AdminInterface } from './components/AdminInterface';
 import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
@@ -18,13 +19,14 @@ import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPre
 import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
 import { mergeLocalMeaningState } from './services/meaningStateService';
 import { scanEmotionalState } from './services/emotionalStateService';
-import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles } from 'lucide-react';
+import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
 
 enum AppMode {
   DIRECT_CHAT = 'DIRECT_CHAT',
   COUNCIL_SESSION = 'COUNCIL_SESSION',
   CYCLE = 'CYCLE',
   STATS = 'STATS',
+  ADMIN = 'ADMIN',
 }
 
 // --- Helper for Smart Merging ---
@@ -56,6 +58,7 @@ export default function App() {
   const [activeArchetype, setActiveArchetype] = useState<ArchetypeId>(ArchetypeId.SOVEREIGN);
   const [language, setLanguage] = useState<Language>(() => currentUser ? loadUserLanguage(currentUser.id) : 'EN');
   const [statsRefreshKey, setStatsRefreshKey] = useState(0); // Force StatsInterface refresh
+  const [isAdmin, setIsAdmin] = useState(false);
   const [cycle, setCycle] = useState<IntegrationCycle | null>(() => {
     if (!currentUser) return null;
     return loadCurrentCycle(currentUser.id);
@@ -175,6 +178,7 @@ export default function App() {
       setCommunicationPreferences(loadCommunicationPreferences(user.id));
       setRecentUserSignals([]);
       setEmotionalState(undefined);
+      setIsAdmin(Boolean(profile?.isAdmin));
     }
   };
 
@@ -188,6 +192,7 @@ export default function App() {
     clearCurrentUser();
     setIsAuthenticated(false);
     setHasEntered(false);
+    setIsAdmin(false);
   };
 
   const handleLogout = async () => {
@@ -195,6 +200,7 @@ export default function App() {
     clearCurrentUser();
     setIsAuthenticated(false);
     setHasEntered(false);
+    setIsAdmin(false);
     setLore('');
     setStats({
       title: '',
@@ -445,6 +451,7 @@ export default function App() {
     { mode: AppMode.COUNCIL_SESSION, icon: ScrollText, label: ui.COUNCIL_SESSION },
     { mode: AppMode.CYCLE, icon: CalendarDays, label: language === 'DE' ? 'Zyklus' : 'Cycle' },
     { mode: AppMode.STATS, icon: LayoutDashboard, label: ui.BLUEPRINT },
+    ...(isAdmin ? [{ mode: AppMode.ADMIN, icon: Shield, label: 'Admin' }] : []),
   ];
 
   const communicationModes: Array<{ mode: CommunicationMode; label: string }> = [
@@ -638,6 +645,9 @@ export default function App() {
                 meaningContext={meaningContext}
                 currentLore={lore}
              />
+           )}
+           {currentMode === AppMode.ADMIN && isAdmin && (
+             <AdminInterface language={language} />
            )}
         </div>
       </main>

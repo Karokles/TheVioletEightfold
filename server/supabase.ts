@@ -151,6 +151,75 @@ export const upsertUserProfile = async (profile: UserProfileRecord): Promise<Use
   }
 };
 
+export interface AdminAccountRecord {
+  user_id: string;
+  username?: string | null;
+  display_name?: string | null;
+  language?: string | null;
+  preferences?: any;
+  created_at?: string | null;
+  updated_at?: string | null;
+  profile_created_at?: string | null;
+  profile_updated_at?: string | null;
+}
+
+export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const [{ data: users, error: usersError }, { data: profiles, error: profilesError }] = await Promise.all([
+      getSupabaseClient()
+        .from('users')
+        .select('id, username, created_at, updated_at')
+        .order('updated_at', { ascending: false }),
+      getSupabaseClient()
+        .from('user_profiles')
+        .select('user_id, display_name, language, preferences, created_at, updated_at')
+        .order('updated_at', { ascending: false }),
+    ]);
+
+    if (usersError) {
+      console.error('[SUPABASE] Error listing admin users:', usersError.message);
+    }
+    if (profilesError) {
+      console.error('[SUPABASE] Error listing admin profiles:', profilesError.message);
+    }
+
+    const byId = new Map<string, AdminAccountRecord>();
+    ((users || []) as any[]).forEach(user => {
+      byId.set(user.id, {
+        user_id: user.id,
+        username: user.username,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      });
+    });
+
+    ((profiles || []) as any[]).forEach(profile => {
+      const existing = byId.get(profile.user_id) || { user_id: profile.user_id };
+      byId.set(profile.user_id, {
+        ...existing,
+        display_name: profile.display_name,
+        language: profile.language,
+        preferences: profile.preferences || {},
+        profile_created_at: profile.created_at,
+        profile_updated_at: profile.updated_at,
+      });
+    });
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const left = a.profile_updated_at || a.updated_at || a.created_at || '';
+      const right = b.profile_updated_at || b.updated_at || b.created_at || '';
+      return right.localeCompare(left);
+    });
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listAdminAccounts:', error.message);
+    return [];
+  }
+};
+
 // Council sessions
 export interface CouncilSession {
   id?: string;

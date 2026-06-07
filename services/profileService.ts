@@ -32,6 +32,7 @@ export type UserProfile = {
   language?: 'EN' | 'DE' | null;
   activeArchetype?: string | null;
   preferences?: Record<string, unknown>;
+  isAdmin?: boolean;
 };
 
 export const getProfile = async (): Promise<UserProfile | null> => {

@@ -18,6 +18,7 @@ import {
   getSupabaseAuthUser,
   getUserProfile,
   isSupabaseConfigured,
+  listAdminAccounts,
   upsertUserProfile,
   createQuestLogEntry,
   getQuestLogEntries,
@@ -171,12 +172,23 @@ if (openai) {
 }
 
 // Simple in-memory user store (for MVP - replace with database later)
+type AdminEntitlement = 'free' | 'founder' | 'blocked';
+
+type AdminAccountSettings = {
+  entitlement?: AdminEntitlement;
+  offlineOnly?: boolean;
+  weeklyFreeInteractions?: number | null;
+  weeklyCouncilSessions?: number | null;
+  weeklyMeaningAnalyses?: number | null;
+};
+
 interface User {
   id: string;
   username: string;
   secretHash: string;
   token?: string;
   email?: string;
+  adminSettings?: AdminAccountSettings;
 }
 
 const users: User[] = [
@@ -266,11 +278,65 @@ const userMatchesIdentifiers = (user: Pick<User, 'id' | 'username' | 'email'> | 
 };
 
 const isOfflineOnlyUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
-  return userMatchesIdentifiers(user, runtimeConfig.offlineOnlyIdentifiers);
+  return Boolean((user as User | undefined)?.adminSettings?.offlineOnly)
+    || userMatchesIdentifiers(user, runtimeConfig.offlineOnlyIdentifiers);
 };
 
 const hasFounderAccess = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
-  return userMatchesIdentifiers(user, runtimeConfig.founderAccessIdentifiers);
+  return (user as User | undefined)?.adminSettings?.entitlement === 'founder'
+    || userMatchesIdentifiers(user, runtimeConfig.founderAccessIdentifiers);
+};
+
+const isAdminUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  return userMatchesIdentifiers(user, runtimeConfig.adminIdentifiers);
+};
+
+const getProfileAdminSettings = (preferences: any): AdminAccountSettings => {
+  const admin = preferences && typeof preferences === 'object' ? preferences.admin : null;
+  const entitlement = admin?.entitlement === 'founder' || admin?.entitlement === 'blocked' || admin?.entitlement === 'free'
+    ? admin.entitlement as AdminEntitlement
+    : undefined;
+  const readLimit = (value: unknown): number | null | undefined => {
+    if (value === null) return null;
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue >= 0 ? Math.floor(numberValue) : undefined;
+  };
+
+  return {
+    entitlement,
+    offlineOnly: admin?.offlineOnly === true,
+    weeklyFreeInteractions: readLimit(admin?.weeklyFreeInteractions),
+    weeklyCouncilSessions: readLimit(admin?.weeklyCouncilSessions),
+    weeklyMeaningAnalyses: readLimit(admin?.weeklyMeaningAnalyses),
+  };
+};
+
+const sanitizeAdminSettings = (value: any): AdminAccountSettings => {
+  const entitlement = value?.entitlement === 'founder' || value?.entitlement === 'blocked' || value?.entitlement === 'free'
+    ? value.entitlement as AdminEntitlement
+    : 'free';
+  const sanitizeLimit = (input: unknown): number | null => {
+    if (input === null || input === '' || input === undefined) return null;
+    const numberValue = Number(input);
+    if (!Number.isFinite(numberValue)) return null;
+    return Math.max(0, Math.min(10000, Math.floor(numberValue)));
+  };
+
+  return {
+    entitlement,
+    offlineOnly: value?.offlineOnly === true,
+    weeklyFreeInteractions: sanitizeLimit(value?.weeklyFreeInteractions),
+    weeklyCouncilSessions: sanitizeLimit(value?.weeklyCouncilSessions),
+    weeklyMeaningAnalyses: sanitizeLimit(value?.weeklyMeaningAnalyses),
+  };
+};
+
+const requireAdmin = (req: AuthenticatedRequest, res: Response): boolean => {
+  if (!req.user || !isAdminUser(req.user)) {
+    res.status(403).json({ error: 'forbidden', message: 'Admin access required.' });
+    return false;
+  }
+  return true;
 };
 
 const countCouncilSpeakers = (reply: string): number => {
@@ -315,6 +381,7 @@ const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Pro
   if (!isOfflineOnlyUser(req.user)) {
     await ensureUserExists(authUser.id, username, secretHash);
     const existingProfile = await getUserProfile(authUser.id);
+    req.user.adminSettings = getProfileAdminSettings(existingProfile?.preferences);
     await upsertUserProfile({
       user_id: authUser.id,
       display_name: existingProfile?.display_name || displayName,
@@ -401,6 +468,10 @@ const authenticate = async (req: AuthenticatedRequest, res: Response, next: Next
       
       // Attach user to request
       req.user = user;
+      if (isSupabaseConfigured()) {
+        const profile = await getUserProfile(user.id);
+        req.user.adminSettings = getProfileAdminSettings(profile?.preferences);
+      }
       return next();
     } catch (error: any) {
       if (serviceReadiness.supabaseAuth) {
@@ -486,6 +557,13 @@ const enforceUsageLimit = (
   if (!runtimeConfig.usageLimitsEnabled || !req.user) {
     return true;
   }
+  if (req.user.adminSettings?.entitlement === 'blocked') {
+    res.status(403).json({
+      error: 'account_blocked',
+      message: 'This account is currently blocked by an administrator.'
+    });
+    return false;
+  }
   if (hasFounderAccess(req.user)) {
     return true;
   }
@@ -496,11 +574,16 @@ const enforceUsageLimit = (
     : type === 'council'
       ? usage.councilSessions
       : usage.interactions;
-  const limit = type === 'meaning'
+  const configuredLimit = type === 'meaning'
+    ? req.user.adminSettings?.weeklyMeaningAnalyses
+    : type === 'council'
+      ? req.user.adminSettings?.weeklyCouncilSessions
+      : req.user.adminSettings?.weeklyFreeInteractions;
+  const limit = configuredLimit ?? (type === 'meaning'
     ? runtimeConfig.weeklyMeaningAnalyses
     : type === 'council'
       ? runtimeConfig.weeklyCouncilSessions
-      : runtimeConfig.weeklyFreeInteractions;
+      : runtimeConfig.weeklyFreeInteractions);
 
   if (current >= limit) {
     res.status(429).json({
@@ -790,7 +873,8 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
         preferences: {
           offlineOnly: true,
           entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
-        }
+        },
+        isAdmin: isAdminUser(req.user)
       });
     }
 
@@ -800,7 +884,8 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
       displayName: profile?.display_name || req.user.username,
       language: profile?.language || null,
       activeArchetype: profile?.active_archetype || null,
-      preferences: profile?.preferences || {}
+      preferences: profile?.preferences || {},
+      isAdmin: isAdminUser(req.user)
     });
   } catch (error: any) {
     console.error('GET /api/profile error:', error);
@@ -839,16 +924,25 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
           offlineOnly: true,
           entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
         },
+        isAdmin: isAdminUser(req.user),
         persistenceStatus: 'offline_only_local'
       });
     }
 
+    const existingProfile = await getUserProfile(req.user.id);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const nextPreferences = preferences && typeof preferences === 'object'
+      ? { ...existingPreferences, ...preferences, admin: existingPreferences.admin }
+      : existingPreferences;
+
     const profile = await upsertUserProfile({
       user_id: req.user.id,
-      display_name: safeDisplayName || req.user.username,
-      language: safeLanguage || null,
-      active_archetype: safeActiveArchetype,
-      preferences: preferences && typeof preferences === 'object' ? preferences : {}
+      display_name: safeDisplayName || existingProfile?.display_name || req.user.username,
+      language: safeLanguage || existingProfile?.language || null,
+      active_archetype: safeActiveArchetype || existingProfile?.active_archetype || null,
+      preferences: nextPreferences
     });
 
     res.json({
@@ -856,7 +950,8 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
       displayName: profile?.display_name || safeDisplayName || req.user.username,
       language: profile?.language || safeLanguage || null,
       activeArchetype: profile?.active_archetype || safeActiveArchetype,
-      preferences: profile?.preferences || {}
+      preferences: profile?.preferences || {},
+      isAdmin: isAdminUser(req.user)
     });
   } catch (error: any) {
     console.error('PUT /api/profile error:', error);
@@ -879,6 +974,90 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
       error: process.env.NODE_ENV === 'production'
         ? 'Internal server error'
         : error.message
+    });
+  }
+});
+
+app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.json({ accounts: [], databaseStatus: 'disabled' });
+    }
+
+    const accounts = await listAdminAccounts();
+    res.json({
+      databaseStatus: 'configured',
+      accounts: accounts.map(account => {
+        const settings = getProfileAdminSettings(account.preferences);
+        return {
+          userId: account.user_id,
+          username: account.username || null,
+          displayName: account.display_name || account.username || account.user_id,
+          language: account.language || null,
+          createdAt: account.profile_created_at || account.created_at || null,
+          updatedAt: account.profile_updated_at || account.updated_at || null,
+          entitlement: settings.entitlement || 'free',
+          offlineOnly: Boolean(settings.offlineOnly),
+          limits: {
+            weeklyFreeInteractions: settings.weeklyFreeInteractions ?? null,
+            weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
+            weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
+          },
+        };
+      }),
+    });
+  } catch (error: any) {
+    console.error('GET /api/admin/accounts error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+});
+
+app.put('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    const targetUserId = String(req.params.userId || '').trim();
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'user_id_required' });
+    }
+
+    const existingProfile = await getUserProfile(targetUserId);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const adminSettings = sanitizeAdminSettings(req.body?.admin || req.body || {});
+    const profile = await upsertUserProfile({
+      user_id: targetUserId,
+      display_name: existingProfile?.display_name || null,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: {
+        ...existingPreferences,
+        admin: adminSettings,
+      },
+    });
+
+    res.json({
+      userId: targetUserId,
+      entitlement: adminSettings.entitlement,
+      offlineOnly: adminSettings.offlineOnly,
+      limits: {
+        weeklyFreeInteractions: adminSettings.weeklyFreeInteractions,
+        weeklyCouncilSessions: adminSettings.weeklyCouncilSessions,
+        weeklyMeaningAnalyses: adminSettings.weeklyMeaningAnalyses,
+      },
+      updatedAt: profile?.updated_at || new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('PUT /api/admin/accounts/:userId error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
     });
   }
 });
