@@ -1,4 +1,4 @@
-import { getCurrentUser, setCurrentUserDisplayName } from './userService';
+import { getCurrentUser, saveUserLanguage, setCurrentUserDisplayName } from './userService';
 
 const getApiBaseUrl = (): string => {
   const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
@@ -48,6 +48,9 @@ export const getProfile = async (): Promise<UserProfile | null> => {
   if (profile.displayName) {
     setCurrentUserDisplayName(profile.displayName);
   }
+  if ((profile.language === 'DE' || profile.language === 'EN') && profile.userId) {
+    saveUserLanguage(profile.userId, profile.language);
+  }
 
   return profile;
 };
@@ -66,6 +69,9 @@ export const updateProfile = async (profile: Partial<UserProfile>): Promise<User
   const savedProfile = await response.json() as UserProfile;
   if (savedProfile.displayName) {
     setCurrentUserDisplayName(savedProfile.displayName);
+  }
+  if ((savedProfile.language === 'DE' || savedProfile.language === 'EN') && savedProfile.userId) {
+    saveUserLanguage(savedProfile.userId, savedProfile.language);
   }
 
   return savedProfile;

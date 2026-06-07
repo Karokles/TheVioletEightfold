@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "ts-node --esm server.ts",
+    "dev": "node scripts/dev-server.js",
     "build": "tsc",
     "start": "node dist/server.js",
     "test:smoke": "node scripts/smoke-test.js",

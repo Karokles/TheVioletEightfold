@@ -4,8 +4,10 @@ import { startCouncilSession, sendMessageToCouncil } from '../services/aiService
 // Note: analyzeSessionForUpdates removed - Scribe functionality can be added back later if needed
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
-import { Play, Sparkles, Send, Download, Save, CheckCircle2, User } from 'lucide-react';
-import { Language, UserStats, ScribeAnalysis, Message } from '../types';
+import { Play, Sparkles, Send, Save, User, ListChecks, X } from 'lucide-react';
+import { Language, UserStats, ScribeAnalysis, Message, MeaningContext } from '../types';
+import { getCurrentUser } from '../services/userService';
+import { CouncilActionSummary, loadLastCouncilActionSummary, saveLastCouncilActionSummary } from '../services/councilActionSummaryService';
 
 interface DialogueTurn {
   id: string;
@@ -18,10 +20,12 @@ interface CouncilSessionProps {
     language: Language;
     currentStats: UserStats;
     currentLore: string;
+    meaningContext: MeaningContext;
+    onUserSignal?: (content: string) => void;
     onIntegrate: (analysis: ScribeAnalysis) => void;
 }
 
-export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, currentStats, currentLore, onIntegrate }) => {
+export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, currentStats, currentLore, meaningContext, onUserSignal, onIntegrate }) => {
   const [topic, setTopic] = useState('');
   const [userInput, setUserInput] = useState('');
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -29,21 +33,63 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isIntegrating, setIsIntegrating] = useState(false); // Scribe State
+  const [lastActionSummary, setLastActionSummary] = useState<CouncilActionSummary | null>(null);
+  const [showActionSummary, setShowActionSummary] = useState(false);
   
   const dialogueEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const historyRef = useRef<DialogueTurn[]>([]);
+  const lastCouncilRawRef = useRef('');
   
   // Keep ref in sync with state
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
 
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (user?.id) {
+      setLastActionSummary(loadLastCouncilActionSummary(user.id));
+    }
+  }, []);
+
   const ui = getUIText(language);
   const archetypes = getArchetypes(language);
 
   const parseBufferToTurns = (buffer: string, startIndex: number): DialogueTurn[] => {
     const turns: DialogueTurn[] = [];
+    const speakerAliases: Record<string, ArchetypeId | 'MODERATOR'> = {
+      MODERATOR: 'MODERATOR',
+      SOVEREIGN: ArchetypeId.SOVEREIGN,
+      WARRIOR: ArchetypeId.WARRIOR,
+      SAGE: ArchetypeId.SAGE,
+      LOVER: ArchetypeId.LOVER,
+      CREATOR: ArchetypeId.CREATOR,
+      CAREGIVER: ArchetypeId.CAREGIVER,
+      EXPLORER: ArchetypeId.EXPLORER,
+      ALCHEMIST: ArchetypeId.ALCHEMIST,
+      SOUVERAEN: ArchetypeId.SOVEREIGN,
+      SOUVERÄN: ArchetypeId.SOVEREIGN,
+      KRIEGER: ArchetypeId.WARRIOR,
+      WEISER: ArchetypeId.SAGE,
+      SAGE_DE: ArchetypeId.SAGE,
+      LIEBENDER: ArchetypeId.LOVER,
+      SCHOEPFER: ArchetypeId.CREATOR,
+      SCHÖPFER: ArchetypeId.CREATOR,
+      BEWAHRER: ArchetypeId.CAREGIVER,
+      ENTDECKER: ArchetypeId.EXPLORER,
+      ALCHEMIST_DE: ArchetypeId.ALCHEMIST,
+    };
+
+    const normalizeSpeaker = (speaker: string): ArchetypeId | 'MODERATOR' | null => {
+      const key = speaker
+        .trim()
+        .replace(/^DER\s+/i, '')
+        .replace(/^DIE\s+/i, '')
+        .replace(/\s+/g, '_')
+        .toUpperCase();
+      return speakerAliases[key] || null;
+    };
     
     // First, extract MODERATOR summary if present
     const moderatorMatch = buffer.match(/^MODERATOR:\s*(.+?)(?=\n\[\[SPEAKER:|$)/s);
@@ -55,24 +101,35 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         isUser: false
       });
     }
-    
-    // Extract archetype speakers
-    const parts = buffer.split(/\[\[SPEAKER:\s*([A-Z_]+)\]\]/);
-    
-    for (let i = 1; i < parts.length; i += 2) {
-        const speakerId = parts[i];
-        let content = parts[i+1] || '';
-        
-        // Remove SOVEREIGN DECISION and NEXT STEPS markers from content (they'll be handled separately)
-        // But keep them in the content for now so they display
-        content = content.trim();
-        
+
+    const speakerPattern = /(?:\[\[\s*SPEAKER\s*:\s*([^\]]+?)\s*\]\]|^\s*(SOVEREIGN|WARRIOR|SAGE|LOVER|CREATOR|CAREGIVER|EXPLORER|ALCHEMIST|SOUVERÄN|SOUVERAEN|KRIEGER|WEISER|LIEBENDER|SCHÖPFER|SCHOEPFER|BEWAHRER|ENTDECKER)\s*:)/gim;
+    const matches = Array.from(buffer.matchAll(speakerPattern));
+
+    matches.forEach((match, index) => {
+      const speakerId = normalizeSpeaker(match[1] || match[2] || '');
+      if (!speakerId || speakerId === 'MODERATOR') return;
+
+      const contentStart = match.index! + match[0].length;
+      const contentEnd = matches[index + 1]?.index ?? buffer.length;
+      const content = buffer.slice(contentStart, contentEnd).trim();
+
+      if (content) {
         turns.push({
-            id: `stream-${startIndex}-${i}`,
-            speaker: speakerId, 
-            content: content,
-            isUser: false
+          id: `stream-${startIndex}-${index}`,
+          speaker: speakerId,
+          content,
+          isUser: false
         });
+      }
+    });
+
+    if (turns.length === 0 && buffer.trim()) {
+      turns.push({
+        id: `fallback-${startIndex}`,
+        speaker: 'SOVEREIGN',
+        content: buffer.trim(),
+        isUser: false,
+      });
     }
     
     return turns;
@@ -94,6 +151,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
             }
         }
         
+        lastCouncilRawRef.current = buffer;
         const newTurns = parseBufferToTurns(buffer, historyRef.current.length);
         setHistory(prev => [...prev, ...newTurns]);
         setStreamingContent('');
@@ -127,9 +185,10 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         content: topic,
         isUser: true
     }]);
+    onUserSignal?.(topic);
     setTopic(''); 
     
-    await handleStream(startCouncilSession(topic, language, currentLore));
+    await handleStream(startCouncilSession(topic, language, currentLore, meaningContext));
   };
 
   const handleReply = async () => {
@@ -160,8 +219,9 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       isUser: true
     };
     setHistory(prev => [...prev, userTurn]);
+    onUserSignal?.(content);
 
-    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore));
+    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore, meaningContext));
   };
 
   // --- Meaning Agent Integration Handler ---
@@ -174,6 +234,19 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     setIsIntegrating(true);
 
     try {
+      const user = getCurrentUser();
+      if (user?.id) {
+        const fallbackText = history
+          .filter(turn => !turn.isUser && turn.speaker !== 'SYSTEM')
+          .slice(-2)
+          .map(turn => turn.content)
+          .join('\n');
+        const savedSummary = saveLastCouncilActionSummary(user.id, lastCouncilRawRef.current || fallbackText, language);
+        if (savedSummary) {
+          setLastActionSummary(savedSummary);
+        }
+      }
+
       // Convert history to Message format for API
       const sessionHistory = history
         .filter(turn => turn.speaker !== 'SYSTEM')
@@ -188,11 +261,13 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       const { analyzeMeaning } = await import('../services/aiService');
       const meaningResult = await analyzeMeaning(sessionHistory, {
         mode: 'council',
+        language,
         userLore: currentLore,
         currentQuestState: {
           title: currentStats.currentQuest,
           state: currentStats.state
-        }
+        },
+        meaningContext
       });
       
       // Convert MeaningAnalysisResult to ScribeAnalysis for backward compatibility
@@ -275,6 +350,41 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
             100% { transform: scale(0); opacity: 0; }
         }
       `}</style>
+
+      {lastActionSummary && (
+        <div className="absolute right-5 top-5 z-40">
+          <button
+            onClick={() => setShowActionSummary(prev => !prev)}
+            className="group flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/70 shadow-[0_0_24px_rgba(255,255,255,0.04)] backdrop-blur-md transition-all hover:border-white/25 hover:bg-white/[0.08] hover:text-white"
+            title={language === 'DE' ? 'Letzte Aktionszusammenfassung anzeigen' : 'Show last action summary'}
+          >
+            <ListChecks size={14} className="text-white/75 transition-colors group-hover:text-white" />
+            <span className="hidden sm:inline">{language === 'DE' ? 'Letzte Aktion' : 'Last Action'}</span>
+          </button>
+
+          {showActionSummary && (
+            <div className="absolute right-0 mt-3 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-white/12 bg-[#09040f]/85 p-4 text-left shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl animate-fade-in">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">{lastActionSummary.title}</span>
+                <button
+                  onClick={() => setShowActionSummary(false)}
+                  className="rounded-full p-1 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                  title={language === 'DE' ? 'Schließen' : 'Close'}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="space-y-2">
+                {lastActionSummary.lines.map((line, index) => (
+                  <div key={`${line}-${index}`} className="border-l border-white/15 pl-3 text-sm leading-6 text-white/90">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 4D Warp Field Background */}
       <div className={`absolute inset-0 transition-opacity duration-1000 pointer-events-none overflow-hidden ${isSessionActive ? 'opacity-40' : 'opacity-20'}`}>
@@ -384,6 +494,20 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                                 <h2 className={`text-xl font-light tracking-[0.2em] uppercase opacity-90 drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] ${isIntegrating ? 'text-amber-100' : 'text-violet-100'}`}>
                                     {isIntegrating ? (language === 'DE' ? 'Kristallisierung...' : 'Crystallizing Memory...') : ui.AWAITING}
                                 </h2>
+
+                                {!isIntegrating && lastActionSummary && (
+                                  <div className="pt-3 space-y-2">
+                                    {lastActionSummary.lines.slice(0, 3).map((line, index) => (
+                                      <p
+                                        key={`${line}-${index}`}
+                                        className="text-[12px] leading-5 text-white/75 drop-shadow-[0_0_14px_rgba(255,255,255,0.22)] animate-pulse-slow"
+                                        style={{ animationDelay: `${index * 0.7}s`, animationDuration: '5s' }}
+                                      >
+                                        {line}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
                         </div>
                     </div>
                 </div>

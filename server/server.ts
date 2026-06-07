@@ -176,6 +176,7 @@ interface User {
   username: string;
   secretHash: string;
   token?: string;
+  email?: string;
 }
 
 const users: User[] = [
@@ -238,6 +239,50 @@ const users: User[] = [
   },
 ];
 
+const parseIdentifierList = (value: string): string[] => {
+  return value
+    .split(',')
+    .map(item => item.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const wildcardMatch = (pattern: string, value: string): boolean => {
+  if (!pattern || !value) return false;
+  if (pattern === value) return true;
+  if (!pattern.includes('*')) return false;
+  const escaped = pattern
+    .split('*')
+    .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${escaped}$`, 'i').test(value);
+};
+
+const userMatchesIdentifiers = (user: Pick<User, 'id' | 'username' | 'email'> | undefined, identifiers: string): boolean => {
+  if (!user) return false;
+  const candidates = [user.id, user.username, user.email]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .map(candidate => candidate.toLowerCase());
+  return parseIdentifierList(identifiers).some(pattern => candidates.some(candidate => wildcardMatch(pattern, candidate)));
+};
+
+const isOfflineOnlyUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  return userMatchesIdentifiers(user, runtimeConfig.offlineOnlyIdentifiers);
+};
+
+const hasFounderAccess = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  return userMatchesIdentifiers(user, runtimeConfig.founderAccessIdentifiers);
+};
+
+const countCouncilSpeakers = (reply: string): number => {
+  const speakerMatches = reply.match(/\[\[\s*SPEAKER\s*:\s*([A-Z_]+)\s*\]\]/gi) || [];
+  const speakers = new Set(
+    speakerMatches
+      .map(match => match.replace(/\[\[\s*SPEAKER\s*:\s*/i, '').replace(/\s*\]\]/, '').trim().toUpperCase())
+      .filter(Boolean)
+  );
+  return speakers.size;
+};
+
 // Authentication middleware
 interface AuthenticatedRequest extends Request {
   user?: User;
@@ -260,21 +305,24 @@ const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Pro
     || authUser.id;
   const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
 
-  await ensureUserExists(authUser.id, username, secretHash);
-  const existingProfile = await getUserProfile(authUser.id);
-  await upsertUserProfile({
-    user_id: authUser.id,
-    display_name: existingProfile?.display_name || displayName,
-    language: existingProfile?.language || null,
-    active_archetype: existingProfile?.active_archetype || null,
-    preferences: existingProfile?.preferences || {}
-  });
-
   req.user = {
     id: authUser.id,
     username,
     secretHash,
+    email: authUser.email || undefined,
   };
+
+  if (!isOfflineOnlyUser(req.user)) {
+    await ensureUserExists(authUser.id, username, secretHash);
+    const existingProfile = await getUserProfile(authUser.id);
+    await upsertUserProfile({
+      user_id: authUser.id,
+      display_name: existingProfile?.display_name || displayName,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: existingProfile?.preferences || {}
+    });
+  }
 
   return true;
 };
@@ -436,6 +484,9 @@ const enforceUsageLimit = (
   type: 'interaction' | 'council' | 'meaning'
 ): boolean => {
   if (!runtimeConfig.usageLimitsEnabled || !req.user) {
+    return true;
+  }
+  if (hasFounderAccess(req.user)) {
     return true;
   }
 
@@ -730,6 +781,19 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
       return res.status(401).json({ error: 'Unauthorized: User not found' });
     }
 
+    if (isOfflineOnlyUser(req.user)) {
+      return res.json({
+        userId: req.user.id,
+        displayName: req.user.username,
+        language: null,
+        activeArchetype: null,
+        preferences: {
+          offlineOnly: true,
+          entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
+        }
+      });
+    }
+
     const profile = await getUserProfile(req.user.id);
     res.json({
       userId: req.user.id,
@@ -764,6 +828,20 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     const safeDisplayName = typeof displayName === 'string' ? displayName.trim().slice(0, 80) : undefined;
     const safeLanguage = language === 'DE' || language === 'EN' ? language : undefined;
     const safeActiveArchetype = typeof activeArchetype === 'string' ? activeArchetype.trim().slice(0, 64) : null;
+
+    if (isOfflineOnlyUser(req.user)) {
+      return res.json({
+        userId: req.user.id,
+        displayName: safeDisplayName || req.user.username,
+        language: safeLanguage || null,
+        activeArchetype: safeActiveArchetype,
+        preferences: {
+          offlineOnly: true,
+          entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
+        },
+        persistenceStatus: 'offline_only_local'
+      });
+    }
 
     const profile = await upsertUserProfile({
       user_id: req.user.id,
@@ -880,7 +958,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     }
 
     // Ensure user exists in Supabase (if configured)
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(user)) {
       await ensureUserExists(user.id, user.username, user.secretHash);
     }
 
@@ -971,7 +1049,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
 
     const persistCouncilExchange = async (reply: string) => {
       // Best-effort persistence: database issues must not break no-budget/mock responses.
-      if (!isSupabaseConfigured()) {
+      if (!isSupabaseConfigured() || isOfflineOnlyUser(req.user)) {
         return;
       }
 
@@ -1059,7 +1137,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     let completion;
     try {
       completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini', // Using gpt-4o-mini as specified
+        model: runtimeConfig.openAiModel,
         messages: [
           { role: 'system', content: systemPrompt },
           ...conversationHistory,
@@ -1069,7 +1147,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       });
       
       // Log mode and temperature for debugging
-      console.log(`[API] OpenAI call - mode: ${mode.toUpperCase()}, temperature: ${temperature}, promptLength: ${systemPrompt.length}`);
+      console.log(`[API] OpenAI call - mode: ${mode.toUpperCase()}, model: ${runtimeConfig.openAiModel}, temperature: ${temperature}, promptLength: ${systemPrompt.length}`);
     } catch (openaiError: any) {
       // Handle OpenAI API errors gracefully
       console.error('[COUNCIL] OpenAI API error:', {
@@ -1113,6 +1191,46 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     if (!reply) {
       console.warn('[API] Empty reply from OpenAI', { userId, mode });
       reply = 'I apologize, but I could not generate a response. Please try again.';
+    }
+
+    if (mode === 'council' && openai && countCouncilSpeakers(reply) < 3) {
+      console.warn('[COUNCIL] Too few council speakers; retrying with strict multi-voice format', {
+        userId,
+        speakerCount: countCouncilSpeakers(reply),
+        replyPreview: reply.substring(0, 160),
+      });
+
+      try {
+        const retryCompletion = await openai.chat.completions.create({
+          model: runtimeConfig.openAiModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...conversationHistory,
+            {
+              role: 'system',
+              content:
+                'FORMAT REPAIR: Your previous council response had too few distinct voices. Return a full council round with at least four distinct [[SPEAKER: ARCHETYPE_ID]] sections, using only valid IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLORER, ALCHEMIST. Do not force closure. End with a living question unless the user explicitly asked for a decision or action plan. Do not explain the repair.',
+            },
+          ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+          temperature: 0.65,
+          stream: false,
+        });
+
+        const repairedReply = retryCompletion?.choices?.[0]?.message?.content || '';
+        if (countCouncilSpeakers(repairedReply) >= 3) {
+          reply = repairedReply;
+        } else {
+          console.warn('[COUNCIL] Format repair still had too few speakers; returning original reply', {
+            userId,
+            repairedSpeakerCount: countCouncilSpeakers(repairedReply),
+          });
+        }
+      } catch (repairError: any) {
+        console.warn('[COUNCIL] Format repair retry failed; returning original reply', {
+          userId,
+          message: repairError?.message,
+        });
+      }
     }
     
     // CRITICAL: In DIRECT mode, strip any council structure that might have leaked through
@@ -1169,7 +1287,7 @@ app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: 
     }
     
     // Persist integration to Supabase (if configured)
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         await createLoreEntry({
           user_id: userId,
@@ -1234,16 +1352,20 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       sessionId, 
       mode, 
       activeArchetype, 
+      language,
       messages, 
       userLore, 
-      currentQuestState 
+      currentQuestState,
+      meaningContext,
     } = req.body as { 
       sessionId?: string;
       mode?: 'single' | 'council';
       activeArchetype?: string;
+      language?: 'EN' | 'DE';
       messages?: Array<{ role: string; content: string; meta?: any }>;
       userLore?: string;
       currentQuestState?: { title?: string; state?: string; objective?: string };
+      meaningContext?: any;
     };
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -1276,6 +1398,17 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       })
       .join('\n\n');
     
+    const outputLanguage = language === 'DE' ? 'DE' : 'EN';
+    const outputLanguageInstruction = outputLanguage === 'DE'
+      ? `OUTPUT LANGUAGE:
+- Write every user-facing string value in German.
+- This includes questLogEntries.title/content, soulTimelineEvents.label/summary, breakthroughs.title/insight/trigger/action, and nextQuestState fields.
+- Keep JSON property names exactly in English.
+- Type constants such as "BREAKTHROUGH" and "EVENT" must remain English constants.`
+      : `OUTPUT LANGUAGE:
+- Write every user-facing string value in English.
+- Keep JSON property names and type constants exactly as specified.`;
+
     // Build analysis prompt
     const analysisPrompt = `You are the Meaning Agent. Analyze this conversation transcript and extract meaningful insights.
 
@@ -1284,12 +1417,20 @@ ${transcript}
 
 ${userLore ? `USER CONTEXT:\n${userLore}\n` : ''}
 ${currentQuestState ? `CURRENT QUEST: ${currentQuestState.title || 'None'}\nCURRENT STATE: ${currentQuestState.state || 'None'}\n` : ''}
+${meaningContext?.emotionalState ? `CURRENT EMOTIONAL STATE SCAN:
+${JSON.stringify(meaningContext.emotionalState, null, 2)}
+
+Use this as a soft communication signal only. It is not a diagnosis. Preserve user agency and avoid labeling the user.
+` : ''}
+
+${outputLanguageInstruction}
 
 Analyze this conversation and return JSON ONLY (no prose, no explanations). Extract:
 
 1. **Questlog Entry**: One meaningful questlog entry summarizing the session's main topic/objective
 2. **Soul Timeline Event**: One significant event or moment from the conversation
 3. **Breakthrough**: One breakthrough or realization (if any occurred, otherwise empty array)
+4. **Emotional State**: A gentle communication scan for tone/pacing, not a diagnosis
 
 Rules:
 - Return STRICT JSON only (no markdown, no code blocks, no explanations)
@@ -1298,12 +1439,14 @@ Rules:
 - If session is empty or trivial, return empty arrays
 - Use ISO date strings for createdAt fields
 - Generate unique IDs (use short UUIDs or timestamps)
+- emotionalState must use schemaVersion 1, valence POSITIVE/NEUTRAL/MIXED/NEGATIVE, activation LOW/MEDIUM/HIGH, clarity CLEAR/UNCERTAIN/OVERLOADED, supportNeeds from PRESENCE/MIRRORING/GROUNDING/CLARITY/ACTION, and confidence from 0 to 1.
 
 Return this exact JSON structure:
 {
   "questLogEntries": [{"id": "...", "createdAt": "...", "title": "...", "content": "...", "tags": [], "relatedArchetypes": [], "sourceSessionId": "..."}],
   "soulTimelineEvents": [{"id": "...", "createdAt": "...", "label": "...", "summary": "...", "intensity": 5, "type": "EVENT", "tags": [], "sourceSessionId": "..."}],
   "breakthroughs": [{"id": "...", "createdAt": "...", "title": "...", "insight": "...", "trigger": "...", "action": "...", "tags": [], "sourceSessionId": "..."}],
+  "emotionalState": {"schemaVersion": 1, "valence": "MIXED", "activation": "MEDIUM", "clarity": "UNCERTAIN", "primarySignals": [], "supportNeeds": [], "overloadRisk": false, "confidence": 0.5, "updatedAt": "..."},
   "attributeUpdates": [],
   "skillUpdates": [],
   "nextQuestState": null
@@ -1318,7 +1461,7 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     let completion;
     try {
       completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: runtimeConfig.openAiModel,
         messages: [
           { role: 'system', content: 'You are a JSON-only API. Return valid JSON only, no markdown, no explanations.' },
           { role: 'user', content: analysisPrompt }
@@ -1393,6 +1536,19 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     if (!analysisResult.breakthroughs || !Array.isArray(analysisResult.breakthroughs)) {
       analysisResult.breakthroughs = [];
     }
+    if (analysisResult.emotionalState && typeof analysisResult.emotionalState === 'object') {
+      analysisResult.emotionalState = {
+        schemaVersion: 1,
+        valence: analysisResult.emotionalState.valence || 'NEUTRAL',
+        activation: analysisResult.emotionalState.activation || 'MEDIUM',
+        clarity: analysisResult.emotionalState.clarity || 'UNCERTAIN',
+        primarySignals: Array.isArray(analysisResult.emotionalState.primarySignals) ? analysisResult.emotionalState.primarySignals : [],
+        supportNeeds: Array.isArray(analysisResult.emotionalState.supportNeeds) ? analysisResult.emotionalState.supportNeeds : [],
+        overloadRisk: Boolean(analysisResult.emotionalState.overloadRisk),
+        confidence: typeof analysisResult.emotionalState.confidence === 'number' ? analysisResult.emotionalState.confidence : 0.5,
+        updatedAt: analysisResult.emotionalState.updatedAt || new Date().toISOString()
+      };
+    }
     
     // Ensure all timeline events have required fields
     analysisResult.soulTimelineEvents.forEach((event: any) => {
@@ -1464,7 +1620,7 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     });
     
     // Persist to Supabase (if configured) - best-effort, don't break response
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         // Persist questlog entries
         for (const entry of analysisResult.questLogEntries) {
@@ -1540,7 +1696,7 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
     const userId = req.user.id;
     
     // Load from Supabase if configured
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         const [questLogEntries, timelineEvents, breakthroughs] = await Promise.all([
           getQuestLogEntries(userId),
@@ -1637,6 +1793,7 @@ function buildDirectChatPrompt(userProfile: any): string {
   const archetypeConfig = archetypesConfig[activeArchetype];
   const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
   const baseSystemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
+  const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'direct', archetypeName);
   
   // Clean the base prompt - remove any council references
   const cleanedPrompt = baseSystemPrompt
@@ -1646,6 +1803,8 @@ function buildDirectChatPrompt(userProfile: any): string {
   
   // STRICT DIRECT MODE PROMPT - NO COUNCIL STRUCTURE ALLOWED
   const directChatPrompt = `${cleanedPrompt}
+
+${communicationContract}
 
 ═══════════════════════════════════════════════════════════════
 CRITICAL: SINGLE VOICE MODE - YOU MUST FOLLOW THESE RULES EXACTLY
@@ -1699,12 +1858,91 @@ Integrate this context into your understanding. DO NOT recite these facts explic
   return directChatPrompt;
 }
 
+function buildCommunicationContract(meaningContext: any, language: string, mode: 'direct' | 'council', voiceName?: string): string {
+  const communicationMode = meaningContext?.communicationMode || 'MIRROR';
+  const consentState = meaningContext?.consentState || 'ASK_BEFORE_DEEPENING';
+  const cycleLine = meaningContext?.activeCycleTheme
+    ? `Active integration cycle: day ${meaningContext.activeCycleDay || '?'} around "${meaningContext.activeCycleTheme}".`
+    : 'No active integration cycle context was provided.';
+  const emotionalState = meaningContext?.emotionalState;
+  const emotionalLine = emotionalState
+    ? `Emotional scan: valence=${emotionalState.valence || 'UNKNOWN'}, activation=${emotionalState.activation || 'UNKNOWN'}, clarity=${emotionalState.clarity || 'UNKNOWN'}, overloadRisk=${Boolean(emotionalState.overloadRisk)}, supportNeeds=${Array.isArray(emotionalState.supportNeeds) ? emotionalState.supportNeeds.join(', ') : 'none'}. Treat this as a soft pacing signal, never as a diagnosis.`
+    : 'No emotional scan was provided.';
+  const identityLine = mode === 'direct' && voiceName
+    ? `Apply this as ${voiceName}'s own voice, not as a meta-system announcement.`
+    : 'Apply this across the council without turning it into a generic moderator lecture.';
+
+  const descriptions: Record<string, { EN: string; DE: string }> = {
+    HOLD: {
+      EN: 'Hold space. Let the story breathe. Use fewer interpretations, fewer solutions, and more presence.',
+      DE: 'Halte Raum. Lass die Geschichte atmen. Nutze weniger Deutung, weniger Lösung, mehr Präsenz.',
+    },
+    MIRROR: {
+      EN: 'Mirror clearly. Reflect what is alive without rushing toward a fix.',
+      DE: 'Spiegle klar. Reflektiere, was lebendig ist, ohne vorschnell zu reparieren.',
+    },
+    EXPLORE: {
+      EN: 'Explore gently. Ask careful questions and deepen only one layer at a time.',
+      DE: 'Erkunde vorsichtig. Stelle sorgfältige Fragen und vertiefe nur eine Schicht auf einmal.',
+    },
+    GROUND: {
+      EN: 'Ground. Reduce intensity, simplify the field, and protect the user from overload.',
+      DE: 'Erde. Senke die Intensität, vereinfache das Feld und schütze vor Überlastung.',
+    },
+    ACT: {
+      EN: 'Act. Translate insight into one small, clean, realistic next move.',
+      DE: 'Handle. Übersetze Einsicht in eine kleine, klare, realistische nächste Bewegung.',
+    },
+  };
+
+  const description = descriptions[communicationMode]?.[language === 'DE' ? 'DE' : 'EN'] || descriptions.MIRROR.EN;
+
+  if (language === 'DE') {
+    return `KOMMUNIKATIONSVERTRAG:
+- Aktueller Modus: ${communicationMode}. ${description}
+- Consent-State: ${consentState}. Frage nach Erlaubnis, bevor du tief deutest, umlenkst oder einen Exit Room öffnest, wenn der Nutzer überlastet wirken könnte.
+- Geschichten dürfen leben. Nicht jede Intensität ist ein Problem; nicht jede Wiederholung braucht sofort eine Lösung.
+- Exit Rooms sind verfügbar, aber nicht reflexhaft. Nutze sie nur bei klarer Überlastung, Feststecken, Selbstverlust oder ausdrücklichem Wunsch.
+- Wenn nötig, frage knapp: "Soll ich das halten, spiegeln, sortieren, erden oder in eine kleine Handlung übersetzen?"
+- ${emotionalLine}
+- Wenn Aktivierung hoch oder Overload-Risiko wahr ist: langsamer, klarer, weniger Optionen, zuerst Halt/Erden.
+- ${cycleLine}
+- ${identityLine}`;
+  }
+
+  return `COMMUNICATION CONTRACT:
+- Current mode: ${communicationMode}. ${description}
+- Consent state: ${consentState}. Ask for permission before deep interpretation, redirection, or opening an exit room when the user may be overloaded.
+- Stories are allowed to breathe. Not every intensity is a problem; not every repetition needs an immediate solution.
+- Exit rooms are available, but not reflexive. Use them only when there is clear overload, stuckness, self-loss, or explicit user desire.
+- When needed, ask briefly: "Do you want me to hold this, mirror it, sort it, ground it, or translate it into one small action?"
+- ${emotionalLine}
+- If activation is high or overload risk is true: slow down, reduce options, and prioritize presence/grounding first.
+- ${cycleLine}
+- ${identityLine}`;
+}
+
 function buildCouncilSystemPrompt(userProfile: any): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
+  const languageInstruction = language === 'DE'
+    ? `LANGUAGE CONTRACT:
+- The user selected German.
+- Respond in German (Deutsch) for every archetype's spoken content and any optional synthesis/action sections.
+- Keep technical speaker headers exactly as [[SPEAKER: ARCHETYPE_ID]] using the English IDs.
+- Do not switch to English unless the user explicitly asks you to translate or answer in English.`
+    : `LANGUAGE CONTRACT:
+- The user selected English.
+- Respond in English for every archetype's spoken content and any optional synthesis/action sections.
+- Keep technical speaker headers exactly as [[SPEAKER: ARCHETYPE_ID]].`;
 
   // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
-  const basePrompt = `You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
+  const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'council');
+  const basePrompt = `${languageInstruction}
+
+${communicationContract}
+
+You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
 The user is present in the session. This is an ongoing conversation.
 
 The eight archetypes are:
@@ -1724,6 +1962,13 @@ Instructions:
 4. The Sovereign should usually speak last to synthesize, but this is not a hard rule.
 5. You may direct questions to the user.
 6. After a round of debate, STOP generating to allow the user to respond. Do not simulate the user.
+7. A council response with only one archetype is invalid. Always include at least four distinct [[SPEAKER: ...]] sections.
+8. Do not force closure. The council may leave a question open, let tension remain alive, or invite the user back into the conversation.
+9. Only include SOVEREIGN DECISION and NEXT STEPS when the user explicitly asks for a conclusion/action plan, when the situation clearly requires closure, or when the user is ending/integrating the session.
+10. When the user asks for the council's perspective on them, do not flatter. Avoid generic praise such as "remarkable", "inspiring", "great potential", "valuable quality", or "you are on the right path". Speak in neutral observations: patterns, tensions, likely blind spots, recurring strengths under pressure, and what each archetype notices from its own angle.
+11. Archetypal perspective is not approval. Each voice should name one concrete observation and one edge/question, without turning everything into criticism.
+12. For personal perspective requests, prefer this internal shape without labeling it mechanically: "I observe X pattern. The edge is Y." Avoid capability-praise phrasing such as "du hast Potenzial", "du bist bemerkenswert", "du bist inspirierend", "es ist offensichtlich, dass...". Translate traits into visible behavior.
+13. Avoid second-person compliment shells like "deine Disziplin ist spürbar" or "deine Kreativität ist stark". Rephrase as behavior: "Ich sehe wiederholte Bewegung in Richtung Disziplin, aber..." or "Der kreative Impuls taucht auf, bleibt aber..."
 
 CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
 
@@ -1733,9 +1978,11 @@ CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
    [[SPEAKER: ARCHETYPE_ID]]
    [Their vivid, character-appropriate response - be specific, not generic, sharp and decisive]
 
-3. After all archetypes have spoken, end with:
+3. After the archetypes have spoken, usually end with one living invitation or question to the user. Do not summarize everything into closure by default.
+
+4. Optional closure format, only when closure is actually needed or explicitly requested:
    SOVEREIGN DECISION:
-   [The final ruling or synthesis from The Sovereign - be decisive and clear, in the Sovereign's authoritative tone]
+   [The final ruling or synthesis from The Sovereign - decisive and clear, not generic]
 
    NEXT STEPS:
    - [Action item 1]
@@ -1756,12 +2003,12 @@ But what does your heart say? What work makes you feel alive? That matters more 
 Both can coexist. We can build a bridge between passion and security. Innovation doesn't require abandoning stability.
 
 [[SPEAKER: SOVEREIGN]]
-The council has spoken. We see a path forward.
+The council has not closed this yet. There is a real tension between longing and safety, and it deserves one more honest answer from you before we turn it into a plan: which part feels most alive right now, and which part feels most defended?
 
-SOVEREIGN DECISION:
+OPEN INVITATION:
 We will pursue the path that aligns passion with practical security. This is not a compromise—it is integration.
 
-NEXT STEPS:
+ONLY IF CLOSURE IS REQUESTED, NEXT STEPS CAN LOOK LIKE:
 - Research hybrid roles that combine your passion with market demand
 - Create a 90-day transition plan with clear milestones
 - Set up weekly check-ins with the council to track progress
@@ -1771,7 +2018,9 @@ Valid Archetype IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLOR
 IMPORTANT: 
 - Make responses vivid, specific, and character-appropriate. Avoid generic therapy-moderator fluff.
 - Keep it short and sharp, like the original example ("greeting is the first compression… Reductive Protocol…").
-- The Sovereign's tone should be authoritative and decisive, not generic.`;
+- The Sovereign's tone should be authoritative and decisive, but not prematurely conclusive.
+- Never turn every user reply into a completed session. Let the conversation breathe unless closure is warranted.
+- No sycophancy. Do not perform admiration. If the user asks what the council sees in them, answer as witnesses, not fans.`;
 
   // Add user profile context if provided
   if (userProfile && userProfile.lore) {

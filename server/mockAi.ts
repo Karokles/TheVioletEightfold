@@ -24,8 +24,8 @@ export const createMockCouncilReply = (options: {
   }
 
   return isGerman
-    ? `[[SPEAKER: SAGE]]\n[Mock-Modus: KI deaktiviert] Der Rat laeuft lokal ohne bezahlten Provider. Thema: "${topic}".\n\n[[SPEAKER: SOVEREIGN]]\nWir behandeln dies als vorbereitende Sitzung. Sammle Kontext, entscheide den naechsten Schritt, und aktiviere echte KI erst mit Budget und Credentials.\n\nSOVEREIGN DECISION:\nDer no-budget Modus ist aktiv. Keine bezahlten API-Aufrufe wurden ausgefuehrt.\n\nNEXT STEPS:\n- Kontext lokal pruefen\n- Naechste Handlung notieren\n- Provider spaeter serverseitig aktivieren`
-    : `[[SPEAKER: SAGE]]\n[Mock mode: AI disabled] The council is running locally without a paid provider. Topic: "${topic}".\n\n[[SPEAKER: SOVEREIGN]]\nWe treat this as a preparation session. Gather context, choose the next step, and enable real AI only when budget and credentials exist.\n\nSOVEREIGN DECISION:\nNo-budget mode is active. No paid API call was made.\n\nNEXT STEPS:\n- Review context locally\n- Record the next action\n- Enable the provider later on the server`;
+    ? `[[SPEAKER: SAGE]]\n[Mock-Modus: KI deaktiviert] Der Rat laeuft lokal ohne bezahlten Provider. Thema: "${topic}".\n\n[[SPEAKER: CAREGIVER]]\nWir muessen das nicht sofort abschliessen. Halte die Frage offen genug, damit sie atmen kann.\n\n[[SPEAKER: SOVEREIGN]]\nDies bleibt eine vorbereitende Runde. Was soll der Rat als Naechstes genauer betrachten?`
+    : `[[SPEAKER: SAGE]]\n[Mock mode: AI disabled] The council is running locally without a paid provider. Topic: "${topic}".\n\n[[SPEAKER: CAREGIVER]]\nWe do not need to close this immediately. Keep the question open enough to breathe.\n\n[[SPEAKER: SOVEREIGN]]\nThis remains a preparatory round. What should the council examine next?`;
 };
 
 export const createMockMeaningResult = () => emptyMeaningResult();

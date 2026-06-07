@@ -1,9 +1,10 @@
-import { UserStats } from '../types';
+import { Language, UserStats } from '../types';
 import { getLoreTemplate, getStatsTemplate } from '../config/loader';
 
 const AUTH_TOKEN_KEY = 'vc_auth_token';
 const USER_ID_KEY = 'vc_user_id';
 const USER_DISPLAY_NAME_KEY = 'vc_user_display_name';
+const USER_LANGUAGE_KEY = 'language_preference';
 
 export interface User {
   id: string;
@@ -101,6 +102,15 @@ export const loadUserStats = (userId: string): UserStats => {
 export const saveUserStats = (userId: string, stats: UserStats) => {
   const key = getUserScopedKey('stats', userId);
   localStorage.setItem(key, JSON.stringify(stats));
+};
+
+export const loadUserLanguage = (userId: string): Language => {
+  const saved = localStorage.getItem(getUserScopedKey(USER_LANGUAGE_KEY, userId));
+  return saved === 'DE' ? 'DE' : 'EN';
+};
+
+export const saveUserLanguage = (userId: string, language: Language) => {
+  localStorage.setItem(getUserScopedKey(USER_LANGUAGE_KEY, userId), language);
 };
 
 

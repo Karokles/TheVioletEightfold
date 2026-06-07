@@ -6,11 +6,12 @@ import { Language } from '../types';
 interface RoundTableProps {
   activeArchetype: ArchetypeId;
   onSelectArchetype: (id: ArchetypeId) => void;
+  onCoreClick?: () => void;
   mini?: boolean;
   language: Language;
 }
 
-export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelectArchetype, mini = false, language }) => {
+export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelectArchetype, onCoreClick, mini = false, language }) => {
   const archetypes = Object.values(getArchetypes(language));
   // Reduced dimensions to fix out-of-bounds issue
   const radius = mini ? 40 : 65; 
@@ -82,14 +83,21 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
         
         {/* Central Resonance Core */}
         <div className="absolute z-10 flex items-center justify-center">
-           <div className={`${mini ? 'w-8 h-8' : 'w-20 h-20'} rounded-full flex items-center justify-center relative`}>
+           <button
+             type="button"
+             onClick={onCoreClick}
+             disabled={!onCoreClick}
+             title={language === 'DE' ? 'Zur Startanimation' : 'Return to start animation'}
+             aria-label={language === 'DE' ? 'Zur Startanimation' : 'Return to start animation'}
+             className={`${mini ? 'w-8 h-8' : 'w-20 h-20'} rounded-full flex items-center justify-center relative group/core outline-none transition-transform duration-500 ${onCoreClick ? 'cursor-pointer hover:scale-105 active:scale-95 focus-visible:ring-2 focus-visible:ring-purple-200/70' : 'cursor-default'}`}
+           >
                {/* Core Outer Glow */}
-               <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${activeColor} opacity-10 blur-2xl animate-pulse-slow transition-colors duration-700`} />
+               <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${activeColor} opacity-10 blur-2xl animate-pulse-slow transition-all duration-700 group-hover/core:opacity-25 group-focus-visible/core:opacity-30`} />
                
                {/* Core Structure */}
-               <div className={`relative w-full h-full rounded-full border border-purple-500/10 bg-black/60 flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-sm overflow-hidden`}>
+               <div className={`relative w-full h-full rounded-full border border-purple-500/10 bg-black/60 flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-sm overflow-hidden transition-all duration-500 group-hover/core:border-purple-200/35 group-hover/core:bg-purple-950/35 group-hover/core:shadow-[0_0_24px_rgba(216,180,254,0.22),inset_0_0_24px_rgba(255,255,255,0.08)]`}>
                   {/* Inner Energy Source */}
-                  <div className={`w-[30%] h-[30%] rounded-full bg-gradient-to-br ${activeColor} opacity-90 shadow-[0_0_20px_currentColor] animate-pulse-glow transition-colors duration-700`} />
+                  <div className={`w-[30%] h-[30%] rounded-full bg-gradient-to-br ${activeColor} opacity-90 shadow-[0_0_20px_currentColor] animate-pulse-glow transition-all duration-700 group-hover/core:w-[38%] group-hover/core:h-[38%] group-hover/core:opacity-100`} />
                   
                   {/* Grid overlay */}
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:10px_10px] opacity-30" />
@@ -101,7 +109,7 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
                {/* Orbiting Electron */}
                <div className="absolute inset-0 border border-white/5 rounded-full animate-[spin_8s_linear_infinite] border-t-purple-400/40" />
                <div className="absolute inset-2 border border-white/5 rounded-full animate-[spin_12s_linear_infinite_reverse] border-b-purple-400/30" />
-           </div>
+           </button>
         </div>
 
         {/* Seats */}

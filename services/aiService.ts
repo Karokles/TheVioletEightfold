@@ -1,5 +1,5 @@
 import { ArchetypeId } from '../constants';
-import { Language, Message } from '../types';
+import { Language, MeaningContext, Message } from '../types';
 import { getCurrentUser } from './userService';
 
 // Production safety check: ensure API base URL is set in production builds
@@ -46,7 +46,9 @@ export const sendMessageToArchetype = async (
   message: string,
   lang: Language,
   currentLore: string,
-  conversationHistory?: Message[]
+  conversationHistory?: Message[],
+  meaningContext?: MeaningContext,
+  signal?: AbortSignal
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -90,8 +92,10 @@ export const sendMessageToArchetype = async (
         lore: currentLore,
         activeArchetype: archetypeId, // This signals direct chat mode
         language: lang,
+        meaningContext,
       },
     }),
+    signal,
   });
 
   if (!response.ok) {
@@ -143,7 +147,8 @@ export const sendMessageToArchetype = async (
 export const startCouncilSession = async (
   topic: string,
   lang: Language,
-  currentLore: string
+  currentLore: string,
+  meaningContext?: MeaningContext
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -159,7 +164,7 @@ export const startCouncilSession = async (
     {
       id: '1',
       role: 'user',
-      content: topic,
+      content: `${lang === 'DE' ? '[Antworte auf Deutsch.]' : '[Respond in English.]'} ${topic}`,
       timestamp: Date.now(),
     },
   ];
@@ -173,6 +178,7 @@ export const startCouncilSession = async (
       userProfile: {
         lore: currentLore,
         language: lang,
+        meaningContext,
       },
     }),
   });
@@ -225,7 +231,8 @@ export const sendMessageToCouncil = async (
   message: string,
   conversationHistory: Message[],
   lang: Language,
-  currentLore: string
+  currentLore: string,
+  meaningContext?: MeaningContext
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -243,7 +250,7 @@ export const sendMessageToCouncil = async (
     {
       id: Date.now().toString(),
       role: 'user',
-      content: message,
+      content: `${lang === 'DE' ? '[Antworte auf Deutsch.]' : '[Respond in English.]'} ${message}`,
       timestamp: Date.now(),
     },
   ];
@@ -262,6 +269,7 @@ export const sendMessageToCouncil = async (
       userProfile: {
         lore: currentLore,
         language: lang,
+        meaningContext,
       },
     }),
   });
@@ -335,8 +343,10 @@ export async function analyzeMeaning(
     sessionId?: string;
     mode?: 'single' | 'council';
     activeArchetype?: string;
+    language?: Language;
     userLore?: string;
     currentQuestState?: { title?: string; state?: string; objective?: string };
+    meaningContext?: MeaningContext;
   }
 ): Promise<import('../types').MeaningAnalysisResult> {
   const user = getCurrentUser();
@@ -351,13 +361,15 @@ export async function analyzeMeaning(
       sessionId: options?.sessionId,
       mode: options?.mode || 'council',
       activeArchetype: options?.activeArchetype,
+      language: options?.language,
       messages: messages.map(msg => ({
         role: msg.role,
         content: msg.content,
         meta: msg.archetypeId ? { archetypeId: msg.archetypeId } : undefined
       })),
       userLore: options?.userLore,
-      currentQuestState: options?.currentQuestState
+      currentQuestState: options?.currentQuestState,
+      meaningContext: options?.meaningContext
     }),
   });
 
@@ -422,7 +434,11 @@ export async function analyzeMeaning(
       const merged: import('../types').MeaningAnalysisResult = {
         questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
         soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
-        breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs])
+        breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs]),
+        emotionalState: data.emotionalState || existingData.emotionalState,
+        attributeUpdates: data.attributeUpdates || existingData.attributeUpdates,
+        skillUpdates: data.skillUpdates || existingData.skillUpdates,
+        nextQuestState: data.nextQuestState || existingData.nextQuestState,
       };
       
       localStorage.setItem(storageKey, JSON.stringify(merged));
@@ -445,6 +461,55 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
     };
   }
 
+  const storageKey = `user_${user.id}_meaning_state`;
+  const loadLocalState = (): import('../types').MeaningAnalysisResult => {
+    try {
+      const existing = localStorage.getItem(storageKey);
+      if (existing) {
+        const parsed = JSON.parse(existing);
+        return {
+          questLogEntries: Array.isArray(parsed.questLogEntries) ? parsed.questLogEntries : [],
+          soulTimelineEvents: Array.isArray(parsed.soulTimelineEvents) ? parsed.soulTimelineEvents : [],
+          breakthroughs: Array.isArray(parsed.breakthroughs) ? parsed.breakthroughs : [],
+          emotionalState: parsed.emotionalState,
+          attributeUpdates: parsed.attributeUpdates,
+          skillUpdates: parsed.skillUpdates,
+          nextQuestState: parsed.nextQuestState,
+        };
+      }
+    } catch (e) {
+      console.warn('Failed to load meaning state from localStorage');
+    }
+
+    return {
+      questLogEntries: [],
+      soulTimelineEvents: [],
+      breakthroughs: []
+    };
+  };
+
+  const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
+    const seen = new Set<string>();
+    return arr.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  };
+
+  const mergeMeaningState = (
+    primary: import('../types').MeaningAnalysisResult,
+    secondary: import('../types').MeaningAnalysisResult,
+  ): import('../types').MeaningAnalysisResult => ({
+    questLogEntries: dedupeById([...(primary.questLogEntries || []), ...(secondary.questLogEntries || [])]),
+    soulTimelineEvents: dedupeById([...(primary.soulTimelineEvents || []), ...(secondary.soulTimelineEvents || [])]),
+    breakthroughs: dedupeById([...(primary.breakthroughs || []), ...(secondary.breakthroughs || [])]),
+    emotionalState: primary.emotionalState || secondary.emotionalState,
+    attributeUpdates: primary.attributeUpdates || secondary.attributeUpdates,
+    skillUpdates: primary.skillUpdates || secondary.skillUpdates,
+    nextQuestState: primary.nextQuestState || secondary.nextQuestState,
+  });
+
   // Try backend first
   try {
     const response = await fetch(`${API_BASE_URL}/api/meaning/state`, {
@@ -453,10 +518,19 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
     });
 
     if (response.ok) {
-      const data = await response.json();
+      const backendData = await response.json();
+      const data = mergeMeaningState(loadLocalState(), {
+        questLogEntries: Array.isArray(backendData.questLogEntries) ? backendData.questLogEntries : [],
+        soulTimelineEvents: Array.isArray(backendData.soulTimelineEvents) ? backendData.soulTimelineEvents : [],
+        breakthroughs: Array.isArray(backendData.breakthroughs) ? backendData.breakthroughs : [],
+        emotionalState: backendData.emotionalState,
+        attributeUpdates: backendData.attributeUpdates,
+        skillUpdates: backendData.skillUpdates,
+        nextQuestState: backendData.nextQuestState,
+      });
       // Also update localStorage as backup
       try {
-        localStorage.setItem(`user_${user.id}_meaning_state`, JSON.stringify(data));
+        localStorage.setItem(storageKey, JSON.stringify(data));
       } catch (e) {
         console.warn('Failed to backup meaning state to localStorage');
       }
@@ -467,21 +541,7 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
   }
 
   // Fallback to localStorage
-  try {
-    const storageKey = `user_${user.id}_meaning_state`;
-    const existing = localStorage.getItem(storageKey);
-    if (existing) {
-      return JSON.parse(existing);
-    }
-  } catch (e) {
-    console.warn('Failed to load meaning state from localStorage');
-  }
-
-  return {
-    questLogEntries: [],
-    soulTimelineEvents: [],
-    breakthroughs: []
-  };
+  return loadLocalState();
 }
 
 // Integration endpoint (for questlog integration) - DEPRECATED: Use analyzeMeaning instead

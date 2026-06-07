@@ -25,5 +25,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "dist",
+    "server",
+    "the-violet-eightfoldzzzzz88",
+    "services/geminiService.ts"
+  ]
 }

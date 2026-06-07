@@ -51,6 +51,8 @@ PAYMENT_ENABLED=false
 AUTH_STRICT_MODE=false
 DEBUG_ENDPOINTS_ENABLED=true
 LOCAL_AUTH_ENABLED=true
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 4. Start the backend server:
@@ -64,6 +66,15 @@ To verify local no-budget mode while the backend is running:
 ```bash
 npm run test:no-budget
 ```
+
+To enable live AI chat, keep the key server-side and switch the provider on:
+```env
+AI_PROVIDER_ENABLED=true
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+The frontend only needs `VITE_API_BASE_URL`; do not place paid provider keys in root `.env`.
 
 ### Frontend Setup
 

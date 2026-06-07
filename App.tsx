@@ -1,22 +1,29 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { RoundTable } from './components/RoundTable';
 import { ChatInterface } from './components/ChatInterface';
 import { CouncilSession } from './components/CouncilSession';
 import { StatsInterface } from './components/StatsInterface';
+import { CycleInterface } from './components/CycleInterface';
 import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
-import { Language, UserStats, ScribeAnalysis } from './types';
-import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser } from './services/userService';
+import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle, Language, UserStats, ScribeAnalysis } from './types';
+import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser } from './services/userService';
 import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
-import { getProfile } from './services/profileService';
-import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut } from 'lucide-react';
+import { getProfile, updateProfile } from './services/profileService';
+import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, loadCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
+import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPreferences, suggestCommunicationMode } from './services/communicationService';
+import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
+import { mergeLocalMeaningState } from './services/meaningStateService';
+import { scanEmotionalState } from './services/emotionalStateService';
+import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles } from 'lucide-react';
 
 enum AppMode {
   DIRECT_CHAT = 'DIRECT_CHAT',
   COUNCIL_SESSION = 'COUNCIL_SESSION',
+  CYCLE = 'CYCLE',
   STATS = 'STATS',
 }
 
@@ -39,18 +46,29 @@ const mergeStrings = (initial: string[], saved: string[]): string[] => {
 };
 
 export default function App() {
+  // Get current user before any state initializer needs user-scoped storage.
+  const currentUser = getCurrentUser();
+  const currentUserId = currentUser?.id;
+
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!getCurrentUser());
   const [hasEntered, setHasEntered] = useState(false);
   const [currentMode, setCurrentMode] = useState<AppMode>(AppMode.DIRECT_CHAT);
   const [activeArchetype, setActiveArchetype] = useState<ArchetypeId>(ArchetypeId.SOVEREIGN);
-  const [language, setLanguage] = useState<Language>('EN');
+  const [language, setLanguage] = useState<Language>(() => currentUser ? loadUserLanguage(currentUser.id) : 'EN');
   const [statsRefreshKey, setStatsRefreshKey] = useState(0); // Force StatsInterface refresh
+  const [cycle, setCycle] = useState<IntegrationCycle | null>(() => {
+    if (!currentUser) return null;
+    return loadCurrentCycle(currentUser.id);
+  });
+  const [communicationPreferences, setCommunicationPreferences] = useState(() => {
+    if (!currentUser) return loadCommunicationPreferences('local');
+    return loadCommunicationPreferences(currentUser.id);
+  });
+  const [recentUserSignals, setRecentUserSignals] = useState<string[]>([]);
+  const [emotionalState, setEmotionalState] = useState<EmotionalStateScan | undefined>(undefined);
   
   // Mobile specific state
   const [showMobileArchetypes, setShowMobileArchetypes] = useState(false);
-
-  // Get current user
-  const currentUser = getCurrentUser();
 
   // --- Persistent State for Lifelong System (Per-User Scoped) ---
   
@@ -78,16 +96,48 @@ export default function App() {
 
   // Save changes to persistence (per-user scoped)
   useEffect(() => { 
-    if (currentUser) {
-      saveUserLore(currentUser.id, lore);
+    if (currentUserId) {
+      saveUserLore(currentUserId, lore);
     }
-  }, [lore, currentUser]);
+  }, [lore, currentUserId]);
 
   useEffect(() => { 
-    if (currentUser) {
-      saveUserStats(currentUser.id, stats);
+    if (currentUserId) {
+      saveUserStats(currentUserId, stats);
     }
-  }, [stats, currentUser]);
+  }, [stats, currentUserId]);
+
+  useEffect(() => {
+    if (currentUserId) {
+      saveCurrentCycle(currentUserId, cycle);
+    }
+  }, [cycle, currentUserId]);
+
+  useEffect(() => {
+    if (currentUserId) {
+      saveCommunicationPreferences(currentUserId, communicationPreferences);
+    }
+  }, [communicationPreferences, currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    saveUserLanguage(currentUserId, language);
+  }, [currentUserId, language]);
+
+  const meaningContext = useMemo(
+    () => buildMeaningContext(communicationPreferences, cycle, emotionalState),
+    [communicationPreferences, cycle, emotionalState],
+  );
+
+  const handleUserSignal = (content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    setRecentUserSignals(prev => {
+      const next = [...prev, trimmed].slice(-6);
+      setEmotionalState(scanEmotionalState(next));
+      return next;
+    });
+  };
 
   // --- Data Manipulation Handlers ---
   const handleScribeUpdate = (updates: ScribeAnalysis) => {
@@ -111,11 +161,20 @@ export default function App() {
   };
 
   const loadSignedInUserState = async () => {
-    await getProfile();
+    const profile = await getProfile();
     const user = getCurrentUser();
     if (user) {
+      const preferredLanguage = profile?.language === 'DE' || profile?.language === 'EN'
+        ? profile.language
+        : loadUserLanguage(user.id);
+      setLanguage(preferredLanguage);
+      saveUserLanguage(user.id, preferredLanguage);
       setLore(loadUserLore(user.id));
       setStats(loadUserStats(user.id));
+      setCycle(loadCurrentCycle(user.id));
+      setCommunicationPreferences(loadCommunicationPreferences(user.id));
+      setRecentUserSignals([]);
+      setEmotionalState(undefined);
     }
   };
 
@@ -147,6 +206,88 @@ export default function App() {
       inventory: [],
       calendarEvents: [],
     });
+    setCycle(null);
+    setRecentUserSignals([]);
+    setEmotionalState(undefined);
+  };
+
+  const handleCommunicationModeChange = (mode: CommunicationMode) => {
+    setCommunicationPreferences(prev => ({
+      ...prev,
+      mode,
+      consentState: mode === 'GROUND' || mode === 'HOLD' ? 'LOW_INTERVENTION' : 'ASK_BEFORE_DEEPENING',
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const handleStartCycle = (title: string, answers: IntegrationCycle['onboardingAnswers']) => {
+    const nextCycle = startIntegrationCycle(title, answers);
+    setCycle(nextCycle);
+    setStats(prev => ({
+      ...prev,
+      level: language === 'DE' ? 'Tag 1' : 'Day 1',
+      currentQuest: `Cycle: ${nextCycle.theme}`,
+      state: language === 'DE' ? 'Im Integrationszyklus' : 'In integration cycle',
+    }));
+  };
+
+  const handleUpdateCycle = (record: Omit<CycleDayRecord, 'date'>) => {
+    if (!cycle) {
+      return;
+    }
+
+    if (!record.completedAt) {
+      const nextParticipationDay = getCycleDayNumber(cycle);
+      const existingRecord = cycle.dayRecords.find(dayRecord => dayRecord.day === record.day);
+      if (record.day !== nextParticipationDay && !existingRecord) {
+        console.warn('[CYCLE] Ignored invalid draft save attempt', record.day);
+        return;
+      }
+
+      setCycle(upsertCycleDayRecord(cycle, record));
+      return;
+    }
+
+    const existingCompletedRecord = cycle.dayRecords.find(dayRecord => dayRecord.day === record.day && dayRecord.completedAt);
+    if (!existingCompletedRecord) {
+      const completionCheck = canCompleteCycleDay(cycle, record.day);
+      if (!completionCheck.allowed) {
+        console.warn('[CYCLE] Ignored invalid completion attempt', completionCheck.reason);
+        return;
+      }
+    }
+
+    const nextCycle = upsertCycleDayRecord(cycle, record);
+    setCycle(nextCycle);
+    setStats(prev => ({
+      ...prev,
+      level: language === 'DE' ? `Tag ${getCycleDayNumber(nextCycle)}` : `Day ${getCycleDayNumber(nextCycle)}`,
+      state: nextCycle.status === 'COMPLETED'
+        ? (language === 'DE' ? 'Zyklus abgeschlossen' : 'Cycle completed')
+        : prev.state,
+    }));
+
+    if (existingCompletedRecord || !currentUserId || !isBlueprintCycleMilestone(record.day)) {
+      return;
+    }
+
+    const savedRecord = nextCycle.dayRecords.find(dayRecord => dayRecord.day === record.day);
+    if (!savedRecord) {
+      return;
+    }
+
+    const meaningPatch = buildCycleMilestoneMeaning(nextCycle, savedRecord, language);
+    if (meaningPatch) {
+      mergeLocalMeaningState(currentUserId, meaningPatch);
+      setStats(prev => applyCycleMilestoneToStats(prev, nextCycle, savedRecord, language));
+      setStatsRefreshKey(prev => prev + 1);
+    }
+  };
+
+  const handleArchiveCycle = () => {
+    if (!currentUser || !cycle) return;
+    archiveCycle(currentUser.id, cycle);
+    setCycle(null);
   };
 
   // Register auth error handler on mount
@@ -240,7 +381,17 @@ export default function App() {
   }, [isAuthenticated]);
 
   const toggleLanguage = () => {
-    setLanguage(prev => prev === 'EN' ? 'DE' : 'EN');
+    setLanguage(prev => {
+      const next = prev === 'EN' ? 'DE' : 'EN';
+      const user = getCurrentUser();
+      if (user?.id) {
+        saveUserLanguage(user.id, next);
+        updateProfile({ language: next }).catch(error => {
+          console.warn('[PROFILE] Failed to persist language preference remotely', error);
+        });
+      }
+      return next;
+    });
   };
 
   // Show login screen if not authenticated
@@ -292,8 +443,19 @@ export default function App() {
   const navItems = [
     { mode: AppMode.DIRECT_CHAT, icon: MessageSquare, label: ui.DIRECT_COUNSEL },
     { mode: AppMode.COUNCIL_SESSION, icon: ScrollText, label: ui.COUNCIL_SESSION },
+    { mode: AppMode.CYCLE, icon: CalendarDays, label: language === 'DE' ? 'Zyklus' : 'Cycle' },
     { mode: AppMode.STATS, icon: LayoutDashboard, label: ui.BLUEPRINT },
   ];
+
+  const communicationModes: Array<{ mode: CommunicationMode; label: string }> = [
+    { mode: 'HOLD', label: language === 'DE' ? 'Halten' : 'Hold' },
+    { mode: 'MIRROR', label: language === 'DE' ? 'Spiegeln' : 'Mirror' },
+    { mode: 'EXPLORE', label: language === 'DE' ? 'Erkunden' : 'Explore' },
+    { mode: 'GROUND', label: language === 'DE' ? 'Erden' : 'Ground' },
+    { mode: 'ACT', label: language === 'DE' ? 'Handeln' : 'Act' },
+  ];
+  const suggestedCommunicationMode = suggestCommunicationMode(cycle, currentMode);
+  const suggestedCommunicationModeLabel = communicationModes.find(item => item.mode === suggestedCommunicationMode.mode)?.label || suggestedCommunicationMode.mode;
 
   const hideSidePanel = currentMode !== AppMode.DIRECT_CHAT && currentMode !== AppMode.COUNCIL_SESSION; 
 
@@ -341,6 +503,34 @@ export default function App() {
                 <span className={language === 'DE' ? 'text-white' : 'text-purple-500/70'}>DE</span>
             </button>
 
+            <div className="hidden xl:flex items-center gap-1 rounded-full border border-purple-500/15 bg-violet-950/35 p-1">
+                {communicationModes.map(item => (
+                    <button
+                        key={item.mode}
+                        onClick={() => handleCommunicationModeChange(item.mode)}
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] transition-all ${
+                          communicationPreferences.mode === item.mode
+                            ? 'bg-purple-500/25 text-white ring-1 ring-purple-200/20'
+                            : 'text-purple-400/65 hover:bg-purple-500/10 hover:text-purple-100'
+                        }`}
+                        title={language === 'DE' ? `Kommunikationsmodus: ${item.label}` : `Communication mode: ${item.label}`}
+                    >
+                      {item.label}
+                    </button>
+                ))}
+            </div>
+
+            {communicationPreferences.mode !== suggestedCommunicationMode.mode && (
+                <button
+                    onClick={() => handleCommunicationModeChange(suggestedCommunicationMode.mode)}
+                    className="hidden 2xl:flex max-w-[260px] items-center gap-2 rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-sky-100 transition-all hover:border-sky-200/40 hover:bg-sky-400/15"
+                    title={suggestedCommunicationMode.reason[language]}
+                >
+                    <Sparkles size={13} />
+                    <span>{language === 'DE' ? 'Vorschlag' : 'Suggestion'}: {suggestedCommunicationModeLabel}</span>
+                </button>
+            )}
+
             <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-950/40 border border-purple-500/20 text-xs font-bold text-purple-200 hover:bg-red-950/40 hover:border-red-400/40 hover:text-red-100 transition-all duration-300"
@@ -381,6 +571,7 @@ export default function App() {
                 <RoundTable 
                   activeArchetype={activeArchetype} 
                   onSelectArchetype={setActiveArchetype} 
+                  onCoreClick={() => setHasEntered(false)}
                   language={language}
                   mini={false}
                 />
@@ -411,18 +602,42 @@ export default function App() {
            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-32 bg-purple-600/5 blur-[100px] pointer-events-none" />
            
            {currentMode === AppMode.DIRECT_CHAT && (
-             <ChatInterface activeArchetype={activeArchetype} language={language} currentLore={lore} />
+             <ChatInterface
+                activeArchetype={activeArchetype}
+                language={language}
+                currentLore={lore}
+                meaningContext={meaningContext}
+                onUserSignal={handleUserSignal}
+             />
            )}
            {currentMode === AppMode.COUNCIL_SESSION && (
              <CouncilSession 
                 language={language} 
                 currentStats={stats} 
                 currentLore={lore} 
+                meaningContext={meaningContext}
+                onUserSignal={handleUserSignal}
                 onIntegrate={handleScribeUpdate} 
              />
            )}
+           {currentMode === AppMode.CYCLE && (
+             <CycleInterface
+                language={language}
+                cycle={cycle}
+                onStartCycle={handleStartCycle}
+                onUpdateCycle={handleUpdateCycle}
+                onArchiveCycle={handleArchiveCycle}
+             />
+           )}
            {currentMode === AppMode.STATS && (
-             <StatsInterface key={statsRefreshKey} language={language} stats={stats} />
+             <StatsInterface
+                key={`${statsRefreshKey}-${language}`}
+                language={language}
+                stats={stats}
+                cycle={cycle}
+                meaningContext={meaningContext}
+                currentLore={lore}
+             />
            )}
         </div>
       </main>
@@ -492,6 +707,10 @@ export default function App() {
                     <RoundTable 
                         activeArchetype={activeArchetype} 
                         onSelectArchetype={setActiveArchetype} 
+                        onCoreClick={() => {
+                          setShowMobileArchetypes(false);
+                          setHasEntered(false);
+                        }}
                         language={language}
                         mini={false}
                     />

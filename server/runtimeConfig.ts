@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 export type AppEnvironment = 'local' | 'staging' | 'production';
 
 const truthy = new Set(['1', 'true', 'yes', 'on', 'enabled']);
@@ -48,14 +52,17 @@ export const runtimeConfig = {
   paymentEnabled: readBoolean('PAYMENT_ENABLED', false),
   supabaseAuthEnabled: readBoolean('SUPABASE_AUTH_ENABLED', appEnvironment === 'staging'),
   authStrictMode: readBoolean('AUTH_STRICT_MODE', defaultStrict),
-  usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', true),
+  usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', appEnvironment !== 'local'),
   debugEndpointsEnabled: readBoolean('DEBUG_ENDPOINTS_ENABLED', appEnvironment !== 'production'),
   localAuthEnabled: readBoolean('LOCAL_AUTH_ENABLED', appEnvironment === 'local' || appEnvironment === 'staging'),
   weeklyFreeInteractions: Number(process.env.WEEKLY_FREE_INTERACTIONS || 25),
   weeklyCouncilSessions: Number(process.env.WEEKLY_COUNCIL_SESSIONS || 5),
   weeklyMeaningAnalyses: Number(process.env.WEEKLY_MEANING_ANALYSES || 10),
+  offlineOnlyIdentifiers: process.env.OFFLINE_ONLY_IDENTIFIERS || '',
+  founderAccessIdentifiers: process.env.FOUNDER_ACCESS_IDENTIFIERS || '',
   jwtSecret: process.env.JWT_SECRET,
   openAiApiKey: process.env.OPENAI_API_KEY,
+  openAiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   hasDatabaseCredentials: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
   hasPaymentCredentials: !!process.env.PAYMENT_PROVIDER_SECRET,
 };

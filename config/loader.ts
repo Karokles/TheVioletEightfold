@@ -3,7 +3,7 @@ import uiTextData from './ui-text.json';
 import brandingData from './branding.json';
 import loreTemplateData from './user-lore-template.json';
 import statsTemplateData from './user-stats-template.json';
-import { Archetype, Language } from '../types';
+import { Archetype, Language, UserStats } from '../types';
 import { ArchetypeId } from '../constants';
 
 export interface ArchetypeConfig {
@@ -36,7 +36,7 @@ export const getArchetypes = (lang: Language): Record<ArchetypeId, Archetype> =>
   return result;
 };
 
-export const getUIText = (lang: Language) => uiTextData[lang];
+export const getUIText = (lang: Language): Record<string, string> => uiTextData[lang];
 
 export const getBranding = (lang: Language) => ({
   appTitle: brandingData.appTitle[lang],
@@ -46,5 +46,5 @@ export const getBranding = (lang: Language) => ({
 
 export const getLoreTemplate = () => loreTemplateData.template;
 
-export const getStatsTemplate = () => statsTemplateData;
+export const getStatsTemplate = (): UserStats => statsTemplateData as UserStats;
 

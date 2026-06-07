@@ -33,6 +33,8 @@ Required Render staging variables:
 - `LOCAL_AUTH_ENABLED=true`
 - `AUTH_STRICT_MODE=false`
 - `USAGE_LIMITS_ENABLED=true`
+- `FOUNDER_ACCESS_IDENTIFIERS` for accounts that should bypass usage caps, e.g. `lionceau*`
+- `OFFLINE_ONLY_IDENTIFIERS` for personal accounts that should keep sensitive app state local and skip database persistence, e.g. `lionceau*`
 
 Required Vercel staging variables:
 
@@ -64,6 +66,8 @@ Local test-user login writes or updates one row in `users`.
 Supabase Auth sign-in creates or updates the matching `users` row through the backend when a protected API route is called.
 
 `GET /api/profile` and `PUT /api/profile` read and update the authenticated user's `user_profiles` row.
+
+Accounts matched by `OFFLINE_ONLY_IDENTIFIERS` do not write app data to Supabase. Their lore, cycle, blueprint, communication preferences, and meaning state stay browser-local. The backend still authenticates the request and returns safe responses, but skips profile, council, lore, and meaning persistence.
 
 `POST /api/council` writes:
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Message, ChatStatus, Language } from '../types';
+import { Message, ChatStatus, Language, MeaningContext } from '../types';
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
 import { sendMessageToArchetype } from '../services/aiService';
@@ -10,9 +10,11 @@ interface ChatInterfaceProps {
   activeArchetype: ArchetypeId;
   language: Language;
   currentLore: string;
+  meaningContext: MeaningContext;
+  onUserSignal?: (content: string) => void;
 }
 
-export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, language, currentLore }) => {
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, language, currentLore, meaningContext, onUserSignal }) => {
   const archetypes = getArchetypes(language);
   const currentArchetypeData = archetypes[activeArchetype];
   const ui = getUIText(language);
@@ -73,10 +75,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
       id: Date.now().toString(),
       role: 'user',
       content: input,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      archetypeId: activeArchetype
     };
 
     setMessages(prev => [...prev, userMsg]);
+    onUserSignal?.(userMsg.content);
     setInput('');
     setStatus(ChatStatus.STREAMING);
 
@@ -93,7 +97,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
           timestamp: msg.timestamp,
         }));
 
-      const stream = await sendMessageToArchetype(activeArchetype, userMsg.content, language, currentLore, conversationHistory);
+      const stream = await sendMessageToArchetype(
+        activeArchetype,
+        userMsg.content,
+        language,
+        currentLore,
+        conversationHistory,
+        meaningContext,
+        abortController.signal
+      );
       
       const botMsgId = (Date.now() + 1).toString();
       setMessages(prev => [...prev, {
