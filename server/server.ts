@@ -29,6 +29,7 @@ import {
 } from './supabase.js';
 import { getCredentialWarnings, runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 import { createMockCouncilReply, createMockMeaningResult } from './mockAi.js';
+import { buildOrganicPromptBlock, createResponsePlan, ResponsePlan } from './conversationOrchestrator.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1215,10 +1216,22 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     // Log request (no secrets) - CRITICAL for debugging mode detection
     console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
 
+    const latestUserMessage = String(messages[messages.length - 1]?.content || '')
+      .replace(/^\[(Antworte auf Deutsch\.|Respond in English\.)\]\s*/i, '')
+      .trim();
+    const responsePlan = createResponsePlan(latestUserMessage, {
+      mode,
+      activeArchetype: userProfile?.activeArchetype,
+      language: userProfile?.language,
+      conversationLength: messages.length,
+      communicationMode: userProfile?.meaningContext?.communicationMode,
+      overloadRisk: Boolean(userProfile?.meaningContext?.overloadSignal || userProfile?.meaningContext?.emotionalState?.overloadRisk),
+    });
+
     // Build system prompt - COMPLETELY SEPARATE for direct vs council
     const systemPrompt = mode === 'direct' 
-      ? buildDirectChatPrompt(userProfile)
-      : buildCouncilSystemPrompt(userProfile);
+      ? buildDirectChatPrompt(userProfile, responsePlan)
+      : buildCouncilSystemPrompt(userProfile, responsePlan);
 
     // Build conversation history
     const conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = messages.map((msg: any) => ({
@@ -1299,7 +1312,8 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         mode,
         activeArchetype: userProfile?.activeArchetype,
         language: userProfile?.language,
-        topic: messages[messages.length - 1]?.content
+        topic: latestUserMessage,
+        responsePlan
       });
       await persistCouncilExchange(reply);
       return res.json({
@@ -1372,7 +1386,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       reply = 'I apologize, but I could not generate a response. Please try again.';
     }
 
-    if (mode === 'council' && openai && countCouncilSpeakers(reply) < 3) {
+    if (mode === 'council' && responsePlan.shouldUseCouncil && openai && countCouncilSpeakers(reply) < 2) {
       console.warn('[COUNCIL] Too few council speakers; retrying with strict multi-voice format', {
         userId,
         speakerCount: countCouncilSpeakers(reply),
@@ -1388,7 +1402,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
             {
               role: 'system',
               content:
-                'FORMAT REPAIR: Your previous council response had too few distinct voices. Return a full council round with at least four distinct [[SPEAKER: ARCHETYPE_ID]] sections, using only valid IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLORER, ALCHEMIST. Do not force closure. End with a living question unless the user explicitly asked for a decision or action plan. Do not explain the repair.',
+                'FORMAT REPAIR: Your previous council response had too few distinct voices for a true council moment. Return a brief council round with 2-4 distinct [[SPEAKER: ARCHETYPE_ID]] sections, using only valid IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLORER, ALCHEMIST. Do not force closure. End with one living question unless the user explicitly asked for a decision or action plan. Do not explain the repair.',
             },
           ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
           temperature: 0.65,
@@ -1396,7 +1410,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         });
 
         const repairedReply = retryCompletion?.choices?.[0]?.message?.content || '';
-        if (countCouncilSpeakers(repairedReply) >= 3) {
+        if (countCouncilSpeakers(repairedReply) >= 2) {
           reply = repairedReply;
         } else {
           console.warn('[COUNCIL] Format repair still had too few speakers; returning original reply', {
@@ -1411,7 +1425,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         });
       }
     }
-    
+
     // CRITICAL: In DIRECT mode, strip any council structure that might have leaked through
     if (mode === 'direct') {
       const originalReply = reply;
@@ -1536,6 +1550,7 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       userLore, 
       currentQuestState,
       meaningContext,
+      persist,
     } = req.body as { 
       sessionId?: string;
       mode?: 'single' | 'council';
@@ -1545,6 +1560,7 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       userLore?: string;
       currentQuestState?: { title?: string; state?: string; objective?: string };
       meaningContext?: any;
+      persist?: boolean;
     };
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -1797,9 +1813,11 @@ IMPORTANT: If you identify a breakthrough, you MUST:
         existingTimelineEvent.intensity = 10;
       }
     });
-    
-    // Persist to Supabase (if configured) - best-effort, don't break response
-    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
+
+    const shouldPersistMeaning = persist === true;
+
+    // Persist to Supabase only when the user explicitly saves/integrates.
+    if (shouldPersistMeaning && isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         // Persist questlog entries
         for (const entry of analysisResult.questLogEntries) {
@@ -1852,7 +1870,8 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     console.log(`[MEANING] Analysis complete for user ${userId}`, {
       questLogEntries: analysisResult.questLogEntries.length,
       timelineEvents: analysisResult.soulTimelineEvents.length,
-      breakthroughs: analysisResult.breakthroughs.length
+      breakthroughs: analysisResult.breakthroughs.length,
+      persisted: shouldPersistMeaning
     });
     
     res.json(analysisResult);
@@ -1959,7 +1978,7 @@ function loadArchetypesConfig() {
 
 // Helper function to build system prompt
 // COMPLETELY SEPARATE prompt builder for DIRECT CHAT mode
-function buildDirectChatPrompt(userProfile: any): string {
+function buildDirectChatPrompt(userProfile: any, responsePlan?: ResponsePlan): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
   const activeArchetype = userProfile?.activeArchetype;
@@ -1973,6 +1992,7 @@ function buildDirectChatPrompt(userProfile: any): string {
   const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
   const baseSystemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
   const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'direct', archetypeName);
+  const organicPromptBlock = responsePlan ? buildOrganicPromptBlock(responsePlan) : '';
   
   // Clean the base prompt - remove any council references
   const cleanedPrompt = baseSystemPrompt
@@ -1984,6 +2004,8 @@ function buildDirectChatPrompt(userProfile: any): string {
   const directChatPrompt = `${cleanedPrompt}
 
 ${communicationContract}
+
+${organicPromptBlock}
 
 ═══════════════════════════════════════════════════════════════
 CRITICAL: SINGLE VOICE MODE - YOU MUST FOLLOW THESE RULES EXACTLY
@@ -2101,7 +2123,7 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
 - ${identityLine}`;
 }
 
-function buildCouncilSystemPrompt(userProfile: any): string {
+function buildCouncilSystemPrompt(userProfile: any, responsePlan?: ResponsePlan): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
   const languageInstruction = language === 'DE'
@@ -2117,9 +2139,15 @@ function buildCouncilSystemPrompt(userProfile: any): string {
 
   // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
   const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'council');
+  const organicPromptBlock = responsePlan ? buildOrganicPromptBlock(responsePlan) : '';
+  const councilFormatRule = responsePlan?.shouldUseCouncil
+    ? '7. This is a true council moment. Include 2-4 distinct [[SPEAKER: ...]] sections. Prefer fewer voices when the user needs intimacy or pacing.'
+    : '7. This is NOT automatically a full council moment. Use 0-1 [[SPEAKER: ...]] section unless the user explicitly asked for multiple perspectives. Mirror, hold, clarify, ground, or integrate according to the response plan.';
   const basePrompt = `${languageInstruction}
 
 ${communicationContract}
+
+${organicPromptBlock}
 
 You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
 The user is present in the session. This is an ongoing conversation.
@@ -2141,7 +2169,7 @@ Instructions:
 4. The Sovereign should usually speak last to synthesize, but this is not a hard rule.
 5. You may direct questions to the user.
 6. After a round of debate, STOP generating to allow the user to respond. Do not simulate the user.
-7. A council response with only one archetype is invalid. Always include at least four distinct [[SPEAKER: ...]] sections.
+${councilFormatRule}
 8. Do not force closure. The council may leave a question open, let tension remain alive, or invite the user back into the conversation.
 9. Only include SOVEREIGN DECISION and NEXT STEPS when the user explicitly asks for a conclusion/action plan, when the situation clearly requires closure, or when the user is ending/integrating the session.
 10. When the user asks for the council's perspective on them, do not flatter. Avoid generic praise such as "remarkable", "inspiring", "great potential", "valuable quality", or "you are on the right path". Speak in neutral observations: patterns, tensions, likely blind spots, recurring strengths under pressure, and what each archetype notices from its own angle.

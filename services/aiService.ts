@@ -347,6 +347,7 @@ export async function analyzeMeaning(
     userLore?: string;
     currentQuestState?: { title?: string; state?: string; objective?: string };
     meaningContext?: MeaningContext;
+    persist?: boolean;
   }
 ): Promise<import('../types').MeaningAnalysisResult> {
   const user = getCurrentUser();
@@ -369,7 +370,8 @@ export async function analyzeMeaning(
       })),
       userLore: options?.userLore,
       currentQuestState: options?.currentQuestState,
-      meaningContext: options?.meaningContext
+      meaningContext: options?.meaningContext,
+      persist: Boolean(options?.persist)
     }),
   });
 
@@ -401,50 +403,52 @@ export async function analyzeMeaning(
 
   const data = await response.json();
   
-  // Persist to localStorage as fallback
-  try {
-    const user = getCurrentUser();
-    if (user?.id) {
-      const storageKey = `user_${user.id}_meaning_state`;
-      const existing = localStorage.getItem(storageKey);
-      let existingData: import('../types').MeaningAnalysisResult = {
-        questLogEntries: [],
-        soulTimelineEvents: [],
-        breakthroughs: []
-      };
-      
-      if (existing) {
-        try {
-          existingData = JSON.parse(existing);
-        } catch (e) {
-          console.warn('Failed to parse existing meaning state from localStorage');
+  if (options?.persist) {
+    // Persist to localStorage as fallback only when the user explicitly saves/integrates.
+    try {
+      const user = getCurrentUser();
+      if (user?.id) {
+        const storageKey = `user_${user.id}_meaning_state`;
+        const existing = localStorage.getItem(storageKey);
+        let existingData: import('../types').MeaningAnalysisResult = {
+          questLogEntries: [],
+          soulTimelineEvents: [],
+          breakthroughs: []
+        };
+
+        if (existing) {
+          try {
+            existingData = JSON.parse(existing);
+          } catch (e) {
+            console.warn('Failed to parse existing meaning state from localStorage');
+          }
         }
+
+        // Merge new data with deduplication by id
+        const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
+          const seen = new Set<string>();
+          return arr.filter(item => {
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+        };
+
+        const merged: import('../types').MeaningAnalysisResult = {
+          questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
+          soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
+          breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs]),
+          emotionalState: data.emotionalState || existingData.emotionalState,
+          attributeUpdates: data.attributeUpdates || existingData.attributeUpdates,
+          skillUpdates: data.skillUpdates || existingData.skillUpdates,
+          nextQuestState: data.nextQuestState || existingData.nextQuestState,
+        };
+
+        localStorage.setItem(storageKey, JSON.stringify(merged));
       }
-      
-      // Merge new data with deduplication by id
-      const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
-        const seen = new Set<string>();
-        return arr.filter(item => {
-          if (seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
-        });
-      };
-      
-      const merged: import('../types').MeaningAnalysisResult = {
-        questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
-        soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
-        breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs]),
-        emotionalState: data.emotionalState || existingData.emotionalState,
-        attributeUpdates: data.attributeUpdates || existingData.attributeUpdates,
-        skillUpdates: data.skillUpdates || existingData.skillUpdates,
-        nextQuestState: data.nextQuestState || existingData.nextQuestState,
-      };
-      
-      localStorage.setItem(storageKey, JSON.stringify(merged));
+    } catch (e) {
+      console.warn('Failed to persist meaning state to localStorage:', e);
     }
-  } catch (e) {
-    console.warn('Failed to persist meaning state to localStorage:', e);
   }
   
   return data;

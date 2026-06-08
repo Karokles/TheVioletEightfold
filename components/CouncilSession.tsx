@@ -8,6 +8,11 @@ import { Play, Sparkles, Send, Save, User, ListChecks, X } from 'lucide-react';
 import { Language, UserStats, ScribeAnalysis, Message, MeaningContext } from '../types';
 import { getCurrentUser } from '../services/userService';
 import { CouncilActionSummary, loadLastCouncilActionSummary, saveLastCouncilActionSummary } from '../services/councilActionSummaryService';
+import { analyzePlayfulDiscovery, DiscoveryNotice } from '../services/playfulDiscoveryService';
+import { DiscoveryCard } from './DiscoveryCard';
+import { TutorialOverlay } from './tutorial/TutorialOverlay';
+import { TutorialTrigger } from './tutorial/TutorialTrigger';
+import { tutorialEventBus, TutorialId } from '../services/tutorialProgressService';
 
 interface DialogueTurn {
   id: string;
@@ -35,6 +40,8 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const [isIntegrating, setIsIntegrating] = useState(false); // Scribe State
   const [lastActionSummary, setLastActionSummary] = useState<CouncilActionSummary | null>(null);
   const [showActionSummary, setShowActionSummary] = useState(false);
+  const [discoveries, setDiscoveries] = useState<DiscoveryNotice[]>([]);
+  const [activeTutorialId, setActiveTutorialId] = useState<TutorialId | null>(null);
   
   const dialogueEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,7 +133,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     if (turns.length === 0 && buffer.trim()) {
       turns.push({
         id: `fallback-${startIndex}`,
-        speaker: 'SOVEREIGN',
+        speaker: 'CHAMBER',
         content: buffer.trim(),
         isUser: false,
       });
@@ -135,7 +142,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     return turns;
   };
 
-  const handleStream = async (streamPromise: Promise<any>) => {
+  const handleStream = async (streamPromise: Promise<any>, streamKind: 'initial' | 'reply' = 'initial') => {
     setIsStreaming(true);
     setStreamingContent('');
     
@@ -155,6 +162,10 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         const newTurns = parseBufferToTurns(buffer, historyRef.current.length);
         setHistory(prev => [...prev, ...newTurns]);
         setStreamingContent('');
+        tutorialEventBus.emit({
+          type: streamKind === 'initial' ? 'council_initial_response_received' : 'council_reply_response_received',
+          payload: { streamKind },
+        });
     } catch (error: any) {
         console.error("Council error:", error);
         const errorMessage = error?.message || error?.toString() || 'Unknown error';
@@ -178,17 +189,35 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
   const handleStart = async () => {
     if (!topic.trim()) return;
+    const startingTopic = topic;
+    tutorialEventBus.emit({
+      type: 'council_started',
+      payload: { topic: startingTopic },
+    });
     setIsSessionActive(true);
     setHistory([{
         id: 'init-topic',
         speaker: 'USER',
-        content: topic,
+        content: startingTopic,
         isUser: true
     }]);
-    onUserSignal?.(topic);
+    onUserSignal?.(startingTopic);
+    const user = getCurrentUser();
+    if (user?.id) {
+      const notices = analyzePlayfulDiscovery({
+        userId: user.id,
+        text: startingTopic,
+        source: 'council',
+        language,
+        meaningContext,
+      });
+      if (notices.length > 0) {
+        setDiscoveries(prev => [...prev, ...notices]);
+      }
+    }
     setTopic(''); 
     
-    await handleStream(startCouncilSession(topic, language, currentLore, meaningContext));
+    await handleStream(startCouncilSession(startingTopic, language, currentLore, meaningContext), 'initial');
   };
 
   const handleReply = async () => {
@@ -219,9 +248,26 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       isUser: true
     };
     setHistory(prev => [...prev, userTurn]);
+    tutorialEventBus.emit({
+      type: 'council_reply_sent',
+      payload: { length: content.length },
+    });
     onUserSignal?.(content);
+    const user = getCurrentUser();
+    if (user?.id) {
+      const notices = analyzePlayfulDiscovery({
+        userId: user.id,
+        text: content,
+        source: 'council',
+        language,
+        meaningContext,
+      });
+      if (notices.length > 0) {
+        setDiscoveries(prev => [...prev, ...notices]);
+      }
+    }
 
-    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore, meaningContext));
+    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore, meaningContext), 'reply');
   };
 
   // --- Meaning Agent Integration Handler ---
@@ -267,7 +313,8 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
           title: currentStats.currentQuest,
           state: currentStats.state
         },
-        meaningContext
+        meaningContext,
+        persist: true
       });
       
       // Convert MeaningAnalysisResult to ScribeAnalysis for backward compatibility
@@ -295,6 +342,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       setIsIntegrating(false);
       setIsSessionActive(false);
       setHistory([]);
+      setDiscoveries([]);
       setTopic('');
     } catch (error: any) {
       console.error('Integration error:', error);
@@ -302,6 +350,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       setIsIntegrating(false);
       setIsSessionActive(false);
       setHistory([]);
+      setDiscoveries([]);
       setTopic('');
     }
   };
@@ -321,7 +370,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const displayTurns = [...history, ...activeTurns];
   
   const lastTurn = displayTurns.length > 0 ? displayTurns[displayTurns.length - 1] : null;
-  const currentSpeakerId = lastTurn && !lastTurn.isUser ? lastTurn.speaker as ArchetypeId : null;
+  const currentSpeakerId = lastTurn && !lastTurn.isUser && lastTurn.speaker in archetypes ? lastTurn.speaker as ArchetypeId : null;
   
   // Heart Visual Logic
   const heartColor = isIntegrating ? "#fbbf24" : "#ff4d4d"; // Gold if integrating, Red if normal
@@ -329,6 +378,15 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
   return (
     <div className="flex flex-col h-full w-full bg-transparent relative transition-colors duration-1000 overflow-hidden">
+      <div className="absolute left-5 top-5 z-40">
+        <TutorialTrigger tutorialId="council_intro" onStart={setActiveTutorialId} />
+      </div>
+      <TutorialOverlay
+        userId={getCurrentUser()?.id}
+        language={language}
+        tutorialId={activeTutorialId}
+        onClose={() => setActiveTutorialId(null)}
+      />
       
       {/* Custom Styles for Animation */}
       <style>{`
@@ -402,7 +460,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       <div className="flex-1 relative flex flex-col items-center min-h-0">
         
         {/* Dialogue Scroll Area */}
-        <div className="w-full h-full max-w-4xl px-6 py-10 overflow-y-auto z-10 pb-40 scroll-smooth">
+        <div data-tutorial-id="council-thread" className="w-full h-full max-w-4xl px-6 py-10 overflow-y-auto z-10 pb-40 scroll-smooth">
             {(!isSessionActive || isIntegrating) && (
                 <div className="flex flex-col items-center justify-center h-full pt-44 md:pt-48 pb-20 space-y-10 md:space-y-20 animate-fade-in relative perspective-1000">
                     
@@ -527,10 +585,13 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
             {!isIntegrating && displayTurns.map((turn, idx) => {
                 const isSystem = turn.speaker === 'SYSTEM';
                 const isUser = turn.isUser;
+                const isChamber = !isUser && (turn.speaker === 'MODERATOR' || turn.speaker === 'CHAMBER');
                 const archetype = !isUser && turn.speaker in archetypes ? archetypes[turn.speaker as ArchetypeId] : null;
                 
-                const color = archetype ? archetype.color : 'from-slate-600 to-slate-500';
-                const name = isUser ? (language === 'DE' ? 'DU' : 'YOU') : (archetype ? archetype.name : turn.speaker);
+                const color = archetype ? archetype.color : (isChamber ? 'from-violet-500 to-sky-400' : 'from-slate-600 to-slate-500');
+                const name = isUser
+                  ? (language === 'DE' ? 'DU' : 'YOU')
+                  : (archetype ? archetype.name : (isChamber ? (language === 'DE' ? 'KAMMER' : 'CHAMBER') : turn.speaker));
                 const Icon = isUser ? User : (archetype ? ICON_MAP[archetype.iconName] : Sparkles);
 
                 if (isSystem) return <div key={turn.id} className="text-center text-red-400/70 text-xs tracking-wide py-4">{turn.content}</div>;
@@ -576,6 +637,14 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                     </div>
                 );
             })}
+
+            {!isIntegrating && discoveries.map(notice => (
+              <DiscoveryCard
+                key={notice.id}
+                notice={notice}
+                onDismiss={() => setDiscoveries(prev => prev.filter(item => item.id !== notice.id))}
+              />
+            ))}
             
             {/* Custom Mystic Spinner Loading Indicator */}
             {isStreaming && !currentSpeakerId && (
@@ -622,13 +691,21 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                         <input
                             type="text"
                             value={topic}
-                            onChange={(e) => setTopic(e.target.value)}
+                            onChange={(e) => {
+                              setTopic(e.target.value);
+                              tutorialEventBus.emit({
+                                type: 'council_topic_words',
+                                payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
+                              });
+                            }}
+                            data-tutorial-id="council-topic-input"
                             placeholder={ui.ENTER_TOPIC_PLACEHOLDER}
                             className="flex-1 bg-transparent border-none px-6 py-4 text-violet-100 placeholder-violet-500/30 focus:ring-0 outline-none transition-all"
                             onKeyDown={(e) => e.key === 'Enter' && handleStart()}
                         />
                         <button
                             onClick={handleStart}
+                            data-tutorial-id="council-start"
                             disabled={!topic.trim()}
                             className="px-8 bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 border-l border-purple-500/10 transition-colors flex items-center justify-center disabled:opacity-50"
                         >
@@ -642,8 +719,15 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                         <textarea 
                             ref={textareaRef}
                             value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
+                            onChange={(e) => {
+                              setUserInput(e.target.value);
+                              tutorialEventBus.emit({
+                                type: 'council_reply_input_words',
+                                payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
+                              });
+                            }}
                             onKeyDown={handleKeyDown}
+                            data-tutorial-id="council-reply-input"
                             placeholder={isStreaming ? ui.COUNCIL_THINKING : ui.INPUT_COUNCIL_PLACEHOLDER}
                             className="w-full bg-transparent border-none text-violet-100 placeholder-violet-500/30 focus:ring-0 resize-none max-h-32 py-4 px-5 leading-relaxed text-sm disabled:opacity-30"
                             rows={1}
@@ -653,6 +737,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                     
                     <button 
                         onClick={handleReply}
+                        data-tutorial-id="council-reply-send"
                         disabled={!userInput.trim() || isStreaming}
                         className="h-12 w-12 flex items-center justify-center bg-purple-600 hover:bg-purple-500 text-white rounded-xl shadow-[0_0_15px_rgba(147,51,234,0.3)] disabled:opacity-20 disabled:shadow-none transition-all duration-300"
                     >
@@ -661,6 +746,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
                     <button 
                         onClick={handleIntegrateAndAdjourn}
+                        data-tutorial-id="council-integrate"
                         className="h-12 flex items-center gap-2 px-4 bg-[#150a26] hover:bg-purple-900/20 text-purple-400 hover:text-white border border-purple-500/20 hover:border-purple-500/50 rounded-xl transition-all shadow-lg"
                         title={ui.ADJOURN_TITLE}
                     >

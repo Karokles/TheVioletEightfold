@@ -19,6 +19,7 @@ import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPre
 import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
 import { mergeLocalMeaningState } from './services/meaningStateService';
 import { scanEmotionalState } from './services/emotionalStateService';
+import { tutorialEventBus } from './services/tutorialProgressService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
 
 enum AppMode {
@@ -224,6 +225,14 @@ export default function App() {
       consentState: mode === 'GROUND' || mode === 'HOLD' ? 'LOW_INTERVENTION' : 'ASK_BEFORE_DEEPENING',
       updatedAt: new Date().toISOString(),
     }));
+  };
+
+  const handleArchetypeSelect = (id: ArchetypeId) => {
+    setActiveArchetype(id);
+    tutorialEventBus.emit({
+      type: 'archetype_selected',
+      payload: { archetypeId: id },
+    });
   };
 
   const handleStartCycle = (title: string, answers: IntegrationCycle['onboardingAnswers']) => {
@@ -577,7 +586,7 @@ export default function App() {
             <div className="w-full flex flex-col items-center p-4 z-10 my-auto">
                 <RoundTable 
                   activeArchetype={activeArchetype} 
-                  onSelectArchetype={setActiveArchetype} 
+                  onSelectArchetype={handleArchetypeSelect}
                   onCoreClick={() => setHasEntered(false)}
                   language={language}
                   mini={false}
@@ -716,7 +725,7 @@ export default function App() {
                   <div className="scale-110">
                     <RoundTable 
                         activeArchetype={activeArchetype} 
-                        onSelectArchetype={setActiveArchetype} 
+                        onSelectArchetype={handleArchetypeSelect}
                         onCoreClick={() => {
                           setShowMobileArchetypes(false);
                           setHasEntered(false);

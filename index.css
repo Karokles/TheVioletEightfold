@@ -4,3 +4,97 @@
 
 /* Custom styles for The Violet Eightfold */
 
+.tutorial-spotlight {
+  animation: tutorial-spotlight-pulse 2.4s ease-in-out infinite;
+}
+
+.tutorial-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(216, 180, 254, 0.075), transparent 58%),
+    linear-gradient(120deg, transparent 12%, rgba(163, 230, 53, 0.075), transparent 34%);
+  opacity: 0.78;
+}
+
+.tutorial-spotlight-scan {
+  position: absolute;
+  inset: -55% -20%;
+  background: linear-gradient(105deg, transparent 42%, rgba(190, 242, 100, 0.16) 50%, transparent 58%);
+  filter: blur(10px);
+  opacity: 0.58;
+  transform: translateX(-42%);
+  animation: tutorial-scan-drift 4.6s ease-in-out infinite;
+}
+
+.tutorial-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  opacity: 0.66;
+  filter: drop-shadow(0 0 7px rgba(190, 242, 100, 0.24));
+}
+
+.tutorial-corner::before,
+.tutorial-corner::after {
+  content: "";
+  position: absolute;
+  background: linear-gradient(90deg, rgba(190, 242, 100, 0.72), rgba(168, 85, 247, 0.28));
+  border-radius: 999px;
+}
+
+.tutorial-corner::before {
+  width: 18px;
+  height: 1px;
+}
+
+.tutorial-corner::after {
+  width: 1px;
+  height: 18px;
+}
+
+.tutorial-corner-tl {
+  top: 5px;
+  left: 5px;
+}
+
+.tutorial-corner-tr {
+  top: 5px;
+  right: 5px;
+  transform: rotate(90deg);
+}
+
+.tutorial-corner-bl {
+  bottom: 5px;
+  left: 5px;
+  transform: rotate(-90deg);
+}
+
+.tutorial-corner-br {
+  right: 5px;
+  bottom: 5px;
+  transform: rotate(180deg);
+}
+
+@keyframes tutorial-spotlight-pulse {
+  0%, 100% {
+    opacity: 0.58;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.82;
+    transform: scale(1.006);
+  }
+}
+
+@keyframes tutorial-scan-drift {
+  0%, 100% {
+    transform: translateX(-42%) rotate(0deg);
+  }
+  50% {
+    transform: translateX(42%) rotate(0deg);
+  }
+}
+

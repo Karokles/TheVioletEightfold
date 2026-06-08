@@ -5,6 +5,12 @@ import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
 import { sendMessageToArchetype } from '../services/aiService';
 import { Send, Sparkles, Bot } from 'lucide-react';
+import { getCurrentUser } from '../services/userService';
+import { analyzePlayfulDiscovery, DiscoveryNotice } from '../services/playfulDiscoveryService';
+import { DiscoveryCard } from './DiscoveryCard';
+import { TutorialOverlay } from './tutorial/TutorialOverlay';
+import { TutorialTrigger } from './tutorial/TutorialTrigger';
+import { tutorialEventBus, TutorialId } from '../services/tutorialProgressService';
 
 interface ChatInterfaceProps {
   activeArchetype: ArchetypeId;
@@ -38,8 +44,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
   const [messages, setMessages] = useState<Message[]>(() => [getInitMessage(activeArchetype, language)]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<ChatStatus>(ChatStatus.IDLE);
+  const [discoveries, setDiscoveries] = useState<DiscoveryNotice[]>([]);
+  const [activeTutorialId, setActiveTutorialId] = useState<TutorialId | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentUser = getCurrentUser();
 
   // Reset messages and cancel any in-flight requests when archetype or language changes
   useEffect(() => {
@@ -80,7 +89,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
     };
 
     setMessages(prev => [...prev, userMsg]);
+    tutorialEventBus.emit({
+      type: 'single_voice_message_sent',
+      payload: { archetypeId: activeArchetype },
+    });
     onUserSignal?.(userMsg.content);
+    const user = getCurrentUser();
+    if (user?.id) {
+      const notices = analyzePlayfulDiscovery({
+        userId: user.id,
+        text: userMsg.content,
+        source: 'chat',
+        language,
+        archetype: activeArchetype,
+        meaningContext,
+      });
+      if (notices.length > 0) {
+        setDiscoveries(prev => [...prev, ...notices]);
+      }
+    }
     setInput('');
     setStatus(ChatStatus.STREAMING);
 
@@ -137,6 +164,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
       if (abortControllerRef.current === abortController) {
         abortControllerRef.current = null;
       }
+      tutorialEventBus.emit({
+        type: 'single_voice_response_received',
+        payload: { archetypeId: activeArchetype },
+      });
       setStatus(ChatStatus.IDLE);
     } catch (error: any) {
       // Ignore abort errors
@@ -181,9 +212,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
   const CurrentIcon = ICON_MAP[currentArchetypeData.iconName];
 
   return (
-    <div className="flex flex-col h-full max-w-5xl mx-auto w-full">
+    <div className="relative flex flex-col h-full max-w-5xl mx-auto w-full">
+      <div className="absolute right-5 top-5 z-30">
+        <TutorialTrigger tutorialId="single_voice_intro" onStart={setActiveTutorialId} />
+      </div>
+      <TutorialOverlay
+        userId={currentUser?.id}
+        language={language}
+        tutorialId={activeTutorialId}
+        onClose={() => setActiveTutorialId(null)}
+      />
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scroll-smooth">
+      <div data-tutorial-id="singlevoice-thread" className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scroll-smooth">
         {messages.map((msg, index) => {
             const isUser = msg.role === 'user';
             const msgArchetype = msg.archetypeId ? archetypes[msg.archetypeId as ArchetypeId] : currentArchetypeData;
@@ -226,6 +266,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
                 </div>
             );
         })}
+        {discoveries.map(notice => (
+          <DiscoveryCard
+            key={notice.id}
+            notice={notice}
+            onDismiss={() => setDiscoveries(prev => prev.filter(item => item.id !== notice.id))}
+          />
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
@@ -238,14 +285,22 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
             <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  tutorialEventBus.emit({
+                    type: 'single_voice_input_words',
+                    payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
+                  });
+                }}
                 onKeyDown={handleKeyDown}
+                data-tutorial-id="singlevoice-input"
                 placeholder={`${ui.INPUT_PLACEHOLDER} ${currentArchetypeData.name}...`}
                 className="flex-1 bg-transparent border-none text-violet-100 placeholder-violet-500/30 focus:ring-0 resize-none max-h-32 py-3 px-2 leading-relaxed text-sm"
                 rows={1}
             />
             <button
                 onClick={handleSend}
+                data-tutorial-id="singlevoice-send"
                 disabled={status !== ChatStatus.IDLE || !input.trim()}
                 className={`p-3 rounded-xl transition-all duration-300 shadow-lg ${
                     input.trim() 

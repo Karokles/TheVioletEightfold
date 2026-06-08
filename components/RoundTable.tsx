@@ -64,7 +64,10 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
       )}
 
       {/* Table Container - Resized */}
-      <div className={`relative ${mini ? 'w-[100px] h-[100px]' : 'w-[180px] h-[180px]'} flex items-center justify-center group perspective-500`}>
+      <div
+        data-tutorial-id={mini ? undefined : 'roundtable-voices'}
+        className={`relative ${mini ? 'w-[100px] h-[100px]' : 'w-[180px] h-[180px]'} flex items-center justify-center group perspective-500`}
+      >
         
         {/* Animated Background Rings */}
         <div className="absolute inset-0 pointer-events-none transform-gpu">
@@ -86,6 +89,7 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
            <button
              type="button"
              onClick={onCoreClick}
+             data-tutorial-id={mini ? undefined : 'roundtable-core'}
              disabled={!onCoreClick}
              title={language === 'DE' ? 'Zur Startanimation' : 'Return to start animation'}
              aria-label={language === 'DE' ? 'Zur Startanimation' : 'Return to start animation'}
@@ -126,6 +130,7 @@ export const RoundTable: React.FC<RoundTableProps> = ({ activeArchetype, onSelec
             <button
               key={archetype.id}
               onClick={() => onSelectArchetype(archetype.id as ArchetypeId)}
+              data-tutorial-id={mini ? undefined : `roundtable-archetype-${archetype.id}`}
               className={`absolute rounded-full flex items-center justify-center transition-all duration-500 group/btn
                 ${isActive 
                   ? `scale-110 z-20 shadow-[0_0_25px_rgba(139,92,246,0.5)] bg-[#0f0716] text-white ring-1 ring-white/50 border border-transparent` 
