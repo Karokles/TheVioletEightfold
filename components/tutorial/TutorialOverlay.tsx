@@ -39,6 +39,52 @@ const getTargetRect = (targetId?: string): TargetRect | null => {
   };
 };
 
+const getTutorialElement = (targetId?: string): Element | null => {
+  if (!targetId) return null;
+  return document.querySelector(`[data-tutorial-id="${targetId}"]`);
+};
+
+const getElementWordCount = (targetId?: string): number => {
+  const element = getTutorialElement(targetId);
+  if (!element) return 0;
+  const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    ? element.value
+    : element.textContent || '';
+  return value.trim().split(/\s+/).filter(Boolean).length;
+};
+
+const inferStepIndexFromCurrentUi = (tutorialId: TutorialId): number => {
+  if (tutorialId === 'single_voice_intro') {
+    if (getElementWordCount('singlevoice-input') >= 1) {
+      return tutorialDefinitions.single_voice_intro.steps.findIndex(item => item.id === 'send_thought');
+    }
+    return 0;
+  }
+
+  if (tutorialId === 'council_intro') {
+    const replyInputExists = Boolean(getTutorialElement('council-reply-input'));
+    if (replyInputExists && getElementWordCount('council-reply-input') >= 1) {
+      return tutorialDefinitions.council_intro.steps.findIndex(item => item.id === 'send_reply');
+    }
+    if (replyInputExists) {
+      return tutorialDefinitions.council_intro.steps.findIndex(item => item.id === 'answer_back');
+    }
+    if (getElementWordCount('council-topic-input') >= 1) {
+      return tutorialDefinitions.council_intro.steps.findIndex(item => item.id === 'invite_room');
+    }
+  }
+
+  return 0;
+};
+
+const eventFromCurrentUi = (waitFor?: string, targetId?: string) => {
+  if (!waitFor || !waitFor.endsWith('_words')) return null;
+  return {
+    type: waitFor,
+    payload: { count: getElementWordCount(targetId) },
+  };
+};
+
 export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   userId,
   tutorialId,
@@ -55,7 +101,8 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     if (!definition || !userId || !isTutorialsEnabled()) return;
     const progress = loadTutorialProgress(userId, definition.id);
     const savedStepIndex = definition.steps.findIndex(item => item.id === progress?.current_step_id);
-    setStepIndex(savedStepIndex >= 0 ? savedStepIndex : 0);
+    const inferredStepIndex = inferStepIndexFromCurrentUi(definition.id);
+    setStepIndex(Math.max(savedStepIndex, inferredStepIndex, 0));
     setCompleted(false);
   }, [definition, userId]);
 
@@ -81,7 +128,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
 
     saveTutorialProgress(userId, definition.id, { current_step_id: step.id });
 
-    const unsubscribe = tutorialEventBus.subscribe(event => {
+    const advanceFromEvent = (event: Parameters<typeof tutorialEventBus.emit>[0]) => {
       if (!step.waitFor || event.type !== step.waitFor) return;
       if (step.validator && !step.validator(event)) return;
 
@@ -92,9 +139,21 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         return;
       }
       setStepIndex(nextIndex);
-    });
+    };
 
-    return unsubscribe;
+    const initialStateTimer = window.setTimeout(() => {
+      const initialEvent = eventFromCurrentUi(step.waitFor, step.targetId);
+      if (initialEvent) {
+        advanceFromEvent(initialEvent as Parameters<typeof tutorialEventBus.emit>[0]);
+      }
+    }, 80);
+
+    const unsubscribe = tutorialEventBus.subscribe(advanceFromEvent);
+
+    return () => {
+      window.clearTimeout(initialStateTimer);
+      unsubscribe();
+    };
   }, [definition, step, stepIndex, userId]);
 
   const completionPosition = useMemo(() => {
