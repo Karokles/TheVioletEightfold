@@ -235,6 +235,18 @@ export default function App() {
     });
   };
 
+  const handleMobileArchetypeSelect = (id: ArchetypeId) => {
+    handleArchetypeSelect(id);
+    setShowMobileArchetypes(false);
+  };
+
+  const handleOpenMobileArchetypes = () => {
+    setShowMobileArchetypes(true);
+    tutorialEventBus.emit({
+      type: 'mobile_archetype_panel_opened',
+    });
+  };
+
   const handleStartCycle = (title: string, answers: IntegrationCycle['onboardingAnswers']) => {
     const nextCycle = startIntegrationCycle(title, answers);
     setCycle(nextCycle);
@@ -484,7 +496,8 @@ export default function App() {
         {/* Logo / Mobile Archetype Toggle */}
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => setShowMobileArchetypes(true)}
+            onClick={handleOpenMobileArchetypes}
+            data-tutorial-id="mobile-archetype-toggle"
             className="w-10 h-10 relative flex items-center justify-center group cursor-pointer transition-transform hover:scale-105 active:scale-95 md:cursor-default"
           >
             <div className="absolute inset-0 bg-purple-500/20 rounded-full blur-md group-hover:bg-purple-500/30 transition-all duration-500"></div>
@@ -725,7 +738,7 @@ export default function App() {
                   <div className="scale-110">
                     <RoundTable 
                         activeArchetype={activeArchetype} 
-                        onSelectArchetype={handleArchetypeSelect}
+                        onSelectArchetype={handleMobileArchetypeSelect}
                         onCoreClick={() => {
                           setShowMobileArchetypes(false);
                           setHasEntered(false);

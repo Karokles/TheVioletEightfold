@@ -13,6 +13,7 @@ export type TutorialId = 'single_voice_intro' | 'council_intro';
 
 export type TutorialEventType =
   | 'archetype_selected'
+  | 'mobile_archetype_panel_opened'
   | 'single_voice_input_words'
   | 'single_voice_message_sent'
   | 'single_voice_response_received'

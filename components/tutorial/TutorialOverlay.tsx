@@ -27,8 +27,7 @@ interface TargetRect {
 }
 
 const getTargetRect = (targetId?: string): TargetRect | null => {
-  if (!targetId) return null;
-  const element = document.querySelector(`[data-tutorial-id="${targetId}"]`);
+  const element = getTutorialElement(targetId);
   if (!element) return null;
   const rect = element.getBoundingClientRect();
   return {
@@ -42,6 +41,13 @@ const getTargetRect = (targetId?: string): TargetRect | null => {
 const getTutorialElement = (targetId?: string): Element | null => {
   if (!targetId) return null;
   return document.querySelector(`[data-tutorial-id="${targetId}"]`);
+};
+
+const getResponsiveTargetId = (tutorialId: TutorialId, stepId: string, targetId?: string): string | undefined => {
+  if (tutorialId !== 'single_voice_intro' || stepId !== 'choose_voice') return targetId;
+  const isMobile = window.matchMedia('(max-width: 767px)').matches;
+  if (!isMobile) return targetId;
+  return getTutorialElement('roundtable-voices') ? 'roundtable-voices' : 'mobile-archetype-toggle';
 };
 
 const getElementWordCount = (targetId?: string): number => {
@@ -107,21 +113,23 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   }, [definition, userId]);
 
   useEffect(() => {
-    if (!step) return;
+    if (!definition || !step) return;
 
     const updateRect = () => {
-      setTargetRect(getTargetRect(step.targetId));
+      setTargetRect(getTargetRect(getResponsiveTargetId(definition.id, step.id, step.targetId)));
     };
 
     updateRect();
     window.setTimeout(updateRect, 120);
     window.addEventListener('resize', updateRect);
     window.addEventListener('scroll', updateRect, true);
+    const unsubscribe = tutorialEventBus.subscribe(updateRect);
     return () => {
       window.removeEventListener('resize', updateRect);
       window.removeEventListener('scroll', updateRect, true);
+      unsubscribe();
     };
-  }, [step?.targetId, step?.id]);
+  }, [definition, step?.targetId, step?.id]);
 
   useEffect(() => {
     if (!definition || !step || !userId) return;
