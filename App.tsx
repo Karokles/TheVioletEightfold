@@ -11,7 +11,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
 import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle, Language, UserStats, ScribeAnalysis } from './types';
-import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser } from './services/userService';
+import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser, setCurrentUser } from './services/userService';
 import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
 import { getProfile, updateProfile } from './services/profileService';
 import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, loadCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
@@ -20,6 +20,7 @@ import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycl
 import { mergeLocalMeaningState } from './services/meaningStateService';
 import { scanEmotionalState } from './services/emotionalStateService';
 import { tutorialEventBus } from './services/tutorialProgressService';
+import { checkCycleDayAccess } from './services/accessService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
 
 enum AppMode {
@@ -165,7 +166,7 @@ export default function App() {
   };
 
   const loadSignedInUserState = async () => {
-    const profile = await getProfile();
+    const profile = await getProfile({ retries: 2 });
     const user = getCurrentUser();
     if (user) {
       const preferredLanguage = profile?.language === 'DE' || profile?.language === 'EN'
@@ -179,7 +180,9 @@ export default function App() {
       setCommunicationPreferences(loadCommunicationPreferences(user.id));
       setRecentUserSignals([]);
       setEmotionalState(undefined);
-      setIsAdmin(Boolean(profile?.isAdmin));
+      if (profile) {
+        setIsAdmin(Boolean(profile.isAdmin));
+      }
     }
   };
 
@@ -258,7 +261,7 @@ export default function App() {
     }));
   };
 
-  const handleUpdateCycle = (record: Omit<CycleDayRecord, 'date'>) => {
+  const handleUpdateCycle = async (record: Omit<CycleDayRecord, 'date'>) => {
     if (!cycle) {
       return;
     }
@@ -281,6 +284,18 @@ export default function App() {
       if (!completionCheck.allowed) {
         console.warn('[CYCLE] Ignored invalid completion attempt', completionCheck.reason);
         return;
+      }
+
+      if (record.day > 5 && currentUserId !== 'lion') {
+        try {
+          const access = await checkCycleDayAccess(record.day);
+          if (!access.allowed) {
+            window.alert(access.message || (language === 'DE' ? 'Beta-Zugang erforderlich.' : 'Beta access required.'));
+            return;
+          }
+        } catch (error) {
+          console.warn('[CYCLE] Access check failed; keeping local flow available for now.', error);
+        }
       }
     }
 
@@ -309,6 +324,22 @@ export default function App() {
       setStats(prev => applyCycleMilestoneToStats(prev, nextCycle, savedRecord, language));
       setStatsRefreshKey(prev => prev + 1);
     }
+  };
+
+  const handleUpdateCycleStarter = (answers: IntegrationCycle['onboardingAnswers']) => {
+    setCycle(prev => {
+      if (!prev) return prev;
+
+      const theme = answers.find(answer => answer.questionId === 'pattern')?.value.trim() || prev.theme;
+
+      return {
+        ...prev,
+        theme,
+        title: prev.title.trim() ? prev.title : theme,
+        onboardingAnswers: answers,
+        updatedAt: new Date().toISOString(),
+      };
+    });
   };
 
   const handleArchiveCycle = () => {
@@ -367,22 +398,43 @@ export default function App() {
 
       try {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        const supabaseSession = await getSupabaseSession();
+        if (supabaseSession) {
+          setCurrentUser(
+            supabaseSession.userId,
+            supabaseSession.token,
+            supabaseSession.displayName || supabaseSession.email
+          );
+        }
+        const latestUser = getCurrentUser();
+        if (!latestUser) {
+          return;
+        }
         
         // Normalize token: remove any existing "Bearer " prefix
-        let token = user.token.trim();
+        let token = latestUser.token.trim();
         while (token.startsWith('Bearer ')) {
           token = token.substring(7).trim();
         }
         
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-          const response = await fetch(`${API_BASE_URL}/api/me`, {
+          const response = await fetch(`${API_BASE_URL}/api/me?ts=${Date.now()}`, {
             method: 'GET',
+            cache: 'no-store',
             headers: {
               'Authorization': `Bearer ${token}`,
             },
           });
 
           if (response.ok) {
+            try {
+              const verified = await response.json();
+              if (typeof verified?.isAdmin === 'boolean') {
+                setIsAdmin(verified.isAdmin);
+              }
+            } catch {
+              // Token validity is enough here; profile hydration handles the rest.
+            }
             return;
           }
 
@@ -654,6 +706,7 @@ export default function App() {
                 language={language}
                 cycle={cycle}
                 onStartCycle={handleStartCycle}
+                onUpdateCycleStarter={handleUpdateCycleStarter}
                 onUpdateCycle={handleUpdateCycle}
                 onArchiveCycle={handleArchiveCycle}
              />
@@ -666,6 +719,7 @@ export default function App() {
                 cycle={cycle}
                 meaningContext={meaningContext}
                 currentLore={lore}
+                onUpdateCycleStarter={handleUpdateCycleStarter}
              />
            )}
            {currentMode === AppMode.ADMIN && isAdmin && (

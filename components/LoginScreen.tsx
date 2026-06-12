@@ -14,6 +14,7 @@ interface LoginScreenProps {
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, language }) => {
   const authMode = import.meta.env.VITE_AUTH_MODE || 'local';
   const supabaseEnabled = authMode === 'supabase' && isSupabaseAuthAvailable;
+  const supabaseMisconfigured = authMode === 'supabase' && !isSupabaseAuthAvailable;
   const [formMode, setFormMode] = useState<'signIn' | 'signUp' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
   const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
@@ -47,7 +48,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
         setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || email);
       } else {
         const authResult = await localLogin(username, secret);
-        setCurrentUser(authResult.userId, authResult.token, username);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || username);
       }
       onLoginSuccess();
     } catch (err: any) {
@@ -110,6 +111,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
           {message && (
             <div className="mb-4 p-3 bg-emerald-900/20 border border-emerald-400/30 rounded-lg text-emerald-200 text-sm">
               {message}
+            </div>
+          )}
+
+          {supabaseMisconfigured && (
+            <div className="mb-4 p-3 bg-amber-900/20 border border-amber-400/30 rounded-lg text-amber-200 text-sm">
+              Supabase Auth is selected for this environment, but the frontend Supabase URL or publishable key is missing.
             </div>
           )}
 
@@ -181,7 +188,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
 
             <button
               type="submit"
-              disabled={loading || !secret || (formMode === 'local' ? !username : !email)}
+              disabled={supabaseMisconfigured || loading || !secret || (formMode === 'local' ? !username : !email)}
               className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold uppercase tracking-widest rounded-lg shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               {loading ? (
@@ -199,7 +206,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
           </div>
         </form>
 
-        {formMode === 'local' && (
+        {formMode === 'local' && !supabaseMisconfigured && (
           <p className="text-center text-xs text-purple-500/40 mt-6">
             Test users: friend1-friend5 (secrets: secret1-secret5)
           </p>

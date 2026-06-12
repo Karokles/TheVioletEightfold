@@ -19,6 +19,11 @@ import {
   getUserProfile,
   isSupabaseConfigured,
   listAdminAccounts,
+  getUserAccess,
+  getUsageCounter,
+  incrementUsageCounter,
+  upsertUserAccess,
+  UserAccessRecord,
   upsertUserProfile,
   createQuestLogEntry,
   getQuestLogEntries,
@@ -30,6 +35,7 @@ import {
 import { getCredentialWarnings, runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 import { createMockCouncilReply, createMockMeaningResult } from './mockAi.js';
 import { buildOrganicPromptBlock, createResponsePlan, ResponsePlan } from './conversationOrchestrator.js';
+import { loadLocalMeaningState, mergeLocalMeaningState } from './localMeaningStore.js';
 
 const require = createRequire(import.meta.url);
 
@@ -97,15 +103,23 @@ console.log('[STARTUP] Server will listen on port:', PORT);
 // Middleware
 // CORS configuration - restrict to allowed origins in production
 const parseAllowedOrigins = (): string[] => {
-  const defaultOrigins = [
+  const localOrigins = [
     'http://localhost:3000',
     'http://localhost:5173',
-    'https://the-violet-eightfold.vercel.app',
-    'https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app',
-    'https://the-violet-eightfold42.vercel.app',
-    'https://the-violet-eightfold42-git-main-the-violet-eightfolds-projects.vercel.app',
-    'https://the-violet-eightfold42-5s9100y9a-the-violet-eightfolds-projects.vercel.app',
   ];
+  const stagingOrigins = [
+    'https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app',
+  ];
+  const productionOrigins = [
+    'https://the-violet-eightfold-git-main-the-violet-eightfolds-projects.vercel.app',
+    'https://the-violet-eightfold.vercel.app',
+    'https://the-violet-eightfold42.vercel.app',
+  ];
+  const defaultOrigins = runtimeConfig.isLocal
+    ? localOrigins
+    : runtimeConfig.isStaging
+      ? stagingOrigins
+      : productionOrigins;
   
   if (process.env.ALLOWED_ORIGINS) {
     const parsed = process.env.ALLOWED_ORIGINS.split(',')
@@ -161,6 +175,13 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json());
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
 
 // Initialize OpenAI only when both the feature flag and credentials are present.
 const openai = serviceReadiness.ai
@@ -173,7 +194,7 @@ if (openai) {
 }
 
 // Simple in-memory user store (for MVP - replace with database later)
-type AdminEntitlement = 'free' | 'founder' | 'blocked';
+type AdminEntitlement = 'free' | 'paid_beta' | 'founder' | 'blocked';
 
 type AdminAccountSettings = {
   entitlement?: AdminEntitlement;
@@ -181,6 +202,10 @@ type AdminAccountSettings = {
   weeklyFreeInteractions?: number | null;
   weeklyCouncilSessions?: number | null;
   weeklyMeaningAnalyses?: number | null;
+  activeUntil?: string | null;
+  betaActivations?: number;
+  betaBonusUsed?: boolean;
+  notes?: string | null;
 };
 
 interface User {
@@ -189,6 +214,7 @@ interface User {
   secretHash: string;
   token?: string;
   email?: string;
+  displayName?: string;
   adminSettings?: AdminAccountSettings;
 }
 
@@ -198,6 +224,7 @@ const users: User[] = [
   {
     id: 'lion',
     username: 'lion',
+    displayName: 'karokles',
     secretHash: createHash('sha256').update('TuerOhneWiederkehr2025').digest('hex'),
   },
   {
@@ -250,6 +277,12 @@ const users: User[] = [
     username: 'anna',
     secretHash: createHash('sha256').update('amethyst').digest('hex'),
   },
+  {
+    id: 'beta-test',
+    username: 'betatest',
+    displayName: 'Beta Test',
+    secretHash: createHash('sha256').update('beta-test-242').digest('hex'),
+  },
 ];
 
 const parseIdentifierList = (value: string): string[] => {
@@ -278,12 +311,27 @@ const userMatchesIdentifiers = (user: Pick<User, 'id' | 'username' | 'email'> | 
   return parseIdentifierList(identifiers).some(pattern => candidates.some(candidate => wildcardMatch(pattern, candidate)));
 };
 
+const isProtectedLocalLionUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (!user) return false;
+  return [user.id, user.username, user.email]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .some(candidate => ['lion', 'karokles'].includes(candidate.toLowerCase()));
+};
+
 const isOfflineOnlyUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (isProtectedLocalLionUser(user)) {
+    return true;
+  }
+
   return Boolean((user as User | undefined)?.adminSettings?.offlineOnly)
     || userMatchesIdentifiers(user, runtimeConfig.offlineOnlyIdentifiers);
 };
 
 const hasFounderAccess = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (isProtectedLocalLionUser(user)) {
+    return true;
+  }
+
   return (user as User | undefined)?.adminSettings?.entitlement === 'founder'
     || userMatchesIdentifiers(user, runtimeConfig.founderAccessIdentifiers);
 };
@@ -294,7 +342,7 @@ const isAdminUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean =>
 
 const getProfileAdminSettings = (preferences: any): AdminAccountSettings => {
   const admin = preferences && typeof preferences === 'object' ? preferences.admin : null;
-  const entitlement = admin?.entitlement === 'founder' || admin?.entitlement === 'blocked' || admin?.entitlement === 'free'
+  const entitlement = ['founder', 'blocked', 'free', 'paid_beta'].includes(admin?.entitlement)
     ? admin.entitlement as AdminEntitlement
     : undefined;
   const readLimit = (value: unknown): number | null | undefined => {
@@ -309,11 +357,15 @@ const getProfileAdminSettings = (preferences: any): AdminAccountSettings => {
     weeklyFreeInteractions: readLimit(admin?.weeklyFreeInteractions),
     weeklyCouncilSessions: readLimit(admin?.weeklyCouncilSessions),
     weeklyMeaningAnalyses: readLimit(admin?.weeklyMeaningAnalyses),
+    activeUntil: typeof admin?.activeUntil === 'string' ? admin.activeUntil : null,
+    betaActivations: Number.isFinite(Number(admin?.betaActivations)) ? Math.max(0, Math.floor(Number(admin.betaActivations))) : 0,
+    betaBonusUsed: admin?.betaBonusUsed === true,
+    notes: typeof admin?.notes === 'string' ? admin.notes.slice(0, 1000) : null,
   };
 };
 
 const sanitizeAdminSettings = (value: any): AdminAccountSettings => {
-  const entitlement = value?.entitlement === 'founder' || value?.entitlement === 'blocked' || value?.entitlement === 'free'
+  const entitlement = ['founder', 'blocked', 'free', 'paid_beta'].includes(value?.entitlement)
     ? value.entitlement as AdminEntitlement
     : 'free';
   const sanitizeLimit = (input: unknown): number | null => {
@@ -329,6 +381,10 @@ const sanitizeAdminSettings = (value: any): AdminAccountSettings => {
     weeklyFreeInteractions: sanitizeLimit(value?.weeklyFreeInteractions),
     weeklyCouncilSessions: sanitizeLimit(value?.weeklyCouncilSessions),
     weeklyMeaningAnalyses: sanitizeLimit(value?.weeklyMeaningAnalyses),
+    activeUntil: typeof value?.activeUntil === 'string' && value.activeUntil.trim() ? value.activeUntil.trim() : null,
+    betaActivations: Number.isFinite(Number(value?.betaActivations)) ? Math.max(0, Math.floor(Number(value.betaActivations))) : 0,
+    betaBonusUsed: value?.betaBonusUsed === true,
+    notes: typeof value?.notes === 'string' ? value.notes.trim().slice(0, 1000) : null,
   };
 };
 
@@ -453,6 +509,14 @@ const authenticate = async (req: AuthenticatedRequest, res: Response, next: Next
       
       // Explicitly set algorithm to HS256 for consistency
       const decoded = jwt.verify(token, JWT_SECRET_FINAL, { algorithms: ['HS256'] }) as { sub: string; username: string; iat: number; exp: number };
+
+      if (!runtimeConfig.localAuthEnabled) {
+        return res.status(401).json({
+          error: 'unauthorized',
+          reason: 'local_auth_disabled',
+          message: 'Local test-user tokens are disabled in this runtime mode.'
+        });
+      }
       
       // Find user by sub (user.id) from JWT claims
       const user = users.find(u => u.id === decoded.sub);
@@ -529,6 +593,30 @@ type UsageBucket = {
 };
 
 const usageBuckets = new Map<string, UsageBucket>();
+const featureUsageBuckets = new Map<string, number>();
+const localAccessRecords = new Map<string, UserAccessRecord>();
+const BETA_ACCESS_DAYS = Number(process.env.BETA_ACCESS_DAYS || 14);
+const BETA_PRICE_EUR = process.env.BETA_PRICE_EUR || '2.42';
+const FREE_SINGLE_VOICE_REPLIES = Number(process.env.FREE_SINGLE_VOICE_REPLIES || 12);
+const FREE_COUNCIL_SESSIONS = Number(process.env.FREE_COUNCIL_SESSIONS || 1);
+const FREE_COUNCIL_REPLIES_PER_SESSION = Number(process.env.FREE_COUNCIL_REPLIES_PER_SESSION || 3);
+const FREE_BLUEPRINT_SAVES = Number(process.env.FREE_BLUEPRINT_SAVES || 1);
+const FREE_CYCLE_DAYS = Number(process.env.FREE_CYCLE_DAYS || 5);
+
+type AccessSnapshot = {
+  tier: AdminEntitlement;
+  activeUntil: string | null;
+  betaActivations: number;
+  betaBonusUsed: boolean;
+  notes: string | null;
+  source: 'protected_local' | 'profile' | 'database' | 'default';
+};
+
+type UsageFeature =
+  | 'single_voice_reply'
+  | 'council_session'
+  | 'blueprint_save'
+  | 'cycle_day_6';
 
 const getWeekKey = () => {
   const now = new Date();
@@ -536,6 +624,184 @@ const getWeekKey = () => {
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const week = Math.ceil(((today - firstDayOfYear) / 86400000 + 1) / 7);
   return `${now.getUTCFullYear()}-W${week}`;
+};
+
+const getWeeklyResetAt = (): string => {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const daysUntilMonday = (8 - day) % 7 || 7;
+  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 0, 0, 0));
+  return reset.toISOString();
+};
+
+const isAccessActive = (access: AccessSnapshot): boolean => {
+  if (access.tier === 'founder') return true;
+  if (access.tier !== 'paid_beta') return false;
+  if (!access.activeUntil) return false;
+  return new Date(access.activeUntil).getTime() > Date.now();
+};
+
+const getAccessFromRecord = (record: UserAccessRecord | null): AccessSnapshot | null => {
+  if (!record) return null;
+  return {
+    tier: record.tier === 'founder' || record.tier === 'blocked' || record.tier === 'paid_beta' ? record.tier : 'free',
+    activeUntil: record.active_until || null,
+    betaActivations: record.beta_activations || 0,
+    betaBonusUsed: Boolean(record.beta_bonus_used),
+    notes: record.notes || null,
+    source: 'database',
+  };
+};
+
+const getEffectiveAccess = async (user: User): Promise<AccessSnapshot> => {
+  if (isProtectedLocalLionUser(user)) {
+    return {
+      tier: 'founder',
+      activeUntil: null,
+      betaActivations: 0,
+      betaBonusUsed: false,
+      notes: 'Protected local offline-only account.',
+      source: 'protected_local',
+    };
+  }
+
+  const localAccess = getAccessFromRecord(localAccessRecords.get(user.id) || null);
+  if (localAccess) {
+    return {
+      ...localAccess,
+      source: 'default',
+    };
+  }
+
+  if (isSupabaseConfigured() && !isOfflineOnlyUser(user)) {
+    const dbAccess = getAccessFromRecord(await getUserAccess(user.id));
+    if (dbAccess) {
+      return dbAccess;
+    }
+  }
+
+  const profileSettings = user.adminSettings;
+  if (profileSettings?.entitlement) {
+    return {
+      tier: profileSettings.entitlement,
+      activeUntil: profileSettings.activeUntil || null,
+      betaActivations: profileSettings.betaActivations || 0,
+      betaBonusUsed: Boolean(profileSettings.betaBonusUsed),
+      notes: profileSettings.notes || null,
+      source: 'profile',
+    };
+  }
+
+  return {
+    tier: 'free',
+    activeUntil: null,
+    betaActivations: 0,
+    betaBonusUsed: false,
+    notes: null,
+    source: 'default',
+  };
+};
+
+const getFreeLimitForFeature = (feature: UsageFeature): number => {
+  if (feature === 'single_voice_reply') return FREE_SINGLE_VOICE_REPLIES;
+  if (feature === 'council_session') return FREE_COUNCIL_SESSIONS;
+  if (feature === 'blueprint_save') return FREE_BLUEPRINT_SAVES;
+  return 0;
+};
+
+const getFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+  if (isSupabaseConfigured()) {
+    const record = await getUsageCounter(userId, periodKey, feature);
+    if (record) return record.count || 0;
+  }
+
+  return featureUsageBuckets.get(`${userId}:${periodKey}:${feature}`) || 0;
+};
+
+const incrementFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+  if (isSupabaseConfigured()) {
+    const record = await incrementUsageCounter(userId, periodKey, feature);
+    if (record) return record.count || 0;
+  }
+
+  const key = `${userId}:${periodKey}:${feature}`;
+  const next = (featureUsageBuckets.get(key) || 0) + 1;
+  featureUsageBuckets.set(key, next);
+  return next;
+};
+
+const sendPaywallResponse = (
+  res: Response,
+  feature: UsageFeature,
+  message: string,
+  extra: Record<string, unknown> = {},
+): void => {
+  res.status(402).json({
+    error: 'paywall_required',
+    feature,
+    message,
+    beta: {
+      priceEur: BETA_PRICE_EUR,
+      accessDays: BETA_ACCESS_DAYS,
+      provider: 'mock',
+    },
+    ...extra,
+  });
+};
+
+const enforceFeatureAccess = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  feature: UsageFeature,
+  options: { increment?: boolean; sessionReplyCount?: number } = {},
+): Promise<boolean> => {
+  if (!req.user) return false;
+  const access = await getEffectiveAccess(req.user);
+
+  if (access.tier === 'blocked') {
+    res.status(403).json({
+      error: 'account_blocked',
+      message: 'This account is currently blocked by an administrator.',
+    });
+    return false;
+  }
+
+  if (hasFounderAccess(req.user) || isAccessActive(access)) {
+    return true;
+  }
+
+  if (feature === 'cycle_day_6') {
+    sendPaywallResponse(res, feature, `Cycle day ${FREE_CYCLE_DAYS + 1} requires beta access.`);
+    return false;
+  }
+
+  if (options.sessionReplyCount !== undefined && options.sessionReplyCount > FREE_COUNCIL_REPLIES_PER_SESSION) {
+    sendPaywallResponse(res, feature, 'This free council session has reached its reply limit.', {
+      limit: FREE_COUNCIL_REPLIES_PER_SESSION,
+      usage: options.sessionReplyCount,
+    });
+    return false;
+  }
+
+  const periodKey = getWeekKey();
+  const current = await getFeatureUsage(req.user.id, periodKey, feature);
+  const limit = getFreeLimitForFeature(feature);
+
+  if (current >= limit) {
+    sendPaywallResponse(res, feature, 'Weekly free usage limit reached.', {
+      limit,
+      usage: current,
+      periodKey,
+      resetAt: getWeeklyResetAt(),
+    });
+    return false;
+  }
+
+  if (options.increment !== false) {
+    await incrementFeatureUsage(req.user.id, periodKey, feature);
+  }
+
+  return true;
 };
 
 const getUsageBucket = (userId: string): UsageBucket => {
@@ -848,6 +1114,7 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
       userId: req.user.id,
       username: req.user.username,
       authProvider: users.some(user => user.id === req.user?.id) ? 'local' : 'supabase',
+      isAdmin: isAdminUser(req.user),
     });
   } catch (error: any) {
     console.error('GET /api/me error:', error);
@@ -991,6 +1258,8 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
       databaseStatus: 'configured',
       accounts: accounts.map(account => {
         const settings = getProfileAdminSettings(account.preferences);
+        const access = getAccessFromRecord(account.access || null);
+        const effectiveTier = access?.tier || settings.entitlement || 'free';
         return {
           userId: account.user_id,
           username: account.username || null,
@@ -998,8 +1267,12 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
           language: account.language || null,
           createdAt: account.profile_created_at || account.created_at || null,
           updatedAt: account.profile_updated_at || account.updated_at || null,
-          entitlement: settings.entitlement || 'free',
+          entitlement: effectiveTier,
           offlineOnly: Boolean(settings.offlineOnly),
+          activeUntil: access?.activeUntil || settings.activeUntil || null,
+          betaActivations: access?.betaActivations ?? settings.betaActivations ?? 0,
+          betaBonusUsed: access?.betaBonusUsed ?? settings.betaBonusUsed ?? false,
+          notes: access?.notes || settings.notes || null,
           limits: {
             weeklyFreeInteractions: settings.weeklyFreeInteractions ?? null,
             weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
@@ -1043,11 +1316,24 @@ app.put('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRe
         admin: adminSettings,
       },
     });
+    const accessRecord: UserAccessRecord = {
+      user_id: targetUserId,
+      tier: adminSettings.entitlement === 'paid_beta' ? 'paid_beta' : adminSettings.entitlement || 'free',
+      active_until: adminSettings.activeUntil || null,
+      beta_activations: adminSettings.betaActivations || 0,
+      beta_bonus_used: Boolean(adminSettings.betaBonusUsed),
+      notes: adminSettings.notes || null,
+    };
+    localAccessRecords.set(targetUserId, accessRecord);
+    await upsertUserAccess(accessRecord);
 
     res.json({
       userId: targetUserId,
       entitlement: adminSettings.entitlement,
       offlineOnly: adminSettings.offlineOnly,
+      activeUntil: adminSettings.activeUntil || null,
+      betaActivations: adminSettings.betaActivations || 0,
+      betaBonusUsed: Boolean(adminSettings.betaBonusUsed),
       limits: {
         weeklyFreeInteractions: adminSettings.weeklyFreeInteractions,
         weeklyCouncilSessions: adminSettings.weeklyCouncilSessions,
@@ -1171,6 +1457,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     res.json({
       userId: user.id,
       token,
+      displayName: user.displayName || user.username,
     });
   } catch (error: any) {
     console.error('Login API error:', error);
@@ -1206,11 +1493,23 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
-    if (!enforceUsageLimit(req, res, 'interaction')) {
-      return;
-    }
-    if (mode === 'council' && !enforceUsageLimit(req, res, 'council')) {
-      return;
+    const userMessageCount = messages.filter((msg: any) => msg?.role === 'user').length;
+    if (mode === 'direct') {
+      if (!(await enforceFeatureAccess(req, res, 'single_voice_reply'))) {
+        return;
+      }
+    } else {
+      const isInitialCouncilCall = userMessageCount <= 1;
+      if (isInitialCouncilCall) {
+        if (!(await enforceFeatureAccess(req, res, 'council_session'))) {
+          return;
+        }
+      } else if (!(await enforceFeatureAccess(req, res, 'council_session', {
+        increment: false,
+        sessionReplyCount: Math.max(0, userMessageCount - 1),
+      }))) {
+        return;
+      }
     }
     
     // Log request (no secrets) - CRITICAL for debugging mode detection
@@ -1533,6 +1832,106 @@ app.get('/api/payment/status', authenticate, (req: AuthenticatedRequest, res: Re
   });
 });
 
+app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  const access = await getEffectiveAccess(req.user);
+  const periodKey = getWeekKey();
+  const [singleVoiceReplies, councilSessions, blueprintSaves] = await Promise.all([
+    getFeatureUsage(req.user.id, periodKey, 'single_voice_reply'),
+    getFeatureUsage(req.user.id, periodKey, 'council_session'),
+    getFeatureUsage(req.user.id, periodKey, 'blueprint_save'),
+  ]);
+
+  res.json({
+    userId: req.user.id,
+    tier: access.tier,
+    active: hasFounderAccess(req.user) || isAccessActive(access),
+    activeUntil: access.activeUntil,
+    betaActivations: access.betaActivations,
+    betaBonusUsed: access.betaBonusUsed,
+    source: access.source,
+    weeklyResetAt: getWeeklyResetAt(),
+    freeLimits: {
+      singleVoiceReplies: FREE_SINGLE_VOICE_REPLIES,
+      councilSessions: FREE_COUNCIL_SESSIONS,
+      councilRepliesPerSession: FREE_COUNCIL_REPLIES_PER_SESSION,
+      blueprintSaves: FREE_BLUEPRINT_SAVES,
+      cycleDays: FREE_CYCLE_DAYS,
+    },
+    usage: {
+      singleVoiceReplies,
+      councilSessions,
+      blueprintSaves,
+    },
+    beta: {
+      priceEur: BETA_PRICE_EUR,
+      accessDays: BETA_ACCESS_DAYS,
+      provider: 'mock',
+      bonusAvailable: access.betaActivations >= 2 && !access.betaBonusUsed,
+    },
+  });
+});
+
+app.post('/api/access/check-cycle-day', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  const day = Number(req.body?.day || 0);
+  if (day <= FREE_CYCLE_DAYS) {
+    return res.json({ allowed: true, freeUntilDay: FREE_CYCLE_DAYS });
+  }
+
+  if (!(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+    return;
+  }
+
+  res.json({ allowed: true, freeUntilDay: FREE_CYCLE_DAYS });
+});
+
+app.post('/api/access/mock-activate-beta', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+  if (isOfflineOnlyUser(req.user)) {
+    return res.status(409).json({
+      error: 'offline_only_account',
+      message: 'This account is protected as local-only and cannot be activated remotely.',
+    });
+  }
+
+  const current = await getEffectiveAccess(req.user);
+  const bonusAvailable = current.betaActivations >= 2 && !current.betaBonusUsed;
+  const now = Date.now();
+  const baseTime = current.activeUntil && new Date(current.activeUntil).getTime() > now
+    ? new Date(current.activeUntil).getTime()
+    : now;
+  const activeUntil = new Date(baseTime + BETA_ACCESS_DAYS * 86400000).toISOString();
+  const nextAccess: UserAccessRecord = {
+    user_id: req.user.id,
+    tier: 'paid_beta',
+    active_until: activeUntil,
+    beta_activations: bonusAvailable ? current.betaActivations : current.betaActivations + 1,
+    beta_bonus_used: bonusAvailable ? true : current.betaBonusUsed,
+    notes: bonusAvailable ? 'Mock bonus beta period after two activations.' : 'Mock beta activation.',
+  };
+
+  localAccessRecords.set(req.user.id, nextAccess);
+  await upsertUserAccess(nextAccess);
+
+  res.json({
+    tier: nextAccess.tier,
+    activeUntil: nextAccess.active_until,
+    betaActivations: nextAccess.beta_activations,
+    betaBonusUsed: nextAccess.beta_bonus_used,
+    charged: !bonusAvailable,
+    provider: 'mock',
+  });
+});
+
 // Meaning Agent endpoint - analyzes session transcript and returns canonical JSON
 app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1567,13 +1966,23 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       return res.status(400).json({ error: 'messages array is required and cannot be empty' });
     }
 
-    if (!enforceUsageLimit(req, res, 'meaning')) {
+    if (persist === true && !(await enforceFeatureAccess(req, res, 'blueprint_save', { increment: false }))) {
       return;
     }
-    
+
     if (!openai) {
+      if (persist === true && !(await enforceFeatureAccess(req, res, 'blueprint_save'))) {
+        return;
+      }
+
+      const mockResult = createMockMeaningResult();
+
+      if (persist === true) {
+        await mergeLocalMeaningState(userId, mockResult);
+      }
+
       return res.json({
-        ...createMockMeaningResult(),
+        ...mockResult,
         provider: 'mock',
         serviceStatus: runtimeConfig.aiProviderEnabled ? 'missing_credentials' : 'disabled'
       });
@@ -1816,6 +2225,10 @@ IMPORTANT: If you identify a breakthrough, you MUST:
 
     const shouldPersistMeaning = persist === true;
 
+    if (shouldPersistMeaning && !(await enforceFeatureAccess(req, res, 'blueprint_save'))) {
+      return;
+    }
+
     // Persist to Supabase only when the user explicitly saves/integrates.
     if (shouldPersistMeaning && isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
@@ -1866,6 +2279,14 @@ IMPORTANT: If you identify a breakthrough, you MUST:
         // Don't fail the request if DB write fails
       }
     }
+
+    if (shouldPersistMeaning) {
+      try {
+        await mergeLocalMeaningState(userId, analysisResult);
+      } catch (error: any) {
+        console.warn(`[LOCAL_STORE] Error persisting meaning analysis for user ${userId}:`, error.message);
+      }
+    }
     
     console.log(`[MEANING] Analysis complete for user ${userId}`, {
       questLogEntries: analysisResult.questLogEntries.length,
@@ -1892,6 +2313,7 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
     }
     
     const userId = req.user.id;
+    const localState = await loadLocalMeaningState(userId);
     
     // Load from Supabase if configured
     if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
@@ -1904,7 +2326,8 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
         
         // Transform to frontend format
         const result = {
-          questLogEntries: questLogEntries.map(entry => ({
+          questLogEntries: [
+            ...questLogEntries.map(entry => ({
             id: entry.id!,
             createdAt: entry.created_at || new Date().toISOString(),
             title: entry.title,
@@ -1912,8 +2335,11 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             tags: entry.tags || [],
             relatedArchetypes: entry.related_archetypes || [],
             sourceSessionId: entry.source_session_id
-          })),
-          soulTimelineEvents: timelineEvents.map(event => ({
+            })),
+            ...localState.questLogEntries,
+          ],
+          soulTimelineEvents: [
+            ...timelineEvents.map(event => ({
             id: event.id!,
             createdAt: event.created_at || new Date().toISOString(),
             label: event.label,
@@ -1922,8 +2348,11 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             type: event.type || 'EVENT',
             tags: event.tags || [],
             sourceSessionId: event.source_session_id
-          })),
-          breakthroughs: breakthroughs.map(bt => ({
+            })),
+            ...localState.soulTimelineEvents,
+          ],
+          breakthroughs: [
+            ...breakthroughs.map(bt => ({
             id: bt.id!,
             createdAt: bt.created_at || new Date().toISOString(),
             title: bt.title,
@@ -1932,7 +2361,13 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             action: bt.action,
             tags: bt.tags || [],
             sourceSessionId: bt.source_session_id
-          }))
+            })),
+            ...localState.breakthroughs,
+          ],
+          emotionalState: localState.emotionalState,
+          attributeUpdates: localState.attributeUpdates,
+          skillUpdates: localState.skillUpdates,
+          nextQuestState: localState.nextQuestState,
         };
         
         console.log(`[MEANING] Loaded state for user ${userId}`, {
@@ -1948,12 +2383,7 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
       }
     }
     
-    // Return empty state if Supabase not configured or error
-    res.json({
-      questLogEntries: [],
-      soulTimelineEvents: [],
-      breakthroughs: []
-    });
+    res.json(localState);
   } catch (error: any) {
     console.error('[MEANING] Error loading state:', error);
     res.status(500).json({ 
@@ -2041,8 +2471,8 @@ YOU ARE IN SINGLE VOICE MODE. This means:
    ❌ Multiple paragraphs with different archetype voices
 
 5. EXAMPLES OF CORRECT RESPONSES (DO THIS):
-   ✅ "The shadow work requires deep honesty. I see patterns that need transformation. Here's what I suggest: [your direct advice]"
-   ✅ "As ${archetypeName}, I believe [your perspective]. The path forward is [your conclusion]."
+   ✅ "One thing I notice is this pattern. In this situation, it may help to look at [specific angle]."
+   ✅ "As ${archetypeName}, I would read it this way: [your perspective]. That is one lens, not the whole truth."
 
 REMEMBER: You are ${archetypeName} speaking ONE-ON-ONE with the user. No council. No other voices. Just you.`;
 
@@ -2261,4 +2691,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[STARTUP] Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log('='.repeat(80));
 });
+
 

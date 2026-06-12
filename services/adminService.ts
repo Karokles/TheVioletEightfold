@@ -26,7 +26,7 @@ const getAuthHeaders = () => {
   };
 };
 
-export type AdminEntitlement = 'free' | 'founder' | 'blocked';
+export type AdminEntitlement = 'free' | 'paid_beta' | 'founder' | 'blocked';
 
 export interface AdminAccount {
   userId: string;
@@ -37,6 +37,10 @@ export interface AdminAccount {
   updatedAt?: string | null;
   entitlement: AdminEntitlement;
   offlineOnly: boolean;
+  activeUntil?: string | null;
+  betaActivations?: number;
+  betaBonusUsed?: boolean;
+  notes?: string | null;
   limits: {
     weeklyFreeInteractions: number | null;
     weeklyCouncilSessions: number | null;
@@ -50,13 +54,25 @@ export interface AdminAccountsResponse {
 }
 
 export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
-  const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts?ts=${Date.now()}`, {
     method: 'GET',
     headers: getAuthHeaders(),
+    cache: 'no-store',
   });
 
   if (!response.ok) {
-    throw new Error(response.status === 403 ? 'Admin access required.' : `Admin request failed: ${response.status}`);
+    let message = response.status === 403 ? 'Admin access required.' : `Admin request failed: ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.message === 'string') {
+        message = body.message;
+      } else if (typeof body?.error === 'string') {
+        message = body.error;
+      }
+    } catch {
+      // Keep HTTP status fallback.
+    }
+    throw new Error(message);
   }
 
   return response.json();
@@ -67,6 +83,10 @@ export const updateAdminAccount = async (
   admin: {
     entitlement: AdminEntitlement;
     offlineOnly: boolean;
+    activeUntil?: string | null;
+    betaActivations?: number;
+    betaBonusUsed?: boolean;
+    notes?: string | null;
     weeklyFreeInteractions: number | null;
     weeklyCouncilSessions: number | null;
     weeklyMeaningAnalyses: number | null;
@@ -75,6 +95,7 @@ export const updateAdminAccount = async (
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts/${encodeURIComponent(userId)}`, {
     method: 'PUT',
     headers: getAuthHeaders(),
+    cache: 'no-store',
     body: JSON.stringify({ admin }),
   });
 

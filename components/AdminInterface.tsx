@@ -22,6 +22,8 @@ const copy = {
     updated: 'Updated',
     noAccess: 'Admin access is not active for this account.',
     dbDisabled: 'Database is not configured on this backend.',
+    loading: 'Loading admin accounts...',
+    empty: 'No staging accounts found yet.',
   },
   DE: {
     title: 'Admin',
@@ -37,6 +39,8 @@ const copy = {
     updated: 'Aktualisiert',
     noAccess: 'Admin-Zugang ist fuer dieses Konto nicht aktiv.',
     dbDisabled: 'Die Datenbank ist auf diesem Backend nicht konfiguriert.',
+    loading: 'Admin-Konten werden geladen...',
+    empty: 'Noch keine Staging-Konten gefunden.',
   },
 };
 
@@ -97,6 +101,10 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
       await updateAdminAccount(account.userId, {
         entitlement: account.entitlement,
         offlineOnly: account.offlineOnly,
+        activeUntil: account.activeUntil || null,
+        betaActivations: account.betaActivations || 0,
+        betaBonusUsed: Boolean(account.betaBonusUsed),
+        notes: account.notes || null,
         weeklyFreeInteractions: account.limits.weeklyFreeInteractions,
         weeklyCouncilSessions: account.limits.weeklyCouncilSessions,
         weeklyMeaningAnalyses: account.limits.weeklyMeaningAnalyses,
@@ -144,11 +152,12 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
         )}
 
         <section className="overflow-x-auto rounded-lg border border-purple-500/15 bg-[#0d0615]/86">
-          <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-purple-500/15 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-300">
                 <th className="px-4 py-3">{t.account}</th>
                 <th className="px-4 py-3">{t.status}</th>
+                <th className="px-4 py-3">Beta</th>
                 <th className="px-4 py-3">{t.communication}</th>
                 <th className="px-4 py-3">{t.council}</th>
                 <th className="px-4 py-3">{t.blueprint}</th>
@@ -158,6 +167,23 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
               </tr>
             </thead>
             <tbody>
+              {loading && accounts.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-purple-200/70">
+                    <RefreshCw size={18} className="mx-auto mb-3 animate-spin text-purple-300" />
+                    {t.loading}
+                  </td>
+                </tr>
+              )}
+
+              {!loading && accounts.length === 0 && !error && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-purple-200/60">
+                    {t.empty}
+                  </td>
+                </tr>
+              )}
+
               {accounts.map(account => (
                 <tr key={account.userId} className="border-b border-purple-500/10 text-purple-100/80 last:border-b-0">
                   <td className="px-4 py-3">
@@ -171,12 +197,36 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                       className="rounded border border-white/10 bg-black/35 px-2 py-2 text-xs font-bold uppercase tracking-[0.08em] text-white outline-none"
                     >
                       <option value="free">Free</option>
+                      <option value="paid_beta">Beta</option>
                       <option value="founder">Founder</option>
                       <option value="blocked">Blocked</option>
                     </select>
                     {account.entitlement === 'founder' && (
                       <Crown size={14} className="ml-2 inline text-amber-200" />
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="datetime-local"
+                      value={account.activeUntil ? account.activeUntil.slice(0, 16) : ''}
+                      onChange={event => patchAccount(account.userId, {
+                        activeUntil: event.target.value ? new Date(event.target.value).toISOString() : null,
+                      })}
+                      className="w-44 rounded border border-white/10 bg-black/35 px-2 py-2 text-xs text-white outline-none placeholder:text-purple-300/30 focus:border-purple-300/35"
+                    />
+                    <div className="mt-2 flex items-center gap-2 text-[10px] text-purple-300/45">
+                      <span>{account.betaActivations || 0}x</span>
+                      <button
+                        onClick={() => patchAccount(account.userId, { betaBonusUsed: !account.betaBonusUsed })}
+                        className={`rounded border px-2 py-1 uppercase tracking-[0.1em] ${
+                          account.betaBonusUsed
+                            ? 'border-amber-200/25 text-amber-100'
+                            : 'border-white/10 text-purple-300/45'
+                        }`}
+                      >
+                        Bonus
+                      </button>
+                    </div>
                   </td>
                   {[
                     ['weeklyFreeInteractions', account.limits.weeklyFreeInteractions],

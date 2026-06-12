@@ -35,31 +35,45 @@ export type UserProfile = {
   isAdmin?: boolean;
 };
 
-export const getProfile = async (): Promise<UserProfile | null> => {
-  const response = await fetch(`${getApiBaseUrl()}/api/profile`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
+const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
-  if (!response.ok) {
-    return null;
+export const getProfile = async (options: { retries?: number } = {}): Promise<UserProfile | null> => {
+  const maxAttempts = Math.max(1, (options.retries || 0) + 1);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(`${getApiBaseUrl()}/api/profile?ts=${Date.now()}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    });
+
+    if (response.ok) {
+      const profile = await response.json() as UserProfile;
+      if (profile.displayName) {
+        setCurrentUserDisplayName(profile.displayName);
+      }
+      if ((profile.language === 'DE' || profile.language === 'EN') && profile.userId) {
+        saveUserLanguage(profile.userId, profile.language);
+      }
+
+      return profile;
+    }
+
+    if (response.status === 401 || response.status === 403 || attempt === maxAttempts) {
+      return null;
+    }
+
+    await delay(450 * attempt);
   }
 
-  const profile = await response.json() as UserProfile;
-  if (profile.displayName) {
-    setCurrentUserDisplayName(profile.displayName);
-  }
-  if ((profile.language === 'DE' || profile.language === 'EN') && profile.userId) {
-    saveUserLanguage(profile.userId, profile.language);
-  }
-
-  return profile;
+  return null;
 };
 
 export const updateProfile = async (profile: Partial<UserProfile>): Promise<UserProfile | null> => {
   const response = await fetch(`${getApiBaseUrl()}/api/profile`, {
     method: 'PUT',
     headers: getAuthHeaders(),
+    cache: 'no-store',
     body: JSON.stringify(profile),
   });
 

@@ -40,7 +40,7 @@ const readEnvironment = (): AppEnvironment => {
 };
 
 const appEnvironment = readEnvironment();
-const defaultStrict = appEnvironment === 'production';
+const defaultStrict = appEnvironment !== 'local';
 
 export const runtimeConfig = {
   appEnvironment,
@@ -48,13 +48,13 @@ export const runtimeConfig = {
   isStaging: appEnvironment === 'staging',
   isProduction: appEnvironment === 'production',
   aiProviderEnabled: readBoolean('AI_PROVIDER_ENABLED', false),
-  databaseEnabled: readBoolean('DATABASE_ENABLED', false),
+  databaseEnabled: readBoolean('DATABASE_ENABLED', appEnvironment !== 'local'),
   paymentEnabled: readBoolean('PAYMENT_ENABLED', false),
   supabaseAuthEnabled: readBoolean('SUPABASE_AUTH_ENABLED', appEnvironment === 'staging'),
   authStrictMode: readBoolean('AUTH_STRICT_MODE', defaultStrict),
   usageLimitsEnabled: readBoolean('USAGE_LIMITS_ENABLED', appEnvironment !== 'local'),
   debugEndpointsEnabled: readBoolean('DEBUG_ENDPOINTS_ENABLED', appEnvironment !== 'production'),
-  localAuthEnabled: readBoolean('LOCAL_AUTH_ENABLED', appEnvironment === 'local' || appEnvironment === 'staging'),
+  localAuthEnabled: readBoolean('LOCAL_AUTH_ENABLED', appEnvironment === 'local'),
   weeklyFreeInteractions: Number(process.env.WEEKLY_FREE_INTERACTIONS || 25),
   weeklyCouncilSessions: Number(process.env.WEEKLY_COUNCIL_SESSIONS || 5),
   weeklyMeaningAnalyses: Number(process.env.WEEKLY_MEANING_ANALYSES || 10),
@@ -97,8 +97,8 @@ export const getCredentialWarnings = (): string[] => {
   if (runtimeConfig.isProduction && runtimeConfig.debugEndpointsEnabled) {
     warnings.push('DEBUG_ENDPOINTS_ENABLED=true in production. Diagnostic endpoints may expose operational details.');
   }
-  if (runtimeConfig.isProduction && runtimeConfig.localAuthEnabled) {
-    warnings.push('LOCAL_AUTH_ENABLED=true in production. Hardcoded local test users must not be used for real users.');
+  if (!runtimeConfig.isLocal && runtimeConfig.localAuthEnabled) {
+    warnings.push('LOCAL_AUTH_ENABLED=true outside local mode. Hardcoded local test users must not be used for real users.');
   }
 
   return warnings;
