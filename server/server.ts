@@ -311,6 +311,50 @@ const userMatchesIdentifiers = (user: Pick<User, 'id' | 'username' | 'email'> | 
   return parseIdentifierList(identifiers).some(pattern => candidates.some(candidate => wildcardMatch(pattern, candidate)));
 };
 
+const STAGING_ADMIN_EMAILS = new Set(['lionceaunicolai@yahoo.de']);
+const STAGING_DISPLAY_NAMES: Record<string, string> = {
+  'lionceaunicolai@yahoo.de': 'Karokles',
+};
+
+const normalizeEmail = (value?: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.includes('@') ? trimmed : null;
+};
+
+const getEmailLocalPart = (email?: string | null): string | null => {
+  const normalized = normalizeEmail(email);
+  return normalized ? normalized.split('@')[0] : null;
+};
+
+const isEmailLike = (value?: string | null): boolean => {
+  return Boolean(normalizeEmail(value));
+};
+
+const getStagingDisplayName = (email?: string | null): string | null => {
+  const normalized = normalizeEmail(email);
+  return normalized ? STAGING_DISPLAY_NAMES[normalized] || null : null;
+};
+
+const chooseDisplayName = (
+  preferred?: string | null,
+  fallbackEmail?: string | null,
+  fallbackId?: string | null,
+): string => {
+  const stagingName = getStagingDisplayName(fallbackEmail);
+  if (stagingName) return stagingName;
+
+  const trimmed = typeof preferred === 'string' ? preferred.trim() : '';
+  if (trimmed && !isEmailLike(trimmed)) {
+    return trimmed.slice(0, 80);
+  }
+
+  const localPart = getEmailLocalPart(fallbackEmail);
+  if (localPart) return localPart.slice(0, 80);
+
+  return (fallbackId || 'User').slice(0, 80);
+};
+
 const isProtectedLocalLionUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
   if (!user) return false;
   return [user.id, user.username, user.email]
@@ -337,6 +381,11 @@ const hasFounderAccess = (user?: Pick<User, 'id' | 'username' | 'email'>): boole
 };
 
 const isAdminUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  const email = normalizeEmail(user?.email || user?.username);
+  if (runtimeConfig.isStaging && email && STAGING_ADMIN_EMAILS.has(email)) {
+    return true;
+  }
+
   return userMatchesIdentifiers(user, runtimeConfig.adminIdentifiers);
 };
 
@@ -420,12 +469,11 @@ const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Pro
   }
 
   const username = authUser.email || authUser.user_metadata?.display_name || authUser.id;
-  const displayName = authUser.user_metadata?.display_name
+  const metadataDisplayName = authUser.user_metadata?.display_name
     || authUser.user_metadata?.name
     || authUser.user_metadata?.full_name
-    || authUser.user_metadata?.preferred_username
-    || authUser.email?.split('@')[0]
-    || authUser.id;
+    || authUser.user_metadata?.preferred_username;
+  const displayName = chooseDisplayName(metadataDisplayName, authUser.email, authUser.id);
   const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
 
   req.user = {
@@ -433,15 +481,17 @@ const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Pro
     username,
     secretHash,
     email: authUser.email || undefined,
+    displayName,
   };
 
   if (!isOfflineOnlyUser(req.user)) {
     await ensureUserExists(authUser.id, username, secretHash);
     const existingProfile = await getUserProfile(authUser.id);
     req.user.adminSettings = getProfileAdminSettings(existingProfile?.preferences);
+    const nextDisplayName = chooseDisplayName(existingProfile?.display_name || displayName, authUser.email, authUser.id);
     await upsertUserProfile({
       user_id: authUser.id,
-      display_name: existingProfile?.display_name || displayName,
+      display_name: nextDisplayName,
       language: existingProfile?.language || null,
       active_archetype: existingProfile?.active_archetype || null,
       preferences: existingProfile?.preferences || {}
@@ -1113,6 +1163,7 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
     res.json({
       userId: req.user.id,
       username: req.user.username,
+      displayName: req.user.displayName || chooseDisplayName(req.user.username, req.user.email, req.user.id),
       authProvider: users.some(user => user.id === req.user?.id) ? 'local' : 'supabase',
       isAdmin: isAdminUser(req.user),
     });
@@ -1135,7 +1186,7 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     if (isOfflineOnlyUser(req.user)) {
       return res.json({
         userId: req.user.id,
-        displayName: req.user.username,
+        displayName: req.user.displayName || chooseDisplayName(req.user.username, req.user.email, req.user.id),
         language: null,
         activeArchetype: null,
         preferences: {
@@ -1149,7 +1200,7 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     const profile = await getUserProfile(req.user.id);
     res.json({
       userId: req.user.id,
-      displayName: profile?.display_name || req.user.username,
+      displayName: chooseDisplayName(profile?.display_name || req.user.displayName, req.user.email || req.user.username, req.user.id),
       language: profile?.language || null,
       activeArchetype: profile?.active_archetype || null,
       preferences: profile?.preferences || {},
@@ -1185,7 +1236,7 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     if (isOfflineOnlyUser(req.user)) {
       return res.json({
         userId: req.user.id,
-        displayName: safeDisplayName || req.user.username,
+        displayName: chooseDisplayName(safeDisplayName || req.user.displayName, req.user.email || req.user.username, req.user.id),
         language: safeLanguage || null,
         activeArchetype: safeActiveArchetype,
         preferences: {
@@ -1207,7 +1258,7 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
 
     const profile = await upsertUserProfile({
       user_id: req.user.id,
-      display_name: safeDisplayName || existingProfile?.display_name || req.user.username,
+      display_name: chooseDisplayName(safeDisplayName || existingProfile?.display_name || req.user.displayName, req.user.email || req.user.username, req.user.id),
       language: safeLanguage || existingProfile?.language || null,
       active_archetype: safeActiveArchetype || existingProfile?.active_archetype || null,
       preferences: nextPreferences
@@ -1215,7 +1266,7 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
 
     res.json({
       userId: req.user.id,
-      displayName: profile?.display_name || safeDisplayName || req.user.username,
+      displayName: chooseDisplayName(profile?.display_name || safeDisplayName || req.user.displayName, req.user.email || req.user.username, req.user.id),
       language: profile?.language || safeLanguage || null,
       activeArchetype: profile?.active_archetype || safeActiveArchetype,
       preferences: profile?.preferences || {},
@@ -1226,7 +1277,7 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     if (req.user) {
       const fallbackDisplayName = typeof req.body?.displayName === 'string' && req.body.displayName.trim()
         ? req.body.displayName.trim().slice(0, 80)
-        : req.user.username;
+        : chooseDisplayName(req.user.displayName || req.user.username, req.user.email, req.user.id);
 
       return res.json({
         userId: req.user.id,
@@ -1260,10 +1311,15 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
         const settings = getProfileAdminSettings(account.preferences);
         const access = getAccessFromRecord(account.access || null);
         const effectiveTier = access?.tier || settings.entitlement || 'free';
+        const displayName = chooseDisplayName(
+          account.display_name,
+          account.username,
+          account.user_id,
+        );
         return {
           userId: account.user_id,
           username: account.username || null,
-          displayName: account.display_name || account.username || account.user_id,
+          displayName,
           language: account.language || null,
           createdAt: account.profile_created_at || account.created_at || null,
           updatedAt: account.profile_updated_at || account.updated_at || null,

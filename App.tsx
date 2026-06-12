@@ -181,7 +181,7 @@ export default function App() {
       setRecentUserSignals([]);
       setEmotionalState(undefined);
       if (profile) {
-        setIsAdmin(Boolean(profile.isAdmin));
+        setIsAdmin(prev => prev || Boolean(profile.isAdmin));
       }
     }
   };
