@@ -157,11 +157,202 @@ export interface AdminAccountRecord {
   display_name?: string | null;
   language?: string | null;
   preferences?: any;
+  access?: UserAccessRecord | null;
+  usage?: UsageCounterRecord[];
   created_at?: string | null;
   updated_at?: string | null;
   profile_created_at?: string | null;
   profile_updated_at?: string | null;
 }
+
+export type AccessTier = 'free' | 'paid_beta' | 'founder' | 'blocked';
+
+export interface UserAccessRecord {
+  user_id: string;
+  tier: AccessTier;
+  beta_activations: number;
+  beta_bonus_used: boolean;
+  active_until?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UsageCounterRecord {
+  user_id: string;
+  period_key: string;
+  feature: string;
+  count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getUserAccess = async (userId: string): Promise<UserAccessRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching user access:', error.message);
+      return null;
+    }
+
+    return data ? (data as UserAccessRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUserAccess:', error.message);
+    return null;
+  }
+};
+
+export const upsertUserAccess = async (access: UserAccessRecord): Promise<UserAccessRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .upsert({
+        ...access,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error upserting user access:', error.message);
+      return null;
+    }
+
+    return (data as UserAccessRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in upsertUserAccess:', error.message);
+    return null;
+  }
+};
+
+export const listUserAccessRecords = async (): Promise<UserAccessRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('[SUPABASE] Error listing user access records:', error.message);
+      return [];
+    }
+
+    return (data as UserAccessRecord[]) || [];
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listUserAccessRecords:', error.message);
+    return [];
+  }
+};
+
+export const getUsageCounter = async (
+  userId: string,
+  periodKey: string,
+  feature: string,
+): Promise<UsageCounterRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('period_key', periodKey)
+      .eq('feature', feature)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching usage counter:', error.message);
+      return null;
+    }
+
+    return data ? (data as UsageCounterRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUsageCounter:', error.message);
+    return null;
+  }
+};
+
+export const incrementUsageCounter = async (
+  userId: string,
+  periodKey: string,
+  feature: string,
+): Promise<UsageCounterRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const existing = await getUsageCounter(userId, periodKey, feature);
+    const nextCount = (existing?.count || 0) + 1;
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .upsert({
+        user_id: userId,
+        period_key: periodKey,
+        feature,
+        count: nextCount,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id,period_key,feature'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error incrementing usage counter:', error.message);
+      return null;
+    }
+
+    return (data as UsageCounterRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in incrementUsageCounter:', error.message);
+    return null;
+  }
+};
+
+export const listUsageCountersForPeriod = async (periodKey: string): Promise<UsageCounterRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .select('*')
+      .eq('period_key', periodKey);
+
+    if (error) {
+      console.error('[SUPABASE] Error listing usage counters:', error.message);
+      return [];
+    }
+
+    return (data as UsageCounterRecord[]) || [];
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listUsageCountersForPeriod:', error.message);
+    return [];
+  }
+};
 
 export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
   if (!isSupabaseConfigured()) {
@@ -169,7 +360,11 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
   }
 
   try {
-    const [{ data: users, error: usersError }, { data: profiles, error: profilesError }] = await Promise.all([
+    const [
+      { data: users, error: usersError },
+      { data: profiles, error: profilesError },
+      accessRecords,
+    ] = await Promise.all([
       getSupabaseClient()
         .from('users')
         .select('id, username, created_at, updated_at')
@@ -178,6 +373,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
         .from('user_profiles')
         .select('user_id, display_name, language, preferences, created_at, updated_at')
         .order('updated_at', { ascending: false }),
+      listUserAccessRecords(),
     ]);
 
     if (usersError) {
@@ -206,6 +402,14 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
         preferences: profile.preferences || {},
         profile_created_at: profile.created_at,
         profile_updated_at: profile.updated_at,
+      });
+    });
+
+    accessRecords.forEach(access => {
+      const existing = byId.get(access.user_id) || { user_id: access.user_id };
+      byId.set(access.user_id, {
+        ...existing,
+        access,
       });
     });
 

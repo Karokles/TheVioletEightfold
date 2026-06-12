@@ -1,13 +1,14 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CommunicationMode, IntegrationCycle, Language, MeaningContext, QuestLogEntry, SoulTimelineEvent, Breakthrough, UserStats } from '../types';
 import { ICON_MAP } from '../constants';
-import { Shield, Zap, Brain, Activity, Target, Lock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, Hourglass } from 'lucide-react';
+import { Shield, Zap, Brain, Activity, Target, Lock, Database, Trophy, Star, BookOpen, Sparkles, Calendar, Hourglass, ChevronDown } from 'lucide-react';
 import { getMeaningState } from '../services/aiService';
 import { getSupabaseSession } from '../services/supabaseAuth';
 import { getCurrentUser, setCurrentUserDisplayName } from '../services/userService';
 import { CYCLE_LENGTH_DAYS, cycleMilestones } from '../config/integrationCycle';
 import { getCompletedCycleParticipationDays, getCycleCalendarDayNumber, getCycleDayNumber, getCycleRecordCompletedToday } from '../services/cycleService';
+import { buildCommunicationStanceExplanation, suggestCommunicationMode } from '../services/communicationService';
 
 interface StatsInterfaceProps {
     language: Language;
@@ -15,6 +16,7 @@ interface StatsInterfaceProps {
     cycle?: IntegrationCycle | null;
     meaningContext?: MeaningContext;
     currentLore?: string;
+    onUpdateCycleStarter?: (answers: IntegrationCycle['onboardingAnswers']) => void;
     onRefresh?: () => void; // Optional refresh trigger
 }
 
@@ -38,6 +40,12 @@ const uiLabels = {
     noBreakthroughs: 'No breakthroughs',
     noEntries: 'No entries',
     beyond: 'The Beyond...',
+    starterBlueprint: 'Initial Starter Inputs',
+    starterEmpty: 'No starter inputs saved',
+    starterOpen: 'Open',
+    starterClose: 'Close',
+    starterSaving: 'Saving',
+    starterSaved: 'Saved',
   },
   DE: {
     state: 'Zustand',
@@ -50,10 +58,16 @@ const uiLabels = {
     noBreakthroughs: 'Keine Durchbrüche',
     noEntries: 'Keine Einträge',
     beyond: 'Das Danach...',
+    starterBlueprint: 'Initiale Starter-Eingaben',
+    starterEmpty: 'Keine Starter-Eingaben gespeichert',
+    starterOpen: 'Oeffnen',
+    starterClose: 'Schliessen',
+    starterSaving: 'Speichert',
+    starterSaved: 'Gespeichert',
   },
 };
 
-export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats, cycle, meaningContext, currentLore = '', onRefresh }) => {
+export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats, cycle, meaningContext, currentLore = '', onUpdateCycleStarter, onRefresh }) => {
   const breakthroughLabel = language === 'DE' ? 'DURCHBRUCH' : 'BREAKTHROUGH';
   const t = uiLabels[language];
   const activeCycleDay = cycle ? getCycleCalendarDayNumber(cycle) : undefined;
@@ -65,6 +79,13 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
     : undefined;
   const progressPercent = cycle ? Math.min(100, Math.round((completedCycleDays / CYCLE_LENGTH_DAYS) * 100)) : 0;
   const sealedLevel = cycle ? completedCycleDays : Number(stats.level.match(/\d+/)?.[0] || 0);
+  const currentCommunicationMode = meaningContext?.communicationMode || 'MIRROR';
+  const recommendedCommunicationMode = suggestCommunicationMode(cycle || null, 'STATS');
+  const communicationExplanation = buildCommunicationStanceExplanation(
+    recommendedCommunicationMode,
+    currentCommunicationMode,
+    language,
+  );
   const currentUser = getCurrentUser();
   const isUuid = (value?: string) => Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
   const initialDisplayName = currentUser?.displayName && !isUuid(currentUser.displayName)
@@ -75,6 +96,10 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
   const [timelineEvents, setTimelineEvents] = useState<SoulTimelineEvent[]>([]);
   const [breakthroughs, setBreakthroughs] = useState<Breakthrough[]>([]);
   const [isLoadingMeaning, setIsLoadingMeaning] = useState(true);
+  const [starterOpen, setStarterOpen] = useState(false);
+  const [starterDraftAnswers, setStarterDraftAnswers] = useState<Record<string, string>>({});
+  const [starterSaveState, setStarterSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const lastStarterSignatureRef = useRef('');
 
   const normalizeMeaningText = (value: string): string => {
     return value
@@ -84,6 +109,38 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
       .replace(/\s+/g, ' ')
       .trim();
   };
+
+  useEffect(() => {
+    const nextDraftAnswers = Object.fromEntries(
+      (cycle?.onboardingAnswers || []).map(answer => [answer.questionId, answer.value])
+    );
+    const signature = JSON.stringify(nextDraftAnswers);
+    setStarterDraftAnswers(nextDraftAnswers);
+    setStarterSaveState('idle');
+    lastStarterSignatureRef.current = signature;
+  }, [cycle?.id]);
+
+  useEffect(() => {
+    if (!cycle?.onboardingAnswers.length || !onUpdateCycleStarter) return;
+
+    const signature = JSON.stringify(starterDraftAnswers);
+    if (signature === lastStarterSignatureRef.current) return;
+
+    setStarterSaveState('saving');
+
+    const timer = window.setTimeout(() => {
+      const nextAnswers = cycle.onboardingAnswers.map(answer => ({
+        ...answer,
+        value: starterDraftAnswers[answer.questionId] ?? '',
+      }));
+
+      lastStarterSignatureRef.current = signature;
+      onUpdateCycleStarter(nextAnswers);
+      setStarterSaveState('saved');
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [cycle, onUpdateCycleStarter, starterDraftAnswers]);
 
   // Derive breakthroughs from timeline events (single source of truth)
   const breakthroughTimelineEvents = timelineEvents.filter(e => e.type === 'BREAKTHROUGH');
@@ -160,6 +217,34 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
       return true;
     });
   }, [allBreakthroughs, stats.milestones, timelineEvents]);
+
+  const getTimelineSortTime = (dateString: string): number => {
+    const normalized = /^2023-10-\d{2}/.test(dateString)
+      ? dateString.replace(/^2023-10-/, '2026-06-')
+      : dateString;
+    return new Date(normalized).getTime() || 0;
+  };
+
+  const displayTimelineItems = useMemo(() => {
+    const milestoneItems = displayMilestones.map(milestone => ({
+      kind: 'milestone' as const,
+      id: milestone.id,
+      date: milestone.date,
+      milestone,
+    }));
+    const eventItems = displayTimelineEvents.map(event => ({
+      kind: 'event' as const,
+      id: event.id,
+      date: event.createdAt,
+      event,
+    }));
+
+    return [...milestoneItems, ...eventItems].sort((a, b) => {
+      const bTime = getTimelineSortTime(b.date);
+      const aTime = getTimelineSortTime(a.date);
+      return bTime - aTime;
+    });
+  }, [displayMilestones, displayTimelineEvents]);
 
   const latestMeaningSeed = useMemo(() => {
     const latestQuest = questLogEntries[0]?.title || questLogEntries[0]?.content;
@@ -263,9 +348,19 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
     return dateString;
   };
 
-  const formatDate = (dateString: string) => {
+  const isLionSoulTimelineSeed = (sourceSessionId?: string): boolean => {
+    return sourceSessionId === 'lion-soul-timeline-seed-v1';
+  };
+
+  const formatDate = (dateString: string, sourceSessionId?: string) => {
     try {
       const date = new Date(normalizeLegacyMeaningDate(dateString));
+      if (isLionSoulTimelineSeed(sourceSessionId)) {
+        return date.toLocaleDateString(language === 'DE' ? 'de-DE' : 'en-US', {
+          year: 'numeric',
+          month: 'long',
+        });
+      }
       return date.toLocaleDateString(language === 'DE' ? 'de-DE' : 'en-US', {
         year: 'numeric',
         month: 'short',
@@ -480,6 +575,78 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                             />
                         </div>
 
+                        <div className={`mb-4 w-full origin-top-left overflow-hidden rounded-lg border border-purple-500/15 bg-[#0d0615]/70 transition-[max-width,border-color,background-color] duration-300 focus-within:border-purple-300/30 ${
+                            starterOpen ? 'max-w-[72rem]' : 'max-w-[34rem]'
+                        }`}>
+                            <button
+                                type="button"
+                                onClick={() => setStarterOpen(prev => !prev)}
+                                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.025]"
+                                aria-expanded={starterOpen}
+                            >
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <BookOpen size={14} className="shrink-0 text-purple-300/80" />
+                                    <span className="min-w-0">
+                                        <span className="block text-[10px] font-bold uppercase tracking-[0.18em] text-purple-300">
+                                            {t.starterBlueprint}
+                                        </span>
+                                        <span className="mt-1 block truncate text-xs text-purple-200/45">
+                                            {cycle.onboardingAnswers
+                                                .map(answer => starterDraftAnswers[answer.questionId] ?? answer.value)
+                                                .filter(Boolean)
+                                                .slice(0, 2)
+                                                .join(' / ') || t.starterEmpty}
+                                        </span>
+                                    </span>
+                                </span>
+                                <span className="flex shrink-0 items-center gap-2">
+                                    {starterSaveState !== 'idle' && (
+                                        <span className={`text-[9px] font-bold uppercase tracking-[0.12em] ${
+                                            starterSaveState === 'saving' ? 'text-sky-200/70' : 'text-emerald-200/70'
+                                        }`}>
+                                            {starterSaveState === 'saving' ? t.starterSaving : t.starterSaved}
+                                        </span>
+                                    )}
+                                    <span className="hidden text-[9px] font-bold uppercase tracking-[0.12em] text-purple-300/55 sm:inline">
+                                        {starterOpen ? t.starterClose : t.starterOpen}
+                                    </span>
+                                    <ChevronDown
+                                        size={16}
+                                        className={`text-purple-200/65 transition-transform duration-300 ${starterOpen ? 'rotate-180' : ''}`}
+                                    />
+                                </span>
+                            </button>
+
+                            <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+                                starterOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                            }`}>
+                                <div className="min-h-0 overflow-hidden">
+                                    <div className="grid gap-3 border-t border-purple-500/10 p-4 sm:grid-cols-2">
+                                        {cycle.onboardingAnswers.length ? (
+                                            cycle.onboardingAnswers.map(answer => (
+                                                <label key={answer.questionId} className="rounded-lg border border-white/8 bg-white/[0.035] p-3 transition-colors focus-within:border-purple-300/30">
+                                                    <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-purple-400">
+                                                        {answer.label}
+                                                    </span>
+                                                    <textarea
+                                                        value={starterDraftAnswers[answer.questionId] ?? ''}
+                                                        onChange={event => setStarterDraftAnswers(prev => ({
+                                                            ...prev,
+                                                            [answer.questionId]: event.target.value,
+                                                        }))}
+                                                        rows={3}
+                                                        className="w-full resize-none bg-transparent text-sm leading-relaxed text-purple-100 outline-none placeholder:text-purple-400/30"
+                                                    />
+                                                </label>
+                                            ))
+                                        ) : (
+                                            <p className="text-sm leading-relaxed text-purple-200/45">{t.starterEmpty}</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
                             <div className="rounded-lg border border-white/8 bg-white/[0.035] p-3">
                                 <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-purple-400">
@@ -515,12 +682,31 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                             <Shield size={14} />
                             {language === 'DE' ? 'Kommunikationshaltung' : 'Communication Stance'}
                         </div>
-                        <div className="text-2xl font-bold text-white">
-                            {meaningContext
-                                ? communicationModeLabels[meaningContext.communicationMode][language]
-                                : communicationModeLabels.MIRROR[language]}
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                            <div className="rounded-lg border border-sky-200/12 bg-black/15 p-3">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200/60">
+                                    {language === 'DE' ? 'Empfohlen' : 'Recommended'}
+                                </div>
+                                <div className="mt-1 text-xl font-bold text-white">
+                                    {communicationModeLabels[recommendedCommunicationMode.mode][language]}
+                                </div>
+                            </div>
+                            <div className="rounded-lg border border-sky-200/12 bg-black/15 p-3">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200/60">
+                                    {language === 'DE' ? 'Aktuell' : 'Current'}
+                                </div>
+                                <div className="mt-1 text-xl font-bold text-white">
+                                    {communicationModeLabels[currentCommunicationMode][language]}
+                                </div>
+                            </div>
                         </div>
-                        <p className="mt-3 text-sm leading-relaxed text-sky-100/65">
+                        <div className="mt-4 space-y-2 text-sm leading-relaxed text-sky-100/70">
+                            {communicationExplanation.map(sentence => (
+                                <p key={sentence}>{sentence}</p>
+                            ))}
+                        </div>
+                        {/* Legacy static stance copy removed in favor of dynamic Meaning stance reasoning. */}
+                        <p className="hidden" aria-hidden="true">
                             {language === 'DE'
                                 ? 'Der Rat nutzt diese Haltung als leisen Rahmen. Du kannst sie situativ im Header überschreiben.'
                                 : 'The council uses this as a quiet frame. You can override it situationally in the header.'}
@@ -646,47 +832,45 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                         {/* Timeline Line */}
                         <div className="absolute top-2 bottom-2 left-[23px] w-px bg-gradient-to-b from-purple-500/50 via-purple-500/20 to-transparent" />
 
-                        {/* Milestones (existing) */}
-                        {displayMilestones.map((milestone) => {
-                            const Icon = ICON_MAP[milestone.icon] || Star;
-                            return (
-                                <div key={milestone.id} className="relative flex gap-6 group">
-                                    {/* Icon Node */}
-                                    <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
-                                        <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
-                                        <Icon size={20} className="text-purple-300" />
-                                    </div>
-                                    
-                                    {/* Content */}
-                                    <div className="flex-1 pt-1">
-                                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
-                                            <h4 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
-                                                {milestone.type === 'BREAKTHROUGH'
-                                                    ? localizeGeneratedBreakthroughTitle(localizeMilestoneTitle(milestone.id, milestone.title))
-                                                    : localizeLegacyMeaningTitle(localizeMilestoneTitle(milestone.id, milestone.title))}
-                                            </h4>
-                                            <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
-                                                {formatDate(milestone.date)}
-                                            </span>
-                            {milestone.type === 'BREAKTHROUGH' && (
-                                                <span className="text-[9px] text-amber-400 bg-amber-900/20 px-1.5 rounded border border-amber-500/20">{breakthroughLabel}</span>
-                                            )}
+                        {displayTimelineItems.map((item) => {
+                            if (item.kind === 'milestone') {
+                                const milestone = item.milestone;
+                                const Icon = ICON_MAP[milestone.icon] || Star;
+                                return (
+                                    <div key={item.id} className="relative flex gap-6 group">
+                                        <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
+                                            <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
+                                            <Icon size={20} className="text-purple-300" />
                                         </div>
-                                        <p className="text-sm text-purple-200/70 leading-relaxed max-w-xl">
-                                            {milestone.type === 'BREAKTHROUGH'
-                                                ? localizeGeneratedBreakthroughSummary(localizeCycleSummary(milestone.id, milestone.description))
-                                                : localizeLegacyMeaningSummary(localizeCycleSummary(milestone.id, milestone.description))}
-                                        </p>
-                                    </div>
-                                </div>
-                            );
-                        })}
 
-                        {/* Timeline Events (from meaning agent) */}
-                        {displayTimelineEvents.map((event) => {
+                                        <div className="flex-1 pt-1">
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
+                                                <h4 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
+                                                    {milestone.type === 'BREAKTHROUGH'
+                                                        ? localizeGeneratedBreakthroughTitle(localizeMilestoneTitle(milestone.id, milestone.title))
+                                                        : localizeLegacyMeaningTitle(localizeMilestoneTitle(milestone.id, milestone.title))}
+                                                </h4>
+                                                <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
+                                                    {formatDate(milestone.date)}
+                                                </span>
+                                                {milestone.type === 'BREAKTHROUGH' && (
+                                                    <span className="text-[9px] text-amber-400 bg-amber-900/20 px-1.5 rounded border border-amber-500/20">{breakthroughLabel}</span>
+                                                )}
+                                            </div>
+                                            <p className="text-sm text-purple-200/70 leading-relaxed max-w-xl">
+                                                {milestone.type === 'BREAKTHROUGH'
+                                                    ? localizeGeneratedBreakthroughSummary(localizeCycleSummary(milestone.id, milestone.description))
+                                                    : localizeLegacyMeaningSummary(localizeCycleSummary(milestone.id, milestone.description))}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
+                            const event = item.event;
                             const isBreakthrough = event.type === 'BREAKTHROUGH';
                             return (
-                                <div key={event.id} className="relative flex gap-6 group">
+                                <div key={item.id} className="relative flex gap-6 group">
                                     {/* Icon Node */}
                                     <div className="relative z-10 shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-[#0f0716] border border-purple-500/30 shadow-[0_0_15px_rgba(139,92,246,0.1)] group-hover:scale-110 transition-transform duration-300">
                                         <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-pulse-subtle" />
@@ -706,7 +890,7 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
                                                     : localizeLegacyMeaningTitle(localizeEventTitle(event.id, event.label))}
                                             </h4>
                                             <span className="text-[10px] text-purple-500/50 uppercase tracking-widest font-mono px-2 py-0.5 rounded border border-purple-500/10">
-                                                {formatDate(event.createdAt)}
+                                                {formatDate(event.createdAt, event.sourceSessionId)}
                                             </span>
                                             {isBreakthrough && (
                                                 <span className="text-[9px] text-amber-400 bg-amber-900/20 px-1.5 rounded border border-amber-500/20">{breakthroughLabel}</span>

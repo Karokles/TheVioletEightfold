@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Check, Circle, Compass, Flame, Hourglass, RotateCcw, Shield, Sparkles } from 'lucide-react';
+import { BookOpen, CalendarDays, Check, ChevronDown, Circle, Compass, Flame, Hourglass, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { CycleDayRecord, CyclePacingMode, IntegrationCycle, Language } from '../types';
 import {
   CYCLE_LENGTH_DAYS,
@@ -14,6 +14,7 @@ interface CycleInterfaceProps {
   language: Language;
   cycle: IntegrationCycle | null;
   onStartCycle: (title: string, answers: IntegrationCycle['onboardingAnswers']) => void;
+  onUpdateCycleStarter: (answers: IntegrationCycle['onboardingAnswers']) => void;
   onUpdateCycle: (record: Omit<CycleDayRecord, 'date'>) => void;
   onArchiveCycle: () => void;
 }
@@ -38,6 +39,12 @@ const labels = {
     pacing: 'Pacing',
     calendar: 'Cycle Map',
     noCycle: 'No active cycle yet.',
+    starterBlueprint: 'Initial Starter Inputs',
+    starterEmpty: 'No starter inputs were saved for this cycle.',
+    starterOpen: 'Open',
+    starterClose: 'Close',
+    starterSaving: 'Saving',
+    starterSaved: 'Saved',
     sense: 'Sense',
     trace: 'Trace',
     externalize: 'Externalize',
@@ -72,6 +79,12 @@ const labels = {
     pacing: 'Tempo',
     calendar: 'Zykluskarte',
     noCycle: 'Noch kein aktiver Zyklus.',
+    starterBlueprint: 'Initiale Starter-Eingaben',
+    starterEmpty: 'Fuer diesen Zyklus wurden keine Starter-Eingaben gespeichert.',
+    starterOpen: 'Oeffnen',
+    starterClose: 'Schliessen',
+    starterSaving: 'Speichert',
+    starterSaved: 'Gespeichert',
     sense: 'Spüren',
     trace: 'Zurückverfolgen',
     externalize: 'Externalisieren',
@@ -257,12 +270,16 @@ export const CycleInterface: React.FC<CycleInterfaceProps> = ({
   language,
   cycle,
   onStartCycle,
+  onUpdateCycleStarter,
   onUpdateCycle,
   onArchiveCycle,
 }) => {
   const t = labels[language];
   const [cycleTitle, setCycleTitle] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [starterOpen, setStarterOpen] = useState(false);
+  const [starterDraftAnswers, setStarterDraftAnswers] = useState<Record<string, string>>({});
+  const [starterSaveState, setStarterSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const todayDay = cycle ? getCycleDayNumber(cycle) : 1;
   const [selectedDay, setSelectedDay] = useState(todayDay);
 
@@ -297,6 +314,7 @@ export const CycleInterface: React.FC<CycleInterfaceProps> = ({
   const [validationPulseKey, setValidationPulseKey] = useState(0);
   const writingProfile = useMemo(() => getWritingProfile(cycle), [cycle]);
   const lastDraftSignatureRef = useRef('');
+  const lastStarterSignatureRef = useRef('');
 
   useEffect(() => {
     setSense(selectedRecord?.sense || '');
@@ -308,6 +326,16 @@ export const CycleInterface: React.FC<CycleInterfaceProps> = ({
     setPacing(selectedRecord?.pacing || getRecommendedPacing(selectedDay));
     setThinFields(new Set());
   }, [selectedDay, selectedRecord]);
+
+  useEffect(() => {
+    const nextDraftAnswers = Object.fromEntries(
+      (cycle?.onboardingAnswers || []).map(answer => [answer.questionId, answer.value])
+    );
+    const signature = JSON.stringify(nextDraftAnswers);
+    setStarterDraftAnswers(nextDraftAnswers);
+    setStarterSaveState('idle');
+    lastStarterSignatureRef.current = signature;
+  }, [cycle?.id]);
 
   const canStart = cycleOnboardingQuestions.every(question => answers[question.id]?.trim());
 
@@ -376,6 +404,28 @@ export const CycleInterface: React.FC<CycleInterfaceProps> = ({
     sense,
     trace,
   ]);
+
+  useEffect(() => {
+    if (!cycle || !cycle.onboardingAnswers.length) return;
+
+    const signature = JSON.stringify(starterDraftAnswers);
+    if (signature === lastStarterSignatureRef.current) return;
+
+    setStarterSaveState('saving');
+
+    const timer = window.setTimeout(() => {
+      const nextAnswers = cycle.onboardingAnswers.map(answer => ({
+        ...answer,
+        value: starterDraftAnswers[answer.questionId] ?? '',
+      }));
+
+      lastStarterSignatureRef.current = signature;
+      onUpdateCycleStarter(nextAnswers);
+      setStarterSaveState('saved');
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [cycle, onUpdateCycleStarter, starterDraftAnswers]);
 
   const getPromptLine = (fieldId: CycleTextFieldId): string => {
     const variants = cycleFieldPrompts[fieldId][writingProfile][language];
@@ -552,6 +602,80 @@ export const CycleInterface: React.FC<CycleInterfaceProps> = ({
               </button>
             </div>
           </header>
+
+          <section className={`w-full origin-top-left overflow-hidden rounded-lg border border-purple-500/15 bg-[#100719]/72 transition-[max-width,border-color,background-color] duration-300 focus-within:border-purple-300/30 ${
+            starterOpen ? 'max-w-[72rem]' : 'max-w-[34rem]'
+          }`}>
+            <button
+              type="button"
+              onClick={() => setStarterOpen(prev => !prev)}
+              className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-white/[0.025]"
+              aria-expanded={starterOpen}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-purple-400/15 bg-purple-500/10 text-purple-200">
+                  <BookOpen size={15} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[10px] font-bold uppercase tracking-[0.2em] text-purple-300">
+                    {t.starterBlueprint}
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-purple-200/45">
+                    {cycle.onboardingAnswers
+                      .map(answer => starterDraftAnswers[answer.questionId] ?? answer.value)
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .join(' / ') || t.starterEmpty}
+                  </span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-3">
+                {starterSaveState !== 'idle' && (
+                  <span className={`text-[10px] font-bold uppercase tracking-[0.14em] ${
+                    starterSaveState === 'saving' ? 'text-sky-200/70' : 'text-emerald-200/70'
+                  }`}>
+                    {starterSaveState === 'saving' ? t.starterSaving : t.starterSaved}
+                  </span>
+                )}
+                <span className="hidden text-[10px] font-bold uppercase tracking-[0.14em] text-purple-300/55 sm:inline">
+                  {starterOpen ? t.starterClose : t.starterOpen}
+                </span>
+                <ChevronDown
+                  size={17}
+                  className={`text-purple-200/65 transition-transform duration-300 ${starterOpen ? 'rotate-180' : ''}`}
+                />
+              </span>
+            </button>
+
+            <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+              starterOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            }`}>
+              <div className="min-h-0 overflow-hidden">
+                <div className="grid gap-3 border-t border-purple-500/10 p-5 md:grid-cols-2">
+                  {cycle.onboardingAnswers.length ? (
+                    cycle.onboardingAnswers.map(answer => (
+                      <label key={answer.questionId} className="rounded-lg border border-white/8 bg-white/[0.035] p-4 transition-colors focus-within:border-purple-300/30">
+                        <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.16em] text-purple-400">
+                          {answer.label}
+                        </span>
+                        <textarea
+                          value={starterDraftAnswers[answer.questionId] ?? ''}
+                          onChange={event => setStarterDraftAnswers(prev => ({
+                            ...prev,
+                            [answer.questionId]: event.target.value,
+                          }))}
+                          rows={3}
+                          className="w-full resize-none bg-transparent text-sm leading-relaxed text-purple-100 outline-none placeholder:text-purple-400/30"
+                        />
+                      </label>
+                    ))
+                  ) : (
+                    <p className="text-sm leading-relaxed text-purple-200/45">{t.starterEmpty}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
 
           <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
             <div className="rounded-lg border border-purple-500/15 bg-[#100719]/80 p-5">
