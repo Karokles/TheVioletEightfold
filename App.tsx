@@ -369,8 +369,10 @@ export default function App() {
           return;
         }
 
-        const { setCurrentUser } = await import('./services/userService');
         setCurrentUser(session.userId, session.token, session.displayName || session.email);
+        if (session.isStagingAdmin) {
+          setIsAdmin(true);
+        }
         setIsAuthenticated(true);
         await loadSignedInUserState();
       } catch (error) {
@@ -405,6 +407,9 @@ export default function App() {
             supabaseSession.token,
             supabaseSession.displayName || supabaseSession.email
           );
+          if (supabaseSession.isStagingAdmin) {
+            setIsAdmin(true);
+          }
         }
         const latestUser = getCurrentUser();
         if (!latestUser) {
@@ -430,7 +435,7 @@ export default function App() {
             try {
               const verified = await response.json();
               if (typeof verified?.isAdmin === 'boolean') {
-                setIsAdmin(verified.isAdmin);
+                setIsAdmin(prev => prev || verified.isAdmin);
               }
             } catch {
               // Token validity is enough here; profile hydration handles the rest.

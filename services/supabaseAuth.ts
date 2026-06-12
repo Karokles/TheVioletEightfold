@@ -28,21 +28,50 @@ export type SupabaseAuthResult = {
   token: string;
   email?: string;
   displayName?: string;
+  isStagingAdmin?: boolean;
+};
+
+const STAGING_ADMIN_EMAILS = new Set(['lionceaunicolai@yahoo.de']);
+const STAGING_DISPLAY_NAMES: Record<string, string> = {
+  'lionceaunicolai@yahoo.de': 'Karokles',
+};
+
+const normalizeEmail = (value?: string | null): string | undefined => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && normalized.includes('@') ? normalized : undefined;
+};
+
+const getFallbackDisplayName = (email?: string | null, userId?: string): string | undefined => {
+  const normalized = normalizeEmail(email);
+  if (normalized && STAGING_DISPLAY_NAMES[normalized]) {
+    return STAGING_DISPLAY_NAMES[normalized];
+  }
+
+  if (normalized) {
+    return normalized.split('@')[0];
+  }
+
+  return userId;
 };
 
 const getDisplayNameFromSession = (session: Session): string | undefined => {
   const metadata = session.user.user_metadata || {};
+  const normalizedEmail = normalizeEmail(session.user.email);
   const candidate =
     metadata.display_name ||
     metadata.name ||
     metadata.full_name ||
     metadata.preferred_username;
 
-  if (typeof candidate === 'string' && candidate.trim()) {
+  if (normalizedEmail && STAGING_DISPLAY_NAMES[normalizedEmail]) {
+    return STAGING_DISPLAY_NAMES[normalizedEmail];
+  }
+
+  if (typeof candidate === 'string' && candidate.trim() && normalizeEmail(candidate) !== candidate.trim().toLowerCase()) {
     return candidate.trim();
   }
 
-  return session.user.email?.split('@')[0] || undefined;
+  return getFallbackDisplayName(session.user.email, session.user.id);
 };
 
 const toAuthResult = (session: Session | null): SupabaseAuthResult => {
@@ -55,6 +84,7 @@ const toAuthResult = (session: Session | null): SupabaseAuthResult => {
     token: session.access_token,
     email: session.user.email || undefined,
     displayName: getDisplayNameFromSession(session),
+    isStagingAdmin: STAGING_ADMIN_EMAILS.has(normalizeEmail(session.user.email) || ''),
   };
 };
 
