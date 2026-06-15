@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { startCouncilSession, sendMessageToCouncil } from '../services/aiService';
+import { PaywallRequiredError, startCouncilSession, sendMessageToCouncil } from '../services/aiService';
 // Note: analyzeSessionForUpdates removed - Scribe functionality can be added back later if needed
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
@@ -13,6 +13,8 @@ import { DiscoveryCard } from './DiscoveryCard';
 import { TutorialOverlay } from './tutorial/TutorialOverlay';
 import { TutorialTrigger } from './tutorial/TutorialTrigger';
 import { tutorialEventBus, TutorialId } from '../services/tutorialProgressService';
+import { VoiceInputButton } from './VoiceInputButton';
+import { PaywallNotice } from './PaywallNotice';
 
 interface DialogueTurn {
   id: string;
@@ -42,6 +44,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const [showActionSummary, setShowActionSummary] = useState(false);
   const [discoveries, setDiscoveries] = useState<DiscoveryNotice[]>([]);
   const [activeTutorialId, setActiveTutorialId] = useState<TutorialId | null>(null);
+  const [paywallMessage, setPaywallMessage] = useState('');
   
   const dialogueEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -62,6 +65,45 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
   const ui = getUIText(language);
   const archetypes = getArchetypes(language);
+
+  const updateTopic = (value: string) => {
+    setTopic(value);
+    tutorialEventBus.emit({
+      type: 'council_topic_words',
+      payload: { count: value.trim().split(/\s+/).filter(Boolean).length },
+    });
+  };
+
+  const updateUserInput = (value: string) => {
+    setUserInput(value);
+    tutorialEventBus.emit({
+      type: 'council_reply_input_words',
+      payload: { count: value.trim().split(/\s+/).filter(Boolean).length },
+    });
+  };
+
+  const appendTopicTranscript = (text: string) => {
+    setTopic(prev => {
+      const next = `${prev}${prev.trim() ? ' ' : ''}${text}`.trimStart();
+      tutorialEventBus.emit({
+        type: 'council_topic_words',
+        payload: { count: next.trim().split(/\s+/).filter(Boolean).length },
+      });
+      return next;
+    });
+  };
+
+  const appendReplyTranscript = (text: string) => {
+    setUserInput(prev => {
+      const next = `${prev}${prev.trim() ? ' ' : ''}${text}`.trimStart();
+      tutorialEventBus.emit({
+        type: 'council_reply_input_words',
+        payload: { count: next.trim().split(/\s+/).filter(Boolean).length },
+      });
+      return next;
+    });
+    textareaRef.current?.focus();
+  };
 
   const parseBufferToTurns = (buffer: string, startIndex: number): DialogueTurn[] => {
     const turns: DialogueTurn[] = [];
@@ -167,8 +209,13 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
           payload: { streamKind },
         });
     } catch (error: any) {
-        console.error("Council error:", error);
         const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        if (error instanceof PaywallRequiredError) {
+          setPaywallMessage(errorMessage);
+          return;
+        }
+
+        console.error("Council error:", error);
         console.error("Full error details:", {
             message: errorMessage,
             stack: error?.stack,
@@ -189,6 +236,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
   const handleStart = async () => {
     if (!topic.trim()) return;
+    setPaywallMessage('');
     const startingTopic = topic;
     tutorialEventBus.emit({
       type: 'council_started',
@@ -222,6 +270,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
 
   const handleReply = async () => {
     if (!userInput.trim() || isStreaming) return;
+    setPaywallMessage('');
     
     const content = userInput;
     setUserInput('');
@@ -682,6 +731,15 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       {/* Control Panel (Footer) */}
       {!isIntegrating && (
           <div className="bg-[#0f0716] border-t border-purple-900/20 p-6 z-20 shadow-[0_-20px_50px_rgba(0,0,0,0.5)] shrink-0">
+            {paywallMessage && (
+              <div className="mx-auto mb-4 max-w-3xl">
+                <PaywallNotice
+                  language={language}
+                  message={paywallMessage}
+                  onClose={() => setPaywallMessage('')}
+                />
+              </div>
+            )}
             {!isSessionActive ? (
                 <div className="max-w-2xl mx-auto flex flex-col gap-3">
                     <label className="text-[10px] font-bold text-purple-500/70 uppercase tracking-[0.2em] ml-2">
@@ -692,11 +750,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                             type="text"
                             value={topic}
                             onChange={(e) => {
-                              setTopic(e.target.value);
-                              tutorialEventBus.emit({
-                                type: 'council_topic_words',
-                                payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
-                              });
+                              updateTopic(e.target.value);
                             }}
                             data-tutorial-id="council-topic-input"
                             placeholder={ui.ENTER_TOPIC_PLACEHOLDER}
@@ -711,6 +765,11 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                         >
                             <Play size={18} fill="currentColor" className={topic.trim() ? "text-purple-400" : "text-purple-800"} />
                         </button>
+                        <VoiceInputButton
+                            language={language}
+                            disabled={isStreaming}
+                            onTranscript={appendTopicTranscript}
+                        />
                     </div>
                 </div>
             ) : (
@@ -720,11 +779,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                             ref={textareaRef}
                             value={userInput}
                             onChange={(e) => {
-                              setUserInput(e.target.value);
-                              tutorialEventBus.emit({
-                                type: 'council_reply_input_words',
-                                payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
-                              });
+                              updateUserInput(e.target.value);
                             }}
                             onKeyDown={handleKeyDown}
                             data-tutorial-id="council-reply-input"
@@ -734,6 +789,11 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                             disabled={isStreaming}
                         />
                     </div>
+                    <VoiceInputButton
+                        language={language}
+                        disabled={isStreaming}
+                        onTranscript={appendReplyTranscript}
+                    />
                     
                     <button 
                         onClick={handleReply}

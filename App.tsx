@@ -14,13 +14,13 @@ import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle
 import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser, setCurrentUser } from './services/userService';
 import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
 import { getProfile, updateProfile } from './services/profileService';
-import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, loadCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
+import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, hydrateCurrentCycle, loadCurrentCycle, persistArchivedCycle, persistCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
 import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPreferences, suggestCommunicationMode } from './services/communicationService';
 import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
 import { mergeLocalMeaningState } from './services/meaningStateService';
 import { scanEmotionalState } from './services/emotionalStateService';
 import { tutorialEventBus } from './services/tutorialProgressService';
-import { checkCycleDayAccess } from './services/accessService';
+import { checkCycleDayAccess, redirectToBetaCheckout } from './services/accessService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
 
 enum AppMode {
@@ -113,8 +113,11 @@ export default function App() {
   }, [stats, currentUserId]);
 
   useEffect(() => {
-    if (currentUserId) {
+    if (currentUserId && cycle) {
       saveCurrentCycle(currentUserId, cycle);
+      persistCurrentCycle(currentUserId, cycle).catch(error => {
+        console.warn('[CYCLE] Remote persistence failed; local backup kept.', error);
+      });
     }
   }, [cycle, currentUserId]);
 
@@ -177,6 +180,15 @@ export default function App() {
       setLore(loadUserLore(user.id));
       setStats(loadUserStats(user.id));
       setCycle(loadCurrentCycle(user.id));
+      hydrateCurrentCycle(user.id)
+        .then(nextCycle => {
+          if (getCurrentUser()?.id === user.id) {
+            setCycle(nextCycle);
+          }
+        })
+        .catch(error => {
+          console.warn('[CYCLE] Deferred cycle hydration failed; local backup kept.', error);
+        });
       setCommunicationPreferences(loadCommunicationPreferences(user.id));
       setRecentUserSignals([]);
       setEmotionalState(undefined);
@@ -290,7 +302,15 @@ export default function App() {
         try {
           const access = await checkCycleDayAccess(record.day);
           if (!access.allowed) {
-            window.alert(access.message || (language === 'DE' ? 'Beta-Zugang erforderlich.' : 'Beta access required.'));
+            const message = access.message || (language === 'DE' ? 'Beta-Zugang erforderlich.' : 'Beta access required.');
+            const wantsCheckout = window.confirm(
+              language === 'DE'
+                ? `${message}\n\nBeta jetzt freischalten?`
+                : `${message}\n\nUnlock beta now?`
+            );
+            if (wantsCheckout) {
+              await redirectToBetaCheckout();
+            }
             return;
           }
         } catch (error) {
@@ -344,7 +364,11 @@ export default function App() {
 
   const handleArchiveCycle = () => {
     if (!currentUser || !cycle) return;
+    const cycleToArchive = cycle;
     archiveCycle(currentUser.id, cycle);
+    persistArchivedCycle(cycleToArchive).catch(error => {
+      console.warn('[CYCLE] Remote archive failed; local archive kept.', error);
+    });
     setCycle(null);
   };
 
@@ -385,6 +409,25 @@ export default function App() {
       isMounted = false;
     };
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserId) return;
+
+    let isMounted = true;
+    hydrateCurrentCycle(currentUserId)
+      .then(nextCycle => {
+        if (isMounted && getCurrentUser()?.id === currentUserId) {
+          setCycle(nextCycle);
+        }
+      })
+      .catch(error => {
+        console.warn('[CYCLE] Boot cycle hydration failed; local backup kept.', error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, currentUserId]);
 
   // Boot verification: check if token is still valid on mount
   useEffect(() => {

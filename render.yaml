@@ -18,8 +18,8 @@ services:
         sync: false
         # Stage/production with Supabase: true
       - key: PAYMENT_ENABLED
-        value: false
-        # Keep false until Stripe is implemented.
+        sync: false
+        # Stage with Stripe test mode: true. Production live payments: true after checklist.
       - key: SUPABASE_AUTH_ENABLED
         sync: false
         # Stage/production real users: true
@@ -40,6 +40,21 @@ services:
         # Generate with: openssl rand -base64 32
       - key: OPENAI_API_KEY
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+        # Backend-only. Use sk_test_... on staging and sk_live_... on production.
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+        # From the Stripe webhook endpoint after creating it.
+      - key: STRIPE_BETA_PRICE_ID
+        sync: false
+        # Preferred for automatic Checkout Session activation.
+      - key: STRIPE_BETA_PAYMENT_LINK_URL
+        sync: false
+        # Optional fallback while the Price/Webhook flow is being configured.
+      - key: FRONTEND_APP_URL
+        sync: false
+        # Used for Stripe success/cancel redirects.
       - key: ALLOWED_ORIGINS
         sync: false
         # Stage: https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app

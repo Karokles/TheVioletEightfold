@@ -4,6 +4,7 @@ import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import Stripe from 'stripe';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ import {
   createCouncilMessages,
   CouncilMessageRecord,
   createLoreEntry, 
+  createOrUpdateConfirmedAuthUser,
   getSupabaseAuthUser,
   getUserProfile,
   isSupabaseConfigured,
@@ -36,6 +38,13 @@ import { getCredentialWarnings, runtimeConfig, serviceReadiness } from './runtim
 import { createMockCouncilReply, createMockMeaningResult } from './mockAi.js';
 import { buildOrganicPromptBlock, createResponsePlan, ResponsePlan } from './conversationOrchestrator.js';
 import { loadLocalMeaningState, mergeLocalMeaningState } from './localMeaningStore.js';
+import {
+  archiveLocalCycle,
+  loadLocalCycleState,
+  normalizeCycle as normalizeStoredCycle,
+  saveLocalCurrentCycle,
+  type LocalIntegrationCycle,
+} from './localCycleStore.js';
 
 const require = createRequire(import.meta.url);
 
@@ -134,9 +143,45 @@ const parseAllowedOrigins = (): string[] => {
 };
 
 const allowedOrigins = parseAllowedOrigins();
+const defaultFrontendUrl = runtimeConfig.frontendAppUrl || allowedOrigins[0] || 'http://localhost:5173';
+const stripe = serviceReadiness.payment && runtimeConfig.stripeSecretKey
+  ? new Stripe(runtimeConfig.stripeSecretKey)
+  : null;
+const stripePaymentLinkUrl = runtimeConfig.stripePaymentLinkUrl || '';
+const stripeBetaPriceId = runtimeConfig.stripeBetaPriceId || '';
+const stripeWebhookSecret = runtimeConfig.stripeWebhookSecret || '';
+
+const getFrontendUrlForRequest = (req: Request): string => {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  if (origin && allowedOrigins.includes(origin)) {
+    return origin;
+  }
+  return defaultFrontendUrl;
+};
+
+const buildPaymentLinkUrl = (user: User): string => {
+  if (!stripePaymentLinkUrl) return '';
+
+  try {
+    const url = new URL(stripePaymentLinkUrl);
+    url.searchParams.set('client_reference_id', user.id);
+    if (user.email || isEmailLike(user.username)) {
+      url.searchParams.set('prefilled_email', user.email || user.username);
+    }
+    return url.toString();
+  } catch {
+    return stripePaymentLinkUrl;
+  }
+};
 
 // Log allowed origins on startup (no secrets)
 console.log('[STARTUP] CORS allowed origins:', allowedOrigins.join(', '));
+console.log('[PAYMENT] Stripe status:', {
+  enabled: runtimeConfig.paymentEnabled,
+  checkoutReady: Boolean(stripe && stripeBetaPriceId),
+  paymentLinkReady: Boolean(stripePaymentLinkUrl),
+  webhookReady: Boolean(stripe && stripeWebhookSecret),
+});
 
 // CORS options - credentials: false (no cookies, only JWT in Authorization header)
 const corsOptions: CorsOptions = {
@@ -173,6 +218,51 @@ app.use(cors(corsOptions));
 
 // Explicit OPTIONS handler for all routes (preflight requests)
 app.options('*', cors(corsOptions));
+
+app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+  if (!stripe || !stripeWebhookSecret) {
+    return res.status(503).json({ error: 'stripe_webhook_not_configured' });
+  }
+
+  const signature = req.headers['stripe-signature'];
+  if (!signature || Array.isArray(signature)) {
+    return res.status(400).json({ error: 'missing_stripe_signature' });
+  }
+
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, signature, stripeWebhookSecret);
+  } catch (error: any) {
+    console.warn('[PAYMENT] Stripe webhook signature verification failed:', error?.message || error);
+    return res.status(400).json({ error: 'invalid_stripe_signature' });
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const userId = session.metadata?.userId || session.client_reference_id || '';
+
+      if (!userId) {
+        console.warn('[PAYMENT] Stripe session paid without user metadata', { sessionId: session.id });
+        return res.json({ received: true, ignored: 'missing_user_id' });
+      }
+
+      if (session.payment_status && session.payment_status !== 'paid') {
+        return res.json({ received: true, ignored: 'payment_not_paid' });
+      }
+
+      await activatePaidBetaAccess(userId, {
+        notes: `Stripe beta checkout ${session.id}`,
+        idempotencyKey: session.id,
+      });
+    }
+
+    res.json({ received: true });
+  } catch (error: any) {
+    console.error('[PAYMENT] Stripe webhook processing failed:', error?.message || error);
+    res.status(500).json({ error: 'stripe_webhook_processing_failed' });
+  }
+});
 
 app.use(express.json());
 app.use('/api', (_req, res, next) => {
@@ -443,6 +533,102 @@ const requireAdmin = (req: AuthenticatedRequest, res: Response): boolean => {
     return false;
   }
   return true;
+};
+
+const asObject = (value: unknown): Record<string, any> => {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+};
+
+const getCycleTimestamp = (cycle?: LocalIntegrationCycle | null): number => {
+  if (!cycle) return 0;
+  return new Date(cycle.updatedAt || cycle.completedAt || cycle.createdAt).getTime() || 0;
+};
+
+const chooseNewestCycle = (
+  localCycle?: LocalIntegrationCycle | null,
+  remoteCycle?: LocalIntegrationCycle | null,
+): LocalIntegrationCycle | null => {
+  if (!localCycle) return remoteCycle || null;
+  if (!remoteCycle) return localCycle;
+  return getCycleTimestamp(remoteCycle) > getCycleTimestamp(localCycle) ? remoteCycle : localCycle;
+};
+
+const dedupeCyclesById = (cycles: LocalIntegrationCycle[]): LocalIntegrationCycle[] => {
+  const seen = new Set<string>();
+  return cycles.filter(cycle => {
+    if (!cycle?.id || seen.has(cycle.id)) return false;
+    seen.add(cycle.id);
+    return true;
+  });
+};
+
+const normalizeArchivedCycles = (value: unknown): LocalIntegrationCycle[] => {
+  if (!Array.isArray(value)) return [];
+  return dedupeCyclesById(
+    value
+      .map(normalizeStoredCycle)
+      .filter((cycle): cycle is LocalIntegrationCycle => Boolean(cycle))
+      .map(cycle => ({ ...cycle, status: 'ARCHIVED' as const }))
+  ).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+};
+
+const loadRemoteCycleState = async (user: User): Promise<{
+  currentCycle: LocalIntegrationCycle | null;
+  archivedCycles: LocalIntegrationCycle[];
+}> => {
+  if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
+    return { currentCycle: null, archivedCycles: [] };
+  }
+
+  const profile = await getUserProfile(user.id);
+  const preferences = asObject(profile?.preferences);
+  const integrationCycle = asObject(preferences.integrationCycle);
+
+  const currentCycle = normalizeStoredCycle(integrationCycle.currentCycle);
+  return {
+    currentCycle: currentCycle && currentCycle.status !== 'ARCHIVED' ? currentCycle : null,
+    archivedCycles: normalizeArchivedCycles(integrationCycle.archivedCycles),
+  };
+};
+
+const saveRemoteCycleState = async (
+  user: User,
+  patch: {
+    currentCycle?: LocalIntegrationCycle | null;
+    archivedCycles?: LocalIntegrationCycle[];
+  },
+): Promise<boolean> => {
+  if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
+    return false;
+  }
+
+  const profile = await getUserProfile(user.id);
+  const existingPreferences = asObject(profile?.preferences);
+  const existingIntegrationCycle = asObject(existingPreferences.integrationCycle);
+  const nextIntegrationCycle: Record<string, any> = {
+    ...existingIntegrationCycle,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if ('currentCycle' in patch) {
+    nextIntegrationCycle.currentCycle = patch.currentCycle;
+  }
+  if (patch.archivedCycles) {
+    nextIntegrationCycle.archivedCycles = normalizeArchivedCycles(patch.archivedCycles).slice(0, 100);
+  }
+
+  const savedProfile = await upsertUserProfile({
+    user_id: user.id,
+    display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
+    language: profile?.language || null,
+    active_archetype: profile?.active_archetype || null,
+    preferences: {
+      ...existingPreferences,
+      integrationCycle: nextIntegrationCycle,
+    },
+  });
+
+  return Boolean(savedProfile);
 };
 
 const countCouncilSpeakers = (reply: string): number => {
@@ -752,6 +938,50 @@ const getEffectiveAccess = async (user: User): Promise<AccessSnapshot> => {
   };
 };
 
+async function activatePaidBetaAccess(
+  userId: string,
+  options: { notes: string; idempotencyKey?: string },
+): Promise<UserAccessRecord> {
+  const currentRecord = isSupabaseConfigured()
+    ? await getUserAccess(userId)
+    : localAccessRecords.get(userId) || null;
+  const current = getAccessFromRecord(currentRecord) || getAccessFromRecord(localAccessRecords.get(userId) || null);
+
+  if (
+    options.idempotencyKey &&
+    current?.tier === 'paid_beta' &&
+    current.notes?.includes(options.idempotencyKey)
+  ) {
+    return {
+      user_id: userId,
+      tier: current.tier,
+      active_until: current.activeUntil,
+      beta_activations: current.betaActivations,
+      beta_bonus_used: current.betaBonusUsed,
+      notes: current.notes,
+    };
+  }
+
+  const bonusAvailable = Boolean(current && current.betaActivations >= 2 && !current.betaBonusUsed);
+  const now = Date.now();
+  const baseTime = current?.activeUntil && new Date(current.activeUntil).getTime() > now
+    ? new Date(current.activeUntil).getTime()
+    : now;
+  const activeUntil = new Date(baseTime + BETA_ACCESS_DAYS * 86400000).toISOString();
+  const nextAccess: UserAccessRecord = {
+    user_id: userId,
+    tier: 'paid_beta',
+    active_until: activeUntil,
+    beta_activations: bonusAvailable ? current!.betaActivations : (current?.betaActivations || 0) + 1,
+    beta_bonus_used: bonusAvailable ? true : Boolean(current?.betaBonusUsed),
+    notes: options.notes,
+  };
+
+  localAccessRecords.set(userId, nextAccess);
+  await upsertUserAccess(nextAccess);
+  return nextAccess;
+}
+
 const getFreeLimitForFeature = (feature: UsageFeature): number => {
   if (feature === 'single_voice_reply') return FREE_SINGLE_VOICE_REPLIES;
   if (feature === 'council_session') return FREE_COUNCIL_SESSIONS;
@@ -793,7 +1023,9 @@ const sendPaywallResponse = (
     beta: {
       priceEur: BETA_PRICE_EUR,
       accessDays: BETA_ACCESS_DAYS,
-      provider: 'mock',
+      provider: stripe ? 'stripe' : 'mock',
+      checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+      paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
     },
     ...extra,
   });
@@ -1297,6 +1529,136 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
   }
 });
 
+app.get('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const localState = await loadLocalCycleState(req.user.id);
+    let remoteState: Awaited<ReturnType<typeof loadRemoteCycleState>> = { currentCycle: null, archivedCycles: [] };
+    let remoteAvailable = false;
+
+    try {
+      remoteState = await loadRemoteCycleState(req.user);
+      remoteAvailable = isSupabaseConfigured() && !isOfflineOnlyUser(req.user);
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to load remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    const currentCycle = chooseNewestCycle(localState.currentCycle, remoteState.currentCycle);
+    const archivedCycles = dedupeCyclesById([
+      ...localState.archivedCycles,
+      ...remoteState.archivedCycles,
+    ]).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+
+    if (currentCycle) {
+      const currentTimestamp = getCycleTimestamp(currentCycle);
+      if (currentTimestamp > getCycleTimestamp(localState.currentCycle)) {
+        await saveLocalCurrentCycle(req.user.id, currentCycle);
+      }
+      if (remoteAvailable && currentTimestamp > getCycleTimestamp(remoteState.currentCycle)) {
+        try {
+          await saveRemoteCycleState(req.user, { currentCycle });
+        } catch (error: any) {
+          console.warn(`[CYCLE] Failed to backfill remote cycle state for user ${req.user.id}:`, error.message);
+        }
+      }
+    }
+
+    res.json({
+      currentCycle,
+      archivedCycles,
+      persistenceStatus: remoteAvailable ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error loading current cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
+app.put('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const requestedCycle = normalizeStoredCycle(req.body?.cycle);
+    if (!requestedCycle || requestedCycle.status === 'ARCHIVED') {
+      return res.status(400).json({ error: 'A valid active or completed cycle is required.' });
+    }
+
+    const localState = await saveLocalCurrentCycle(req.user.id, requestedCycle);
+    let remoteSaved = false;
+
+    try {
+      remoteSaved = await saveRemoteCycleState(req.user, { currentCycle: localState.currentCycle });
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to save remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    res.json({
+      currentCycle: localState.currentCycle,
+      persistenceStatus: remoteSaved ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error saving current cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
+app.post('/api/cycle/archive', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const requestedCycle = normalizeStoredCycle(req.body?.cycle);
+    if (!requestedCycle) {
+      return res.status(400).json({ error: 'A valid cycle is required.' });
+    }
+
+    const localState = await archiveLocalCycle(req.user.id, requestedCycle);
+    let remoteSaved = false;
+
+    try {
+      const remoteState = await loadRemoteCycleState(req.user);
+      const archivedCycles = dedupeCyclesById([
+        ...localState.archivedCycles,
+        ...remoteState.archivedCycles,
+      ]).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+
+      remoteSaved = await saveRemoteCycleState(req.user, {
+        currentCycle: null,
+        archivedCycles,
+      });
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to archive remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    res.json({
+      currentCycle: null,
+      archivedCycles: localState.archivedCycles,
+      persistenceStatus: remoteSaved ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error archiving cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
 app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!requireAdmin(req, res)) return;
@@ -1341,6 +1703,96 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
     console.error('GET /api/admin/accounts error:', error);
     res.status(500).json({
       error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+});
+
+app.post('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    const email = normalizeEmail(req.body?.email);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const displayNameInput = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+    const emailConfirm = req.body?.emailConfirm !== false;
+
+    if (!email) {
+      return res.status(400).json({ error: 'invalid_email', message: 'A valid email address is required.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'invalid_password', message: 'Password must be at least 6 characters.' });
+    }
+
+    const displayName = chooseDisplayName(displayNameInput, email);
+    const authResult = await createOrUpdateConfirmedAuthUser({
+      email,
+      password,
+      displayName,
+      emailConfirm,
+    });
+    const authUser = authResult.user;
+    const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
+
+    await ensureUserExists(authUser.id, email, secretHash);
+
+    const existingProfile = await getUserProfile(authUser.id);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const adminSettings = sanitizeAdminSettings(req.body?.admin || {});
+    const profile = await upsertUserProfile({
+      user_id: authUser.id,
+      display_name: displayName,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: {
+        ...existingPreferences,
+        admin: adminSettings,
+      },
+    });
+
+    const accessRecord: UserAccessRecord = {
+      user_id: authUser.id,
+      tier: adminSettings.entitlement === 'paid_beta' ? 'paid_beta' : adminSettings.entitlement || 'free',
+      active_until: adminSettings.activeUntil || null,
+      beta_activations: adminSettings.betaActivations || 0,
+      beta_bonus_used: Boolean(adminSettings.betaBonusUsed),
+      notes: adminSettings.notes || null,
+    };
+    localAccessRecords.set(authUser.id, accessRecord);
+    await upsertUserAccess(accessRecord);
+
+    res.status(authResult.action === 'created' ? 201 : 200).json({
+      action: authResult.action,
+      emailConfirmed: Boolean(authUser.email_confirmed_at || authUser.confirmed_at),
+      account: {
+        userId: authUser.id,
+        username: email,
+        displayName,
+        language: profile?.language || null,
+        createdAt: profile?.created_at || null,
+        updatedAt: profile?.updated_at || new Date().toISOString(),
+        entitlement: adminSettings.entitlement || 'free',
+        offlineOnly: Boolean(adminSettings.offlineOnly),
+        activeUntil: adminSettings.activeUntil || null,
+        betaActivations: adminSettings.betaActivations || 0,
+        betaBonusUsed: Boolean(adminSettings.betaBonusUsed),
+        notes: adminSettings.notes || null,
+        limits: {
+          weeklyFreeInteractions: adminSettings.weeklyFreeInteractions ?? null,
+          weeklyCouncilSessions: adminSettings.weeklyCouncilSessions ?? null,
+          weeklyMeaningAnalyses: adminSettings.weeklyMeaningAnalyses ?? null,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error('POST /api/admin/accounts error:', error?.message || error);
+    res.status(400).json({
+      error: 'account_create_failed',
+      message: error?.message || 'Account creation failed.',
     });
   }
 });
@@ -1878,14 +2330,100 @@ app.get('/api/payment/status', authenticate, (req: AuthenticatedRequest, res: Re
 
   res.json({
     userId: req.user.id,
-    provider: 'mock',
-    status: serviceReadiness.payment ? 'ready_to_connect' : 'disabled',
+    provider: stripe ? 'stripe' : 'mock',
+    status: stripe && stripeBetaPriceId
+      ? 'checkout_ready'
+      : stripePaymentLinkUrl
+        ? 'payment_link_ready'
+        : serviceReadiness.payment
+          ? 'missing_stripe_price'
+          : 'disabled',
     entitlement: 'free',
     featureStatus: runtimeConfig.paymentEnabled
-      ? 'blocked until credentials/budget exist'
+      ? 'server-side payment checks enabled'
       : 'mocked safely',
-    message: 'Payment checks are server-side and mocked until a real provider and webhook secret are configured.'
+    checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+    paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
+    webhookReady: Boolean(stripe && stripeWebhookSecret),
+    message: stripe
+      ? 'Stripe is configured server-side. Use checkout sessions for automatic access activation.'
+      : 'Payment checks are server-side and mocked until Stripe credentials are configured.'
   });
+});
+
+app.post('/api/payment/create-checkout-session', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    if (isOfflineOnlyUser(req.user)) {
+      return res.status(409).json({
+        error: 'offline_only_account',
+        message: 'This account is protected as local-only and cannot be activated remotely.',
+      });
+    }
+
+    const access = await getEffectiveAccess(req.user);
+    if (hasFounderAccess(req.user) || isAccessActive(access)) {
+      return res.json({
+        active: true,
+        tier: access.tier,
+        activeUntil: access.activeUntil,
+      });
+    }
+
+    if (!stripe || !stripeBetaPriceId) {
+      const fallbackUrl = buildPaymentLinkUrl(req.user);
+      if (fallbackUrl) {
+        return res.json({
+          provider: 'stripe_payment_link',
+          url: fallbackUrl,
+          automaticActivation: false,
+          message: 'Payment link fallback is configured. Add STRIPE_BETA_PRICE_ID and STRIPE_WEBHOOK_SECRET for automatic activation.',
+        });
+      }
+
+      return res.status(503).json({
+        error: 'stripe_checkout_not_configured',
+        message: 'Stripe checkout is not configured on this backend.',
+      });
+    }
+
+    const frontendUrl = getFrontendUrlForRequest(req).replace(/\/$/, '');
+    const successUrl = `${frontendUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${frontendUrl}/?payment=cancelled`;
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{ price: stripeBetaPriceId, quantity: 1 }],
+      client_reference_id: req.user.id,
+      customer_email: req.user.email || (isEmailLike(req.user.username) ? req.user.username : undefined),
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        userId: req.user.id,
+        accessTier: 'paid_beta',
+        accessDays: String(BETA_ACCESS_DAYS),
+        source: 'lazarus_engine_beta',
+      },
+    });
+
+    if (!session.url) {
+      return res.status(500).json({ error: 'stripe_checkout_url_missing' });
+    }
+
+    res.json({
+      provider: 'stripe_checkout',
+      sessionId: session.id,
+      url: session.url,
+      automaticActivation: Boolean(stripeWebhookSecret),
+    });
+  } catch (error: any) {
+    console.error('[PAYMENT] Checkout session creation failed:', error?.message || error);
+    res.status(500).json({
+      error: 'checkout_session_failed',
+      message: process.env.NODE_ENV === 'production' ? 'Unable to start checkout.' : error?.message || 'Unable to start checkout.',
+    });
+  }
 });
 
 app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
@@ -1925,7 +2463,9 @@ app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, re
     beta: {
       priceEur: BETA_PRICE_EUR,
       accessDays: BETA_ACCESS_DAYS,
-      provider: 'mock',
+      provider: stripe ? 'stripe' : 'mock',
+      checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+      paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
       bonusAvailable: access.betaActivations >= 2 && !access.betaBonusUsed,
     },
   });
@@ -1952,6 +2492,9 @@ app.post('/api/access/mock-activate-beta', authenticate, async (req: Authenticat
   if (!req.user) {
     return res.status(401).json({ error: 'Unauthorized: User not found' });
   }
+  if (runtimeConfig.isProduction || runtimeConfig.paymentEnabled) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
   if (isOfflineOnlyUser(req.user)) {
     return res.status(409).json({
       error: 'offline_only_account',
@@ -1961,22 +2504,9 @@ app.post('/api/access/mock-activate-beta', authenticate, async (req: Authenticat
 
   const current = await getEffectiveAccess(req.user);
   const bonusAvailable = current.betaActivations >= 2 && !current.betaBonusUsed;
-  const now = Date.now();
-  const baseTime = current.activeUntil && new Date(current.activeUntil).getTime() > now
-    ? new Date(current.activeUntil).getTime()
-    : now;
-  const activeUntil = new Date(baseTime + BETA_ACCESS_DAYS * 86400000).toISOString();
-  const nextAccess: UserAccessRecord = {
-    user_id: req.user.id,
-    tier: 'paid_beta',
-    active_until: activeUntil,
-    beta_activations: bonusAvailable ? current.betaActivations : current.betaActivations + 1,
-    beta_bonus_used: bonusAvailable ? true : current.betaBonusUsed,
+  const nextAccess = await activatePaidBetaAccess(req.user.id, {
     notes: bonusAvailable ? 'Mock bonus beta period after two activations.' : 'Mock beta activation.',
-  };
-
-  localAccessRecords.set(req.user.id, nextAccess);
-  await upsertUserAccess(nextAccess);
+  });
 
   res.json({
     tier: nextAccess.tier,

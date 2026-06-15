@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { login as localLogin } from '../services/aiService';
-import { isSupabaseAuthAvailable, signInWithEmail, signUpWithEmail } from '../services/supabaseAuth';
+import { consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail, signUpWithEmail } from '../services/supabaseAuth';
 import { setCurrentUser } from '../services/userService';
 import { getUIText } from '../config/loader';
 import { Language } from '../types';
@@ -23,8 +23,60 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState('');
 
   const ui = getUIText(language);
+  const normalizeEmailInput = (value: string) => value.trim().toLowerCase();
+
+  const confirmedMessage = language === 'DE'
+    ? 'Email bestaetigt. Du wirst angemeldet...'
+    : 'Email confirmed. Signing you in...';
+  const confirmEmailMessage = language === 'DE'
+    ? 'Account erstellt. Bitte bestaetige deine Email-Adresse und melde dich danach an.'
+    : 'Account created. Please confirm your email address, then sign in.';
+  const resendMessage = language === 'DE'
+    ? 'Bestaetigungs-Email erneut gesendet.'
+    : 'Confirmation email sent again.';
+  const notConfirmedMessage = language === 'DE'
+    ? 'Diese Email ist noch nicht bestaetigt. Pruefe dein Postfach oder sende die Bestaetigung erneut.'
+    : 'This email is not confirmed yet. Check your inbox or resend the confirmation.';
+
+  useEffect(() => {
+    if (!supabaseEnabled || !hasSupabaseAuthRedirectParams()) return;
+
+    let isMounted = true;
+    setLoading(true);
+    setMessage(language === 'DE' ? 'Email-Bestaetigung wird verarbeitet...' : 'Processing email confirmation...');
+    setError('');
+
+    consumeSupabaseAuthRedirect()
+      .then(authResult => {
+        if (!isMounted) return;
+        if (authResult) {
+          setMessage(confirmedMessage);
+          setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || email);
+          onLoginSuccess();
+          return;
+        }
+
+        setMessage(language === 'DE' ? 'Email bestaetigt. Du kannst dich jetzt anmelden.' : 'Email confirmed. You can sign in now.');
+        setFormMode('signIn');
+      })
+      .catch(err => {
+        if (!isMounted) return;
+        setError(err.message || (language === 'DE' ? 'Email-Bestaetigung fehlgeschlagen.' : 'Email confirmation failed.'));
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [confirmedMessage, email, language, onLoginSuccess, supabaseEnabled]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,27 +86,65 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
 
     try {
       if (formMode === 'signUp') {
-        const result = await signUpWithEmail(email, secret, displayName);
+        const normalizedEmail = normalizeEmailInput(email);
+        const result = await signUpWithEmail(normalizedEmail, secret, displayName);
+        if (result.authResult) {
+          setCurrentUser(
+            result.authResult.userId,
+            result.authResult.token,
+            result.authResult.displayName || result.authResult.email || normalizedEmail
+          );
+          onLoginSuccess();
+          return;
+        }
+
         if (result.requiresEmailConfirmation) {
-          setMessage('Account created. Please confirm your email address, then sign in.');
+          setPendingConfirmationEmail(result.email || normalizedEmail);
+          setMessage(confirmEmailMessage);
         } else {
-          setMessage('Account created. You can sign in now.');
+          setMessage(language === 'DE' ? 'Account erstellt. Du kannst dich jetzt anmelden.' : 'Account created. You can sign in now.');
         }
         return;
       }
 
       if (formMode === 'signIn') {
-        const authResult = await signInWithEmail(email, secret);
-        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || email);
+        const normalizedEmail = normalizeEmailInput(email);
+        const authResult = await signInWithEmail(normalizedEmail, secret);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || normalizedEmail);
       } else {
         const authResult = await localLogin(username, secret);
         setCurrentUser(authResult.userId, authResult.token, authResult.displayName || username);
       }
       onLoginSuccess();
     } catch (err: any) {
-      setError(err.message || ui.LOGIN_ERROR);
+      const message = err.message || ui.LOGIN_ERROR;
+      if (formMode === 'signIn' && message.toLowerCase().includes('email not confirmed')) {
+        setPendingConfirmationEmail(normalizeEmailInput(email));
+        setError(notConfirmedMessage);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const targetEmail = normalizeEmailInput(pendingConfirmationEmail || email);
+    if (!targetEmail) return;
+
+    setError('');
+    setMessage('');
+    setResending(true);
+
+    try {
+      await resendSignupConfirmation(targetEmail);
+      setPendingConfirmationEmail(targetEmail);
+      setMessage(resendMessage);
+    } catch (err: any) {
+      setError(err.message || (language === 'DE' ? 'Bestaetigungs-Email konnte nicht gesendet werden.' : 'Could not send confirmation email.'));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -112,6 +202,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
             <div className="mb-4 p-3 bg-emerald-900/20 border border-emerald-400/30 rounded-lg text-emerald-200 text-sm">
               {message}
             </div>
+          )}
+
+          {supabaseEnabled && pendingConfirmationEmail && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resending || loading}
+              className="mb-4 w-full rounded-lg border border-purple-400/25 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-100 transition-all hover:border-purple-300/45 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resending
+                ? (language === 'DE' ? 'Sende...' : 'Sending...')
+                : (language === 'DE' ? 'Bestaetigung erneut senden' : 'Resend confirmation')}
+            </button>
           )}
 
           {supabaseMisconfigured && (

@@ -1,11 +1,37 @@
 import { CalendarEvent, CycleDayRecord, IntegrationCycle } from '../types';
 import { CYCLE_LENGTH_DAYS, getCycleDayGuide, getRecommendedPacing } from '../config/integrationCycle';
-import { getUserScopedKey } from './userService';
+import { getCurrentUser, getUserScopedKey } from './userService';
 
 const CURRENT_CYCLE_KEY = 'integration_cycle_current';
 const CURRENT_CYCLE_BACKUP_KEY = 'integration_cycle_current_backup';
 const ARCHIVED_CYCLES_KEY = 'integration_cycle_archive';
 const CYCLE_SCHEMA_VERSION = 1;
+
+const getApiBaseUrl = (): string => {
+  const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+  if (import.meta.env.PROD && !url) {
+    throw new Error('VITE_API_BASE_URL is not set.');
+  }
+
+  return url || 'http://localhost:3001';
+};
+
+const getAuthHeaders = () => {
+  const user = getCurrentUser();
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+
+  let token = user.token.trim();
+  while (token.startsWith('Bearer ')) {
+    token = token.substring(7).trim();
+  }
+
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+};
 
 const toIsoDate = (date: Date): string => {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().split('T')[0];
@@ -76,17 +102,42 @@ const normalizeCycle = (cycle: IntegrationCycle): IntegrationCycle => {
   };
 };
 
-const parseCycle = (saved: string | null): IntegrationCycle | null => {
-  if (!saved) return null;
+const parseCycleValue = (value: unknown): IntegrationCycle | null => {
+  if (!value || typeof value !== 'object') return null;
 
   try {
-    const parsed = normalizeCycle(JSON.parse(saved) as IntegrationCycle);
+    const parsed = normalizeCycle(value as IntegrationCycle);
     if (!parsed?.id || (parsed.status !== 'ACTIVE' && parsed.status !== 'COMPLETED')) return null;
     return parsed;
   } catch (error) {
     console.error('Failed to parse integration cycle', error);
     return null;
   }
+};
+
+const parseCycle = (saved: string | null): IntegrationCycle | null => {
+  if (!saved) return null;
+
+  try {
+    return parseCycleValue(JSON.parse(saved));
+  } catch (error) {
+    console.error('Failed to parse integration cycle', error);
+    return null;
+  }
+};
+
+const getCycleUpdatedTime = (cycle: IntegrationCycle | null): number => {
+  if (!cycle) return 0;
+  return new Date(cycle.updatedAt || cycle.completedAt || cycle.createdAt).getTime() || 0;
+};
+
+const chooseNewestCycle = (
+  localCycle: IntegrationCycle | null,
+  remoteCycle: IntegrationCycle | null,
+): IntegrationCycle | null => {
+  if (!localCycle) return remoteCycle;
+  if (!remoteCycle) return localCycle;
+  return getCycleUpdatedTime(remoteCycle) > getCycleUpdatedTime(localCycle) ? remoteCycle : localCycle;
 };
 
 export const loadCurrentCycle = (userId: string): IntegrationCycle | null => {
@@ -107,13 +158,13 @@ export const loadCurrentCycle = (userId: string): IntegrationCycle | null => {
   return null;
 };
 
-export const saveCurrentCycle = (userId: string, cycle: IntegrationCycle | null): void => {
+export const saveCurrentCycle = (userId: string, cycle: IntegrationCycle | null): IntegrationCycle | null => {
   const key = getUserScopedKey(CURRENT_CYCLE_KEY, userId);
   const backupKey = getUserScopedKey(CURRENT_CYCLE_BACKUP_KEY, userId);
 
   if (!cycle) {
     // Null saves are intentionally non-destructive. Use clearCurrentCycle() for explicit resets.
-    return;
+    return null;
   }
 
   const existing = localStorage.getItem(key);
@@ -127,11 +178,96 @@ export const saveCurrentCycle = (userId: string, cycle: IntegrationCycle | null)
   });
   localStorage.setItem(key, JSON.stringify(normalized));
   localStorage.setItem(backupKey, JSON.stringify(normalized));
+  return normalized;
 };
 
 export const clearCurrentCycle = (userId: string): void => {
   const key = getUserScopedKey(CURRENT_CYCLE_KEY, userId);
+  const backupKey = getUserScopedKey(CURRENT_CYCLE_BACKUP_KEY, userId);
   localStorage.removeItem(key);
+  localStorage.removeItem(backupKey);
+};
+
+export const persistCurrentCycle = async (
+  userId: string,
+  cycle: IntegrationCycle | null,
+): Promise<IntegrationCycle | null> => {
+  const normalized = saveCurrentCycle(userId, cycle);
+  if (!normalized) return null;
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/cycle/current`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+      body: JSON.stringify({ cycle: normalized }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const persisted = parseCycleValue(data.currentCycle);
+    if (persisted) {
+      saveCurrentCycle(userId, persisted);
+      return persisted;
+    }
+  } catch (error) {
+    console.warn('[CYCLE] Failed to persist cycle to backend; local backup kept.', error);
+  }
+
+  return normalized;
+};
+
+export const hydrateCurrentCycle = async (userId: string): Promise<IntegrationCycle | null> => {
+  const localCycle = loadCurrentCycle(userId);
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/cycle/current?ts=${Date.now()}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const remoteCycle = parseCycleValue(data.currentCycle);
+    const selectedCycle = chooseNewestCycle(localCycle, remoteCycle);
+
+    if (selectedCycle) {
+      saveCurrentCycle(userId, selectedCycle);
+
+      if (localCycle && selectedCycle.id === localCycle.id && getCycleUpdatedTime(localCycle) > getCycleUpdatedTime(remoteCycle)) {
+        await persistCurrentCycle(userId, localCycle);
+      }
+    }
+
+    return selectedCycle;
+  } catch (error) {
+    console.warn('[CYCLE] Failed to hydrate cycle from backend; using local backup.', error);
+    return localCycle;
+  }
+};
+
+export const persistArchivedCycle = async (cycle: IntegrationCycle): Promise<void> => {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/cycle/archive`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+      body: JSON.stringify({ cycle }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.warn('[CYCLE] Failed to archive cycle in backend; local archive kept.', error);
+  }
 };
 
 export const startIntegrationCycle = (
@@ -183,10 +319,26 @@ export const upsertCycleDayRecord = (
 export const archiveCycle = (userId: string, cycle: IntegrationCycle): void => {
   const archiveKey = getUserScopedKey(ARCHIVED_CYCLES_KEY, userId);
   const saved = localStorage.getItem(archiveKey);
-  const archive = saved ? JSON.parse(saved) as IntegrationCycle[] : [];
+  let archive: IntegrationCycle[] = [];
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      archive = Array.isArray(parsed) ? parsed as IntegrationCycle[] : [];
+    } catch (error) {
+      console.warn('[CYCLE] Failed to parse local cycle archive. Starting a fresh archive.', error);
+    }
+  }
+
+  const archivedCycle = {
+    ...normalizeCycle(cycle),
+    status: 'ARCHIVED' as const,
+    updatedAt: new Date().toISOString(),
+    completedAt: cycle.completedAt || new Date().toISOString(),
+  };
+
   localStorage.setItem(archiveKey, JSON.stringify([
-    { ...normalizeCycle(cycle), status: 'ARCHIVED', updatedAt: new Date().toISOString(), completedAt: cycle.completedAt || new Date().toISOString() },
-    ...archive,
+    archivedCycle,
+    ...archive.filter(existing => existing.id !== cycle.id),
   ]));
   clearCurrentCycle(userId);
 };

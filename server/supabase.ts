@@ -51,6 +51,102 @@ export const getSupabaseAuthUser = async (accessToken: string): Promise<Supabase
   }
 };
 
+export interface AdminAuthUserInput {
+  email: string;
+  password: string;
+  displayName: string;
+  emailConfirm?: boolean;
+}
+
+export interface AdminAuthUserResult {
+  action: 'created' | 'updated_existing';
+  user: {
+    id: string;
+    email?: string | null;
+    email_confirmed_at?: string | null;
+    confirmed_at?: string | null;
+  };
+}
+
+const isExistingUserError = (message: string): boolean => {
+  return /already|registered|exists|duplicate/i.test(message);
+};
+
+const findAuthUserByEmail = async (email: string): Promise<AdminAuthUserResult['user'] | null> => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await getSupabaseClient().auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const found = data.users.find(user => user.email?.toLowerCase() === normalizedEmail);
+    if (found) {
+      return found;
+    }
+    if (data.users.length < perPage) {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+export const createOrUpdateConfirmedAuthUser = async (
+  input: AdminAuthUserInput,
+): Promise<AdminAuthUserResult> => {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase client not initialized.');
+  }
+
+  const email = input.email.trim().toLowerCase();
+  const displayName = input.displayName.trim();
+  const userMetadata = {
+    display_name: displayName,
+    full_name: displayName,
+    name: displayName,
+  };
+  const emailConfirm = input.emailConfirm !== false;
+
+  const { data, error } = await getSupabaseClient().auth.admin.createUser({
+    email,
+    password: input.password,
+    email_confirm: emailConfirm,
+    user_metadata: userMetadata,
+  });
+
+  if (!error && data.user) {
+    return { action: 'created', user: data.user };
+  }
+
+  const message = error?.message || 'Unable to create auth user.';
+  if (!isExistingUserError(message)) {
+    throw new Error(message);
+  }
+
+  const existingUser = await findAuthUserByEmail(email);
+  if (!existingUser) {
+    throw new Error('Auth user exists, but could not be found for update.');
+  }
+
+  const update = await getSupabaseClient().auth.admin.updateUserById(existingUser.id, {
+    password: input.password,
+    email_confirm: emailConfirm,
+    user_metadata: {
+      ...(existingUser as any).user_metadata,
+      ...userMetadata,
+    },
+  } as any);
+
+  if (update.error || !update.data.user) {
+    throw new Error(update.error?.message || 'Unable to update existing auth user.');
+  }
+
+  return { action: 'updated_existing', user: update.data.user };
+};
+
 // User management
 export interface DbUser {
   id: string;

@@ -64,8 +64,16 @@ export const runtimeConfig = {
   jwtSecret: process.env.JWT_SECRET,
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY || process.env.PAYMENT_PROVIDER_SECRET,
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  stripeBetaPriceId: process.env.STRIPE_BETA_PRICE_ID,
+  stripePaymentLinkUrl: process.env.STRIPE_BETA_PAYMENT_LINK_URL,
+  frontendAppUrl: process.env.FRONTEND_APP_URL || process.env.PUBLIC_APP_URL,
   hasDatabaseCredentials: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
-  hasPaymentCredentials: !!process.env.PAYMENT_PROVIDER_SECRET,
+  hasPaymentCredentials: !!(
+    (process.env.STRIPE_SECRET_KEY || process.env.PAYMENT_PROVIDER_SECRET)
+    && (process.env.STRIPE_BETA_PRICE_ID || process.env.STRIPE_BETA_PAYMENT_LINK_URL)
+  ),
 };
 
 export const serviceReadiness = {
@@ -85,8 +93,14 @@ export const getCredentialWarnings = (): string[] => {
   if (runtimeConfig.databaseEnabled && !runtimeConfig.hasDatabaseCredentials) {
     warnings.push('DATABASE_ENABLED=true but Supabase credentials are missing. Database writes/reads are disabled.');
   }
-  if (runtimeConfig.paymentEnabled && !runtimeConfig.hasPaymentCredentials) {
-    warnings.push('PAYMENT_ENABLED=true but PAYMENT_PROVIDER_SECRET is missing. Payment routes are disabled.');
+  if (runtimeConfig.paymentEnabled && !runtimeConfig.stripeSecretKey) {
+    warnings.push('PAYMENT_ENABLED=true but STRIPE_SECRET_KEY is missing. Stripe checkout will be disabled.');
+  }
+  if (runtimeConfig.paymentEnabled && !runtimeConfig.stripeBetaPriceId && !runtimeConfig.stripePaymentLinkUrl) {
+    warnings.push('PAYMENT_ENABLED=true but neither STRIPE_BETA_PRICE_ID nor STRIPE_BETA_PAYMENT_LINK_URL is set. Payment routes will not have a checkout target.');
+  }
+  if (runtimeConfig.paymentEnabled && runtimeConfig.stripeSecretKey && !runtimeConfig.stripeWebhookSecret) {
+    warnings.push('PAYMENT_ENABLED=true but STRIPE_WEBHOOK_SECRET is missing. Stripe payments will not auto-activate access.');
   }
   if (runtimeConfig.supabaseAuthEnabled && !runtimeConfig.hasDatabaseCredentials) {
     warnings.push('SUPABASE_AUTH_ENABLED=true but Supabase credentials are missing. Supabase Auth token verification is disabled.');

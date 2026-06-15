@@ -87,6 +87,37 @@ export interface CommunicationModeSuggestion {
   };
 }
 
+const modeEffect: Record<CommunicationMode, Record<'EN' | 'DE', string>> = {
+  HOLD: {
+    EN: 'It keeps the room slow, protective, and less interpretive.',
+    DE: 'Sie haelt den Raum langsam, schuetzend und weniger deutend.',
+  },
+  MIRROR: {
+    EN: 'It reflects the pattern back without pushing you into a conclusion.',
+    DE: 'Sie spiegelt das Muster zurueck, ohne dich in eine Schlussfolgerung zu draengen.',
+  },
+  EXPLORE: {
+    EN: 'It opens more questions and lets the council examine one layer at a time.',
+    DE: 'Sie oeffnet mehr Fragen und laesst den Rat eine Schicht nach der anderen untersuchen.',
+  },
+  GROUND: {
+    EN: 'It translates insight into pacing, body, and nervous-system safety.',
+    DE: 'Sie uebersetzt Einsicht in Tempo, Koerper und Nervensystem-Sicherheit.',
+  },
+  ACT: {
+    EN: 'It narrows the field toward one small action that can actually be lived.',
+    DE: 'Sie verengt das Feld auf eine kleine Handlung, die wirklich gelebt werden kann.',
+  },
+};
+
+const modeName: Record<CommunicationMode, Record<'EN' | 'DE', string>> = {
+  HOLD: { EN: 'Hold', DE: 'Halten' },
+  MIRROR: { EN: 'Mirror', DE: 'Spiegeln' },
+  EXPLORE: { EN: 'Explore', DE: 'Erkunden' },
+  GROUND: { EN: 'Ground', DE: 'Erden' },
+  ACT: { EN: 'Act', DE: 'Handeln' },
+};
+
 export const suggestCommunicationMode = (
   cycle: IntegrationCycle | null,
   surface: 'DIRECT_CHAT' | 'COUNCIL_SESSION' | 'CYCLE' | 'STATS',
@@ -151,4 +182,39 @@ export const suggestCommunicationMode = (
       DE: 'Spiegeln hält Kontinuität, ohne den Prozess zu übernehmen.',
     },
   };
+};
+
+export const buildCommunicationStanceExplanation = (
+  suggestion: CommunicationModeSuggestion,
+  currentMode: CommunicationMode,
+  language: 'EN' | 'DE',
+): string[] => {
+  const recommendedEffect = modeEffect[suggestion.mode][language];
+  const currentEffect = modeEffect[currentMode][language];
+  const recommendedName = modeName[suggestion.mode][language];
+  const currentName = modeName[currentMode][language];
+
+  if (currentMode === suggestion.mode) {
+    return language === 'DE'
+      ? [
+          `${recommendedName} steht gerade als Empfehlung, weil ${suggestion.reason.DE.charAt(0).toLowerCase()}${suggestion.reason.DE.slice(1)}`,
+          recommendedEffect,
+        ]
+      : [
+          `${recommendedName} is recommended right now because ${suggestion.reason.EN.charAt(0).toLowerCase()}${suggestion.reason.EN.slice(1)}`,
+          recommendedEffect,
+        ];
+  }
+
+  return language === 'DE'
+    ? [
+        `Empfohlen waere gerade ${recommendedName}, weil ${suggestion.reason.DE.charAt(0).toLowerCase()}${suggestion.reason.DE.slice(1)}`,
+        `Du hast ${currentName} gewaehlt; dadurch wird die Antwort anders gefaerbt: ${currentEffect}`,
+        `${recommendedName} bleibt die leise Orientierung, aber ${currentName} bestimmt den Ton der naechsten Interaktion.`,
+      ]
+    : [
+        `${recommendedName} would be recommended right now because ${suggestion.reason.EN.charAt(0).toLowerCase()}${suggestion.reason.EN.slice(1)}`,
+        `You selected ${currentName}; that changes the response shape: ${currentEffect}`,
+        `${recommendedName} remains the quiet orientation, but ${currentName} sets the tone of the next interaction.`,
+      ];
 };

@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Message, ChatStatus, Language, MeaningContext } from '../types';
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
-import { sendMessageToArchetype } from '../services/aiService';
+import { PaywallRequiredError, sendMessageToArchetype } from '../services/aiService';
 import { Send, Sparkles, Bot } from 'lucide-react';
 import { getCurrentUser } from '../services/userService';
 import { analyzePlayfulDiscovery, DiscoveryNotice } from '../services/playfulDiscoveryService';
@@ -11,6 +11,8 @@ import { DiscoveryCard } from './DiscoveryCard';
 import { TutorialOverlay } from './tutorial/TutorialOverlay';
 import { TutorialTrigger } from './tutorial/TutorialTrigger';
 import { tutorialEventBus, TutorialId } from '../services/tutorialProgressService';
+import { VoiceInputButton } from './VoiceInputButton';
+import { PaywallNotice } from './PaywallNotice';
 
 interface ChatInterfaceProps {
   activeArchetype: ArchetypeId;
@@ -46,6 +48,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
   const [status, setStatus] = useState<ChatStatus>(ChatStatus.IDLE);
   const [discoveries, setDiscoveries] = useState<DiscoveryNotice[]>([]);
   const [activeTutorialId, setActiveTutorialId] = useState<TutorialId | null>(null);
+  const [paywallMessage, setPaywallMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentUser = getCurrentUser();
@@ -62,11 +65,32 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
     setMessages([getInitMessage(activeArchetype, language)]);
     setStatus(ChatStatus.IDLE);
     setInput(''); // Clear input as well
+    setPaywallMessage('');
   }, [activeArchetype, language]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const updateInput = (value: string) => {
+    setInput(value);
+    tutorialEventBus.emit({
+      type: 'single_voice_input_words',
+      payload: { count: value.trim().split(/\s+/).filter(Boolean).length },
+    });
+  };
+
+  const appendVoiceTranscript = (text: string) => {
+    setInput(prev => {
+      const next = `${prev}${prev.trim() ? ' ' : ''}${text}`.trimStart();
+      tutorialEventBus.emit({
+        type: 'single_voice_input_words',
+        payload: { count: next.trim().split(/\s+/).filter(Boolean).length },
+      });
+      return next;
+    });
+    textareaRef.current?.focus();
+  };
 
   const handleSend = async () => {
     if (!input.trim() || status === ChatStatus.STREAMING) return;
@@ -110,6 +134,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
     }
     setInput('');
     setStatus(ChatStatus.STREAMING);
+    setPaywallMessage('');
 
     try {
       // Build conversation history from existing messages (excluding the init message)
@@ -175,8 +200,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
         return;
       }
 
-      console.error('Chat error:', error);
       const errorMessage = error?.message || error?.toString() || 'Connection error';
+      if (error instanceof PaywallRequiredError) {
+        setPaywallMessage(errorMessage);
+        setStatus(ChatStatus.IDLE);
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+        }
+        return;
+      }
+
+      console.error('Chat error:', error);
       console.error('Full error details:', {
         message: errorMessage,
         stack: error?.stack,
@@ -278,6 +312,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
 
       {/* Input Area */}
       <div className="p-6 pt-2 z-10">
+        {paywallMessage && (
+          <div className="mb-4">
+            <PaywallNotice
+              language={language}
+              message={paywallMessage}
+              onClose={() => setPaywallMessage('')}
+            />
+          </div>
+        )}
         <div className="relative flex items-end gap-3 bg-[#0f0716]/80 border border-purple-500/20 rounded-2xl p-3 focus-within:ring-1 focus-within:ring-purple-500/50 focus-within:border-purple-500/50 transition-all shadow-[0_0_30px_rgba(0,0,0,0.2)] backdrop-blur-xl">
             {/* Console Left Deco */}
             <div className="w-1 h-8 bg-purple-500/20 rounded-full self-center ml-1" />
@@ -286,17 +329,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => {
-                  setInput(e.target.value);
-                  tutorialEventBus.emit({
-                    type: 'single_voice_input_words',
-                    payload: { count: e.target.value.trim().split(/\s+/).filter(Boolean).length },
-                  });
+                  updateInput(e.target.value);
                 }}
                 onKeyDown={handleKeyDown}
                 data-tutorial-id="singlevoice-input"
                 placeholder={`${ui.INPUT_PLACEHOLDER} ${currentArchetypeData.name}...`}
                 className="flex-1 bg-transparent border-none text-violet-100 placeholder-violet-500/30 focus:ring-0 resize-none max-h-32 py-3 px-2 leading-relaxed text-sm"
                 rows={1}
+            />
+            <VoiceInputButton
+                language={language}
+                disabled={status !== ChatStatus.IDLE}
+                onTranscript={appendVoiceTranscript}
             />
             <button
                 onClick={handleSend}

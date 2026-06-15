@@ -53,6 +53,30 @@ export interface AdminAccountsResponse {
   accounts: AdminAccount[];
 }
 
+export interface CreateAdminAccountInput {
+  email: string;
+  password: string;
+  displayName: string;
+  emailConfirm: boolean;
+  admin?: {
+    entitlement?: AdminEntitlement;
+    offlineOnly?: boolean;
+    activeUntil?: string | null;
+    betaActivations?: number;
+    betaBonusUsed?: boolean;
+    notes?: string | null;
+    weeklyFreeInteractions?: number | null;
+    weeklyCouncilSessions?: number | null;
+    weeklyMeaningAnalyses?: number | null;
+  };
+}
+
+export interface CreateAdminAccountResponse {
+  action: 'created' | 'updated_existing';
+  emailConfirmed: boolean;
+  account: AdminAccount;
+}
+
 export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts?ts=${Date.now()}`, {
     method: 'GET',
@@ -62,6 +86,34 @@ export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
 
   if (!response.ok) {
     let message = response.status === 403 ? 'Admin access required.' : `Admin request failed: ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.message === 'string') {
+        message = body.message;
+      } else if (typeof body?.error === 'string') {
+        message = body.error;
+      }
+    } catch {
+      // Keep HTTP status fallback.
+    }
+    throw new Error(message);
+  }
+
+  return response.json();
+};
+
+export const createAdminAccount = async (
+  input: CreateAdminAccountInput,
+): Promise<CreateAdminAccountResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    cache: 'no-store',
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    let message = `Admin create failed: ${response.status}`;
     try {
       const body = await response.json();
       if (typeof body?.message === 'string') {

@@ -1,6 +1,7 @@
 import { ArchetypeId } from '../constants';
 import { Language, MeaningContext, Message } from '../types';
 import { getCurrentUser } from './userService';
+import { loadLocalMeaningState, normalizeMeaningState, saveLocalMeaningState } from './meaningStateService';
 
 // Production safety check: ensure API base URL is set in production builds
 const getApiBaseUrl = (): string => {
@@ -38,6 +39,59 @@ const getAuthHeaders = () => {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
   };
+};
+
+export class PaywallRequiredError extends Error {
+  details: any;
+
+  constructor(message: string, details: any) {
+    super(message);
+    this.name = 'PaywallRequiredError';
+    this.details = details;
+  }
+}
+
+const readErrorBody = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch {
+    return { error: `HTTP ${response.status}: ${response.statusText}` };
+  }
+};
+
+const handleUnauthorizedResponse = async (response: Response): Promise<never> => {
+  const errorData = await readErrorBody(response);
+  const reason = errorData.reason || '';
+  const { handleAuthError } = await import('./userService');
+  handleAuthError();
+  const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+
+  if (
+    reason.startsWith('invalid_') ||
+    reason === 'expired' ||
+    reason === 'missing_token' ||
+    reason === 'legacy_token_invalid'
+  ) {
+    throw new Error(message);
+  }
+
+  throw new Error(message);
+};
+
+const throwApiResponseError = async (response: Response, context: string): Promise<never> => {
+  if (response.status === 401) {
+    return handleUnauthorizedResponse(response);
+  }
+
+  const errorData = await readErrorBody(response);
+  const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+  console.error(`${context} API error:`, errorMsg, 'Status:', response.status);
+
+  if (response.status === 402 || errorData.error === 'paywall_required') {
+    throw new PaywallRequiredError(errorMsg, errorData);
+  }
+
+  throw new Error(errorMsg);
 };
 
 // Direct chat with an archetype (for ChatInterface)
@@ -99,40 +153,7 @@ export const sendMessageToArchetype = async (
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Direct chat API error:', errorMsg, 'Status:', response.status, 'URL:', API_BASE_URL);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Direct chat');
   }
 
   const data = await response.json();
@@ -184,40 +205,7 @@ export const startCouncilSession = async (
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Council API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Council');
   }
 
   const data = await response.json();
@@ -275,40 +263,7 @@ export const sendMessageToCouncil = async (
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Council API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Council');
   }
 
   const data = await response.json();
@@ -319,7 +274,7 @@ export const sendMessageToCouncil = async (
 };
 
 // Login function
-export const login = async (username: string, secret: string): Promise<{ userId: string; token: string }> => {
+export const login = async (username: string, secret: string): Promise<{ userId: string; token: string; displayName?: string }> => {
   const response = await fetch(`${API_BASE_URL}/api/login`, {
     method: 'POST',
     headers: {
@@ -376,29 +331,7 @@ export async function analyzeMeaning(
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-      throw new Error(message);
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Meaning analysis API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Meaning analysis');
   }
 
   const data = await response.json();
@@ -408,21 +341,7 @@ export async function analyzeMeaning(
     try {
       const user = getCurrentUser();
       if (user?.id) {
-        const storageKey = `user_${user.id}_meaning_state`;
-        const existing = localStorage.getItem(storageKey);
-        let existingData: import('../types').MeaningAnalysisResult = {
-          questLogEntries: [],
-          soulTimelineEvents: [],
-          breakthroughs: []
-        };
-
-        if (existing) {
-          try {
-            existingData = JSON.parse(existing);
-          } catch (e) {
-            console.warn('Failed to parse existing meaning state from localStorage');
-          }
-        }
+        const existingData = loadLocalMeaningState(user.id);
 
         // Merge new data with deduplication by id
         const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
@@ -434,7 +353,7 @@ export async function analyzeMeaning(
           });
         };
 
-        const merged: import('../types').MeaningAnalysisResult = {
+        const merged = normalizeMeaningState({
           questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
           soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
           breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs]),
@@ -442,9 +361,9 @@ export async function analyzeMeaning(
           attributeUpdates: data.attributeUpdates || existingData.attributeUpdates,
           skillUpdates: data.skillUpdates || existingData.skillUpdates,
           nextQuestState: data.nextQuestState || existingData.nextQuestState,
-        };
+        });
 
-        localStorage.setItem(storageKey, JSON.stringify(merged));
+        saveLocalMeaningState(user.id, merged);
       }
     } catch (e) {
       console.warn('Failed to persist meaning state to localStorage:', e);
@@ -465,31 +384,8 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
     };
   }
 
-  const storageKey = `user_${user.id}_meaning_state`;
   const loadLocalState = (): import('../types').MeaningAnalysisResult => {
-    try {
-      const existing = localStorage.getItem(storageKey);
-      if (existing) {
-        const parsed = JSON.parse(existing);
-        return {
-          questLogEntries: Array.isArray(parsed.questLogEntries) ? parsed.questLogEntries : [],
-          soulTimelineEvents: Array.isArray(parsed.soulTimelineEvents) ? parsed.soulTimelineEvents : [],
-          breakthroughs: Array.isArray(parsed.breakthroughs) ? parsed.breakthroughs : [],
-          emotionalState: parsed.emotionalState,
-          attributeUpdates: parsed.attributeUpdates,
-          skillUpdates: parsed.skillUpdates,
-          nextQuestState: parsed.nextQuestState,
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to load meaning state from localStorage');
-    }
-
-    return {
-      questLogEntries: [],
-      soulTimelineEvents: [],
-      breakthroughs: []
-    };
+    return loadLocalMeaningState(user.id);
   };
 
   const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
@@ -504,7 +400,7 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
   const mergeMeaningState = (
     primary: import('../types').MeaningAnalysisResult,
     secondary: import('../types').MeaningAnalysisResult,
-  ): import('../types').MeaningAnalysisResult => ({
+  ): import('../types').MeaningAnalysisResult => normalizeMeaningState({
     questLogEntries: dedupeById([...(primary.questLogEntries || []), ...(secondary.questLogEntries || [])]),
     soulTimelineEvents: dedupeById([...(primary.soulTimelineEvents || []), ...(secondary.soulTimelineEvents || [])]),
     breakthroughs: dedupeById([...(primary.breakthroughs || []), ...(secondary.breakthroughs || [])]),
@@ -534,7 +430,7 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
       });
       // Also update localStorage as backup
       try {
-        localStorage.setItem(storageKey, JSON.stringify(data));
+        saveLocalMeaningState(user.id, data);
       } catch (e) {
         console.warn('Failed to backup meaning state to localStorage');
       }
@@ -563,34 +459,7 @@ export async function integrateSession(
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      const reason = errorData.reason || '';
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: 'Unknown error' };
-    }
-    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    await throwApiResponseError(response, 'Integration');
   }
 
   return await response.json();

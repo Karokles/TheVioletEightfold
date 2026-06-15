@@ -49,9 +49,22 @@ export interface AccessStatus {
   beta: {
     priceEur: string;
     accessDays: number;
-    provider: 'mock';
+    provider: 'mock' | 'stripe';
+    checkoutAvailable?: boolean;
+    paymentLinkAvailable?: boolean;
     bonusAvailable: boolean;
   };
+}
+
+export interface CheckoutSessionResponse {
+  active?: boolean;
+  tier?: AccessStatus['tier'];
+  activeUntil?: string | null;
+  provider?: 'stripe_checkout' | 'stripe_payment_link';
+  sessionId?: string;
+  url?: string;
+  automaticActivation?: boolean;
+  message?: string;
 }
 
 export const getAccessStatus = async (): Promise<AccessStatus | null> => {
@@ -67,7 +80,29 @@ export const getAccessStatus = async (): Promise<AccessStatus | null> => {
   return response.json();
 };
 
-export const checkCycleDayAccess = async (day: number): Promise<{ allowed: boolean; message?: string }> => {
+export const startBetaCheckout = async (): Promise<CheckoutSessionResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/payment/create-checkout-session`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.message || body.error || `Checkout failed: ${response.status}`);
+  }
+
+  return body;
+};
+
+export const redirectToBetaCheckout = async (): Promise<CheckoutSessionResponse> => {
+  const checkout = await startBetaCheckout();
+  if (checkout.url) {
+    window.location.href = checkout.url;
+  }
+  return checkout;
+};
+
+export const checkCycleDayAccess = async (day: number): Promise<{ allowed: boolean; message?: string; paywall?: any }> => {
   const response = await fetch(`${getApiBaseUrl()}/api/access/check-cycle-day`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -82,5 +117,6 @@ export const checkCycleDayAccess = async (day: number): Promise<{ allowed: boole
   return {
     allowed: false,
     message: body.message || body.error || 'Access required.',
+    paywall: body,
   };
 };

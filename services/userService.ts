@@ -5,6 +5,9 @@ const AUTH_TOKEN_KEY = 'vc_auth_token';
 const USER_ID_KEY = 'vc_user_id';
 const USER_DISPLAY_NAME_KEY = 'vc_user_display_name';
 const USER_LANGUAGE_KEY = 'language_preference';
+const LOCAL_DISPLAY_NAMES: Record<string, string> = {
+  lion: 'karokles',
+};
 
 export interface User {
   id: string;
@@ -15,11 +18,15 @@ export interface User {
 export const getCurrentUser = (): User | null => {
   const userId = localStorage.getItem(USER_ID_KEY);
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
-  const displayName = localStorage.getItem(USER_DISPLAY_NAME_KEY) || undefined;
+  const storedDisplayName = localStorage.getItem(USER_DISPLAY_NAME_KEY) || undefined;
   
   if (!userId || !token) {
     return null;
   }
+
+  const displayName = storedDisplayName && storedDisplayName !== userId
+    ? storedDisplayName
+    : LOCAL_DISPLAY_NAMES[userId] || storedDisplayName;
   
   return { id: userId, token, displayName };
 };
