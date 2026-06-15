@@ -1086,6 +1086,14 @@ const enforceFeatureAccess = async (
   return true;
 };
 
+const getFirstLockedCompletedCycleDay = (cycle: LocalIntegrationCycle): number | null => {
+  const lockedRecord = cycle.dayRecords
+    .filter(record => record.completedAt && record.day > FREE_CYCLE_DAYS)
+    .sort((a, b) => a.day - b.day)[0];
+
+  return lockedRecord?.day ?? null;
+};
+
 const getUsageBucket = (userId: string): UsageBucket => {
   const week = getWeekKey();
   const existing = usageBuckets.get(userId);
@@ -1592,6 +1600,11 @@ app.put('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, re
       return res.status(400).json({ error: 'A valid active or completed cycle is required.' });
     }
 
+    const lockedDay = getFirstLockedCompletedCycleDay(requestedCycle);
+    if (lockedDay && !(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+      return;
+    }
+
     const localState = await saveLocalCurrentCycle(req.user.id, requestedCycle);
     let remoteSaved = false;
 
@@ -1624,6 +1637,11 @@ app.post('/api/cycle/archive', authenticate, async (req: AuthenticatedRequest, r
     const requestedCycle = normalizeStoredCycle(req.body?.cycle);
     if (!requestedCycle) {
       return res.status(400).json({ error: 'A valid cycle is required.' });
+    }
+
+    const lockedDay = getFirstLockedCompletedCycleDay(requestedCycle);
+    if (lockedDay && !(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+      return;
     }
 
     const localState = await archiveLocalCycle(req.user.id, requestedCycle);
