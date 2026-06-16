@@ -118,11 +118,13 @@ const parseAllowedOrigins = (): string[] => {
   ];
   const stagingOrigins = [
     'https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app',
+    'https://app.lazarus-engine.eu',
   ];
   const productionOrigins = [
     'https://the-violet-eightfold-git-main-the-violet-eightfolds-projects.vercel.app',
     'https://the-violet-eightfold.vercel.app',
     'https://the-violet-eightfold42.vercel.app',
+    'https://app.lazarus-engine.eu',
   ];
   const defaultOrigins = runtimeConfig.isLocal
     ? localOrigins
