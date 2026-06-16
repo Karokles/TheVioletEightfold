@@ -114,7 +114,6 @@ export default function App() {
           <div className="orbital orbital-small" />
           <div className="alchemical-grid" />
           <div className="manuscript-layer" />
-          <div className="rohrschach-mark" />
           <div className="orientation-sigil" />
           <div className="status-card">
             <span className="status-label">Initiation Layer</span>

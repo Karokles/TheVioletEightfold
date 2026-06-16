@@ -344,7 +344,6 @@ h3 {
 .orbital,
 .alchemical-grid,
 .manuscript-layer,
-.rohrschach-mark,
 .orientation-sigil {
   position: absolute;
   pointer-events: none;
@@ -464,22 +463,16 @@ h3 {
   inset: auto 8% 8% auto;
   width: 260px;
   height: 220px;
-  opacity: 0.16;
+  opacity: 0.18;
   background:
-    radial-gradient(circle at 18% 30%, rgba(240, 179, 208, 0.24), transparent 20%),
-    url("/rohrschach-background.jpg") center center / cover no-repeat;
+    radial-gradient(circle at 18% 30%, rgba(240, 179, 208, 0.18), transparent 20%),
+    radial-gradient(circle at 72% 62%, rgba(143, 213, 229, 0.12), transparent 24%),
+    linear-gradient(115deg, transparent 0 18%, rgba(220, 185, 128, 0.08) 18.5%, transparent 19.5%),
+    linear-gradient(28deg, transparent 0 52%, rgba(214, 198, 255, 0.07) 52.5%, transparent 53.5%),
+    radial-gradient(circle at 50% 50%, transparent 56%, rgba(220, 185, 128, 0.12) 56.5%, transparent 57.5%),
+    radial-gradient(circle at 50% 50%, transparent 71%, rgba(214, 198, 255, 0.08) 71.5%, transparent 72.5%);
   mix-blend-mode: screen;
   filter: blur(0.6px);
-}
-
-.rohrschach-mark {
-  left: 6%;
-  top: 12%;
-  width: 220px;
-  height: 300px;
-  background: url("/rohrschach-wings.jpg") center center / contain no-repeat;
-  opacity: 0.12;
-  filter: invert(1) hue-rotate(180deg) saturate(0) contrast(1.25);
 }
 
 .orientation-sigil {
@@ -627,8 +620,10 @@ h3 {
 }
 
 .card:nth-child(3)::after {
-  background: url("/rohrschach-wings.jpg") center center / contain no-repeat;
-  filter: invert(1) opacity(0.3);
+  background:
+    radial-gradient(circle at center, rgba(240, 179, 208, 0.1), transparent 62%),
+    radial-gradient(circle at center, transparent 42%, rgba(220, 185, 128, 0.18) 43%, transparent 44%),
+    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.18) 50%, transparent 51%);
 }
 
 .split {
@@ -660,8 +655,11 @@ h3 {
   left: auto;
   right: 20px;
   bottom: 12px;
-  background: url("/rohrschach-background.jpg") center center / contain no-repeat;
-  filter: invert(1) opacity(0.38);
+  background:
+    radial-gradient(circle at center, rgba(220, 185, 128, 0.16) 0 2px, transparent 3px),
+    radial-gradient(circle at center, transparent 40%, rgba(214, 198, 255, 0.14) 41%, transparent 42%),
+    radial-gradient(circle at center, transparent 62%, rgba(143, 213, 229, 0.1) 63%, transparent 64%),
+    linear-gradient(35deg, transparent 36%, rgba(220, 185, 128, 0.12) 36.5%, transparent 37.5%);
 }
 
 .pathway-list {
