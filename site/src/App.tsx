@@ -1,3 +1,5 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
+
 const thresholdLines = [
   'Council Sessions for moments that refuse simple answers.',
   'Soul Blueprint, Eternal Mirror, and cycle memory held in one reflective system.',
@@ -41,10 +43,36 @@ const closingLines = [
 ];
 
 export default function App() {
+  const handleSurfacePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const tiltX = ((y - 50) / 50) * -2.4;
+    const tiltY = ((x - 50) / 50) * 2.4;
+
+    element.style.setProperty('--pointer-x', `${x}%`);
+    element.style.setProperty('--pointer-y', `${y}%`);
+    element.style.setProperty('--tilt-x', `${tiltX}deg`);
+    element.style.setProperty('--tilt-y', `${tiltY}deg`);
+  };
+
+  const handleSurfacePointerLeave = (event: ReactPointerEvent<HTMLElement>) => {
+    const element = event.currentTarget;
+    element.style.setProperty('--pointer-x', '50%');
+    element.style.setProperty('--pointer-y', '50%');
+    element.style.setProperty('--tilt-x', '0deg');
+    element.style.setProperty('--tilt-y', '0deg');
+  };
+
   return (
     <main className="shell">
       <section className="hero">
-        <div className="hero-copy">
+        <div
+          className="hero-copy interactive-surface float-large"
+          onPointerMove={handleSurfacePointerMove}
+          onPointerLeave={handleSurfacePointerLeave}
+        >
           <p className="eyebrow">Lazarus Engine</p>
           <h1>
             A threshold for reflection,
@@ -71,7 +99,12 @@ export default function App() {
           </div>
         </div>
 
-        <div className="hero-panel" aria-hidden="true">
+        <div
+          className="hero-panel interactive-surface float-medium"
+          aria-hidden="true"
+          onPointerMove={handleSurfacePointerMove}
+          onPointerLeave={handleSurfacePointerLeave}
+        >
           <div className="hero-smoke hero-smoke-left" />
           <div className="hero-smoke hero-smoke-right" />
           <div className="constellation constellation-a" />
@@ -96,8 +129,13 @@ export default function App() {
 
       <section className="band">
         <div className="band-grid">
-          {thresholdLines.map(item => (
-            <div className="metric" key={item}>
+          {thresholdLines.map((item, index) => (
+            <div
+              className={`metric interactive-surface float-subtle float-delay-${index + 1}`}
+              key={item}
+              onPointerMove={handleSurfacePointerMove}
+              onPointerLeave={handleSurfacePointerLeave}
+            >
               <span className="metric-mark" />
               <p>{item}</p>
             </div>
@@ -112,8 +150,13 @@ export default function App() {
         </div>
 
         <div className="card-grid">
-          {chambers.map(chamber => (
-            <article className="card" key={chamber.title}>
+          {chambers.map((chamber, index) => (
+            <article
+              className={`card interactive-surface float-medium float-delay-${index + 1}`}
+              key={chamber.title}
+              onPointerMove={handleSurfacePointerMove}
+              onPointerLeave={handleSurfacePointerLeave}
+            >
               <p className="card-motif">{chamber.motif}</p>
               <h3>{chamber.title}</h3>
               <p>{chamber.text}</p>
@@ -123,12 +166,21 @@ export default function App() {
       </section>
 
       <section className="section split">
-        <div className="stack stack-map">
+        <div
+          className="stack stack-map interactive-surface float-medium"
+          onPointerMove={handleSurfacePointerMove}
+          onPointerLeave={handleSurfacePointerLeave}
+        >
           <p className="eyebrow">Exploration</p>
           <h2>Psychogeography, Council, and the map of returning patterns.</h2>
           <div className="pathway-list">
             {pathways.map(pathway => (
-              <article className="pathway" key={pathway.title}>
+              <article
+                className="pathway interactive-surface float-subtle"
+                key={pathway.title}
+                onPointerMove={handleSurfacePointerMove}
+                onPointerLeave={handleSurfacePointerLeave}
+              >
                 <h3>{pathway.title}</h3>
                 <p>{pathway.text}</p>
               </article>
@@ -136,7 +188,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="stack stack-litany">
+        <div
+          className="stack stack-litany interactive-surface float-medium"
+          onPointerMove={handleSurfacePointerMove}
+          onPointerLeave={handleSurfacePointerLeave}
+        >
           <p className="eyebrow">What Lazarus Is</p>
           <h2>It asks for attention, not submission.</h2>
           <ul className="litany">
@@ -147,7 +203,11 @@ export default function App() {
         </div>
       </section>
 
-      <section className="section cta">
+      <section
+        className="section cta interactive-surface float-large"
+        onPointerMove={handleSurfacePointerMove}
+        onPointerLeave={handleSurfacePointerLeave}
+      >
         <div>
           <p className="eyebrow">Enter the Threshold</p>
           <h2>For those who would rather navigate themselves than be simplified.</h2>

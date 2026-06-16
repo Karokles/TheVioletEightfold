@@ -61,6 +61,7 @@ a {
   width: min(1220px, calc(100% - 56px));
   margin: 0 auto;
   padding: 34px 0 86px;
+  perspective: 1400px;
 }
 
 .hero,
@@ -98,6 +99,51 @@ a {
   box-shadow: var(--shadow);
 }
 
+.interactive-surface {
+  --pointer-x: 50%;
+  --pointer-y: 50%;
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  transform:
+    perspective(1400px)
+    rotateX(var(--tilt-x))
+    rotateY(var(--tilt-y))
+    translateY(0);
+  transition:
+    transform 320ms ease,
+    border-color 260ms ease,
+    box-shadow 260ms ease,
+    background-color 260ms ease;
+  will-change: transform;
+}
+
+.interactive-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(
+      circle at var(--pointer-x) var(--pointer-y),
+      rgba(143, 213, 229, 0.13),
+      rgba(240, 179, 208, 0.08) 18%,
+      transparent 44%
+    );
+  transition: opacity 260ms ease;
+}
+
+.interactive-surface:hover {
+  border-color: rgba(214, 198, 255, 0.24);
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.interactive-surface:hover::after {
+  opacity: 1;
+}
+
 .hero-copy,
 .section,
 .cta {
@@ -121,6 +167,30 @@ a {
   flex-direction: column;
   justify-content: center;
   gap: 14px;
+}
+
+.float-large {
+  animation: chamber-float 11s ease-in-out infinite;
+}
+
+.float-medium {
+  animation: chamber-float 9s ease-in-out infinite;
+}
+
+.float-subtle {
+  animation: chamber-float 7.5s ease-in-out infinite;
+}
+
+.float-delay-1 {
+  animation-delay: -0.7s;
+}
+
+.float-delay-2 {
+  animation-delay: -1.8s;
+}
+
+.float-delay-3 {
+  animation-delay: -3.2s;
 }
 
 .eyebrow {
@@ -436,6 +506,7 @@ h3 {
     linear-gradient(180deg, rgba(8, 9, 22, 0.64), rgba(8, 9, 22, 0.82)),
     radial-gradient(circle at top right, rgba(143, 213, 229, 0.08), transparent 32%);
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  animation: chamber-float 8s ease-in-out infinite;
 }
 
 .status-card strong {
@@ -615,6 +686,24 @@ h3 {
   align-items: center;
 }
 
+@keyframes chamber-float {
+  0%,
+  100% {
+    transform:
+      perspective(1400px)
+      rotateX(var(--tilt-x))
+      rotateY(var(--tilt-y))
+      translateY(0px);
+  }
+  50% {
+    transform:
+      perspective(1400px)
+      rotateX(calc(var(--tilt-x) * 1.02))
+      rotateY(calc(var(--tilt-y) * 1.02))
+      translateY(-8px);
+  }
+}
+
 @keyframes drift {
   from {
     transform: translate3d(0, 0, 0) scale(1);
@@ -661,6 +750,15 @@ h3 {
 }
 
 @media (max-width: 640px) {
+  .interactive-surface,
+  .interactive-surface:hover,
+  .float-large,
+  .float-medium,
+  .float-subtle {
+    transform: none;
+    animation-duration: 10s;
+  }
+
   .shell {
     width: min(100% - 28px, 1220px);
     padding-top: 18px;
