@@ -1,28 +1,43 @@
-const principles = [
-  'Council Sessions fuer komplexe Entscheidungen',
-  'Zyklen, Breakthroughs und Soul-Memory an einem Ort',
-  'Getrennte App-Infrastruktur mit geschuetztem Zugang',
+const thresholdLines = [
+  'Council Sessions for moments that refuse simple answers.',
+  'Soul Blueprint, Eternal Mirror, and cycle memory held in one reflective system.',
+  'A protected threshold between public invitation and private inner work.',
 ];
 
-const modules = [
+const chambers = [
   {
-    title: 'Inner Council',
-    text: 'Acht Stimmen, ein beobachtendes Zentrum und eine Form von digitaler Spiegelung, die nicht nur antwortet, sondern sortiert.',
+    title: 'Council Sessions',
+    motif: 'Circular chamber',
+    text: 'Eight symbolic voices gather around one inner table. Not to overpower you with answers, but to surface the shape of what is already speaking inside you.',
   },
   {
-    title: 'Living Cycle',
-    text: 'Der 63-Tage-Zyklus bleibt erhalten, auch wenn das Backend neu deployed wird. Arbeit darf weitergehen, statt wieder bei null zu beginnen.',
+    title: 'Soul Blueprint',
+    motif: 'Living map',
+    text: 'A cartography of tendencies, fragments, breakthroughs, and unfinished patterns. Less a profile than an evolving inner architecture.',
   },
   {
-    title: 'Guarded Access',
-    text: 'Website, App und API sind getrennt. Dadurch bleibt die oeffentliche Seite leicht, waehrend die eigentliche Innenwelt geschuetzt bleibt.',
+    title: 'Eternal Mirror',
+    motif: 'Fractured reflection',
+    text: 'The mirror does not invent a self. It reveals where the self is split, hidden, defended, remembered, and ready to be integrated.',
   },
 ];
 
-const steps = [
-  'Lies die Website wie einen Einstieg in die Welt von Lazarus Engine.',
-  'Wechsle mit einem klaren Button in die App auf app.lazarus-engine.eu.',
-  'Arbeite dort mit Account, Paywall, Admin und Persistenz getrennt von der Website.',
+const pathways = [
+  {
+    title: 'Psychogeography',
+    text: 'Memory as terrain. Desire as weather. Attention as navigation. Lazarus treats inner life less like a checklist and more like a strange continent that must be walked.',
+  },
+  {
+    title: 'The Cycle',
+    text: 'Recursive days, returning symbols, orbital diagrams, and phases of integration. The path does not move in a straight line because people do not.',
+  },
+];
+
+const closingLines = [
+  'You are not using a tool.',
+  'You are entering a reflective system.',
+  'You are not becoming someone else.',
+  'You are learning how to integrate what is already here.',
 ];
 
 export default function App() {
@@ -32,40 +47,56 @@ export default function App() {
         <div className="hero-copy">
           <p className="eyebrow">Lazarus Engine</p>
           <h1>
-            Eine Website fuer die Einladung.
+            A threshold for reflection,
             <br />
-            Eine App fuer die eigentliche Arbeit.
+            integration, and inner architecture.
           </h1>
           <p className="lead">
-            Dieses zweite Projekt ist dein oeffentliches Standbein. Es kann frei gestaltet,
-            ueber Codex weiterentwickelt und separat von der Live-App deployed werden.
+            Lazarus Engine is not built to hand out certainty. It is built as a symbolic
+            system for navigating the chambers of selfhood, where memory, desire, conflict,
+            and transformation can be seen in relation rather than in isolation.
           </p>
           <div className="hero-actions">
             <a className="button button-primary" href="https://app.lazarus-engine.eu">
-              Zur App
+              Enter the App
             </a>
-            <a className="button button-secondary" href="#architecture">
-              Struktur ansehen
+            <a className="button button-secondary" href="#chambers">
+              Read the Map
             </a>
+          </div>
+          <div className="hero-whisper">
+            <span>Threshold between worlds</span>
+            <span>Digital thought palace</span>
+            <span>Library for inner navigation</span>
           </div>
         </div>
 
         <div className="hero-panel" aria-hidden="true">
+          <div className="hero-smoke hero-smoke-left" />
+          <div className="hero-smoke hero-smoke-right" />
+          <div className="constellation constellation-a" />
+          <div className="constellation constellation-b" />
           <div className="orbital orbital-large" />
           <div className="orbital orbital-mid" />
           <div className="orbital orbital-small" />
-          <div className="signal-grid" />
+          <div className="alchemical-grid" />
+          <div className="manuscript-layer" />
+          <div className="rohrschach-mark" />
+          <div className="orientation-sigil" />
           <div className="status-card">
-            <span className="status-label">Now Live</span>
-            <strong>Website + App getrennt</strong>
-            <p>Codex kann die Website direkt als eigenes Projekt weiterbauen.</p>
+            <span className="status-label">Initiation Layer</span>
+            <strong>The system begins where self-explanation fails.</strong>
+            <p>
+              Council, mirror, map, and cycle are not modules in a dashboard. They are
+              chambers in one symbolic architecture.
+            </p>
           </div>
         </div>
       </section>
 
       <section className="band">
         <div className="band-grid">
-          {principles.map(item => (
+          {thresholdLines.map(item => (
             <div className="metric" key={item}>
               <span className="metric-mark" />
               <p>{item}</p>
@@ -74,60 +105,55 @@ export default function App() {
         </div>
       </section>
 
-      <section className="section" id="architecture">
+      <section className="section" id="chambers">
         <div className="section-heading">
-          <p className="eyebrow">Architektur</p>
-          <h2>Ein zweites Vercel-Projekt gibt dir die Kontrolle ueber die Website.</h2>
+          <p className="eyebrow">Primary Chambers</p>
+          <h2>A symbolic system for meeting what is already alive in you.</h2>
         </div>
 
         <div className="card-grid">
-          {modules.map(module => (
-            <article className="card" key={module.title}>
-              <h3>{module.title}</h3>
-              <p>{module.text}</p>
+          {chambers.map(chamber => (
+            <article className="card" key={chamber.title}>
+              <p className="card-motif">{chamber.motif}</p>
+              <h3>{chamber.title}</h3>
+              <p>{chamber.text}</p>
             </article>
           ))}
         </div>
       </section>
 
       <section className="section split">
-        <div className="stack">
-          <p className="eyebrow">Routing</p>
-          <h2>So wuerde ich die Domains stabil schneiden.</h2>
-          <ul className="route-list">
-            <li>
-              <strong>lazarus-engine.eu</strong>
-              <span>Website / Einstieg / Story / CTA</span>
-            </li>
-            <li>
-              <strong>app.lazarus-engine.eu</strong>
-              <span>Die echte App mit Login, Council, Zyklus und Admin</span>
-            </li>
-            <li>
-              <strong>api.lazarus-engine.eu</strong>
-              <span>Backend und geschuetzte App-Funktionen</span>
-            </li>
-          </ul>
+        <div className="stack stack-map">
+          <p className="eyebrow">Exploration</p>
+          <h2>Psychogeography, Council, and the map of returning patterns.</h2>
+          <div className="pathway-list">
+            {pathways.map(pathway => (
+              <article className="pathway" key={pathway.title}>
+                <h3>{pathway.title}</h3>
+                <p>{pathway.text}</p>
+              </article>
+            ))}
+          </div>
         </div>
 
-        <div className="stack">
-          <p className="eyebrow">Ablauf</p>
-          <h2>Wie wir das in Vercel anbinden.</h2>
-          <ol className="step-list">
-            {steps.map(step => (
-              <li key={step}>{step}</li>
+        <div className="stack stack-litany">
+          <p className="eyebrow">What Lazarus Is</p>
+          <h2>It asks for attention, not submission.</h2>
+          <ul className="litany">
+            {closingLines.map(line => (
+              <li key={line}>{line}</li>
             ))}
-          </ol>
+          </ul>
         </div>
       </section>
 
       <section className="section cta">
         <div>
-          <p className="eyebrow">Naechster Schritt</p>
-          <h2>Verbinde `site/` als neues Vercel-Projekt und lass die Root-App unangetastet.</h2>
+          <p className="eyebrow">Enter the Threshold</p>
+          <h2>For those who would rather navigate themselves than be simplified.</h2>
         </div>
         <a className="button button-primary" href="https://app.lazarus-engine.eu">
-          App oeffnen
+          Enter Lazarus
         </a>
       </section>
     </main>
