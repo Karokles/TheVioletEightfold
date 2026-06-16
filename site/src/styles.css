@@ -767,7 +767,7 @@ h3 {
   --sigil-rgb-soft: 214, 177, 255;
   right: 18px;
   top: 16px;
-  animation: violet-pulse-a 8s ease-in-out infinite;
+  animation: violet-pulse-a 10s ease-in-out infinite;
 }
 
 .council-mark-7::before {
@@ -782,7 +782,7 @@ h3 {
   --sigil-rgb-soft: 227, 200, 255;
   right: 18px;
   bottom: 16px;
-  animation: violet-pulse-b 8s ease-in-out infinite;
+  animation: violet-pulse-b 10s ease-in-out infinite;
 }
 
 .council-mark-8::before {
@@ -806,11 +806,11 @@ h3 {
 
 @keyframes violet-pulse-a {
   0%,
-  38%,
+  28%,
   100% {
     box-shadow: none;
   }
-  18% {
+  14% {
     box-shadow:
       0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
       0 0 18px rgba(var(--sigil-rgb), 0.18),
@@ -820,11 +820,11 @@ h3 {
 
 @keyframes violet-pulse-b {
   0%,
-  62%,
+  72%,
   100% {
     box-shadow: none;
   }
-  80% {
+  86% {
     box-shadow:
       0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
       0 0 18px rgba(var(--sigil-rgb), 0.18),
