@@ -674,11 +674,8 @@ h3 {
   left: auto;
   right: 20px;
   bottom: 12px;
-  background:
-    radial-gradient(circle at center, rgba(220, 185, 128, 0.16) 0 2px, transparent 3px),
-    radial-gradient(circle at center, transparent 40%, rgba(214, 198, 255, 0.14) 41%, transparent 42%),
-    radial-gradient(circle at center, transparent 62%, rgba(143, 213, 229, 0.1) 63%, transparent 64%),
-    linear-gradient(35deg, transparent 36%, rgba(220, 185, 128, 0.12) 36.5%, transparent 37.5%);
+  background: url("/rohrschach-background.jpg") center center / contain no-repeat;
+  filter: invert(1) opacity(0.28);
 }
 
 .pathway-list {
