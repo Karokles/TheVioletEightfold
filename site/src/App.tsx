@@ -3,14 +3,17 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 const thresholdLines = [
   {
     member: 'Sovereign',
+    icon: '/council/sovereign.svg',
     text: 'Council Sessions for moments that refuse simple answers.',
   },
   {
     member: 'Warrior',
+    icon: '/council/warrior.svg',
     text: 'Soul Blueprint, Eternal Mirror, and cycle memory held in one reflective system.',
   },
   {
     member: 'Sage',
+    icon: '/council/sage.svg',
     text: 'A protected threshold between public invitation and private inner work.',
   },
 ];
@@ -18,18 +21,21 @@ const thresholdLines = [
 const chambers = [
   {
     member: 'Lover',
+    icon: '/council/lover.svg',
     title: 'Council Sessions',
     motif: 'Circular chamber',
     text: 'Eight symbolic voices gather around one inner table. Not to overpower you with answers, but to surface the shape of what is already speaking inside you.',
   },
   {
     member: 'Creator',
+    icon: '/council/creator.svg',
     title: 'Soul Blueprint',
     motif: 'Living map',
     text: 'A cartography of tendencies, fragments, breakthroughs, and unfinished patterns. Less a profile than an evolving inner architecture.',
   },
   {
     member: 'Caregiver',
+    icon: '/council/caregiver.svg',
     title: 'Eternal Mirror',
     motif: 'Fractured reflection',
     text: 'The mirror does not invent a self. It reveals where the self is split, hidden, defended, remembered, and ready to be integrated.',
@@ -39,11 +45,13 @@ const chambers = [
 const pathways = [
   {
     member: 'Explorer',
+    icon: '/council/explorer.svg',
     title: 'Psychogeography',
     text: 'Memory as terrain. Desire as weather. Attention as navigation. Lazarus treats inner life less like a checklist and more like a strange continent that must be walked.',
   },
   {
     member: 'Alchemist',
+    icon: '/council/alchemist.svg',
     title: 'The Cycle',
     text: 'Recursive days, returning symbols, orbital diagrams, and phases of integration. The path does not move in a straight line because people do not.',
   },
@@ -150,7 +158,10 @@ export default function App() {
               onPointerLeave={handleSurfacePointerLeave}
             >
               <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true">
-                <span className="council-mark-text">{item.member}</span>
+                <span
+                  className="council-mark-icon"
+                  style={{ ['--council-icon' as '--council-icon']: `url(${item.icon})` }}
+                />
               </span>
               <span className="metric-mark" />
               <p>{item.text}</p>
@@ -174,7 +185,10 @@ export default function App() {
               onPointerLeave={handleSurfacePointerLeave}
             >
               <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true">
-                <span className="council-mark-text">{chamber.member}</span>
+                <span
+                  className="council-mark-icon"
+                  style={{ ['--council-icon' as '--council-icon']: `url(${chamber.icon})` }}
+                />
               </span>
               <p className="card-motif">{chamber.motif}</p>
               <h3>{chamber.title}</h3>
@@ -201,7 +215,10 @@ export default function App() {
                 onPointerLeave={handleSurfacePointerLeave}
               >
                 <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true">
-                  <span className="council-mark-text">{pathway.member}</span>
+                  <span
+                    className="council-mark-icon"
+                    style={{ ['--council-icon' as '--council-icon']: `url(${pathway.icon})` }}
+                  />
                 </span>
                 <h3>{pathway.title}</h3>
                 <p>{pathway.text}</p>

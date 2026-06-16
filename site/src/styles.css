@@ -636,48 +636,48 @@ h3 {
     drop-shadow(0 0 46px rgba(var(--sigil-rgb-soft), 0.34));
 }
 
-.council-mark::before,
-.council-mark::after {
+.council-mark::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
 }
 
-.council-mark-text {
+.council-mark-icon {
   position: absolute;
   left: 50%;
-  bottom: -18px;
-  transform: translateX(-50%) translateY(6px);
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--sigil-rgb-soft), 0.22);
-  background: rgba(9, 7, 20, 0.74);
-  color: rgba(var(--sigil-rgb-soft), 0.84);
-  font-family: var(--font-system);
-  font-size: 0.55rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  opacity: 0;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  transform: translate(-50%, -50%) scale(0.92);
+  background-color: rgba(var(--sigil-rgb-soft), 0.86);
+  mask-image: var(--council-icon);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-image: var(--council-icon);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  opacity: 0.78;
+  filter:
+    drop-shadow(0 0 10px rgba(var(--sigil-rgb), 0.16))
+    drop-shadow(0 0 18px rgba(var(--sigil-rgb-soft), 0.1));
   transition:
-    opacity 220ms ease,
     transform 220ms ease,
-    border-color 220ms ease,
-    color 220ms ease,
-    box-shadow 220ms ease;
+    opacity 220ms ease,
+    background-color 220ms ease,
+    filter 220ms ease;
 }
 
-.interactive-surface:hover .council-mark-text {
+.interactive-surface:hover .council-mark-icon {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
-  border-color: rgba(var(--sigil-rgb-soft), 0.5);
-  color: rgba(255, 255, 255, 0.96);
-  box-shadow:
-    0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
-    0 0 18px rgba(var(--sigil-rgb), 0.16),
-    0 10px 24px rgba(0, 0, 0, 0.2);
+  transform: translate(-50%, -50%) scale(1.05);
+  background-color: rgba(255, 255, 255, 0.98);
+  filter:
+    drop-shadow(0 0 10px rgba(255, 255, 255, 0.3))
+    drop-shadow(0 0 20px rgba(var(--sigil-rgb), 0.52))
+    drop-shadow(0 0 34px rgba(var(--sigil-rgb-soft), 0.42));
 }
 
 .council-mark-1 {
@@ -688,16 +688,9 @@ h3 {
 }
 
 .council-mark-1::before {
-  inset: 11px;
-  border: 1px solid rgba(var(--sigil-rgb), 0.26);
-  box-shadow: 0 0 0 10px rgba(var(--sigil-rgb), 0.05);
-}
-
-.council-mark-1::after {
-  inset: 16px;
-  background:
-    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.26) 50%, transparent 51%),
-    radial-gradient(circle at 50% 18%, rgba(var(--sigil-rgb-soft), 0.34) 0 4px, transparent 5px);
+  inset: 8px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.18);
+  box-shadow: 0 0 0 12px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-2 {
@@ -708,16 +701,10 @@ h3 {
 }
 
 .council-mark-2::before {
-  inset: 12px;
+  inset: 10px;
   border: 1px solid rgba(var(--sigil-rgb), 0.24);
   border-radius: 50%;
-}
-
-.council-mark-2::after {
-  inset: 18px;
-  background:
-    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
-    radial-gradient(circle at 50% 50%, transparent 52%, rgba(var(--sigil-rgb), 0.2) 53%, transparent 54%);
+  box-shadow: 0 0 0 8px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-3 {
@@ -728,18 +715,10 @@ h3 {
 }
 
 .council-mark-3::before {
-  inset: 14px;
+  inset: 10px;
   border: 1px solid rgba(var(--sigil-rgb-soft), 0.24);
   border-radius: 50%;
-}
-
-.council-mark-3::after {
-  inset: 16px;
-  background:
-    radial-gradient(circle at 50% 24%, rgba(var(--sigil-rgb-soft), 0.26) 0 4px, transparent 5px),
-    radial-gradient(circle at 24% 70%, rgba(var(--sigil-rgb-soft), 0.2) 0 4px, transparent 5px),
-    radial-gradient(circle at 76% 70%, rgba(var(--sigil-rgb-soft), 0.2) 0 4px, transparent 5px),
-    linear-gradient(180deg, transparent 26%, rgba(var(--sigil-rgb), 0.18) 27%, rgba(var(--sigil-rgb), 0.18) 29%, transparent 30%);
+  box-shadow: 0 0 0 7px rgba(var(--sigil-rgb-soft), 0.04);
 }
 
 .council-mark-4 {
@@ -749,27 +728,10 @@ h3 {
   bottom: 18px;
 }
 
-.council-mark-4::before,
-.council-mark-4::after {
-  width: 32px;
-  height: 32px;
-  top: 20px;
-  border: 1px solid rgba(var(--sigil-rgb), 0.24);
-  border-radius: 50%;
-}
-
 .council-mark-4::before {
-  left: 12px;
-}
-
-.council-mark-4::after {
-  right: 12px;
-}
-
-.council-mark-4 {
-  background:
-    radial-gradient(circle at 50% 50%, rgba(var(--sigil-rgb), 0.06) 0 10px, transparent 11px),
-    radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.05), transparent 68%);
+  inset: 8px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.18);
+  box-shadow: 0 0 0 12px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-5 {
@@ -780,16 +742,10 @@ h3 {
 }
 
 .council-mark-5::before {
-  inset: 13px;
+  inset: 8px;
   border: 1px solid rgba(var(--sigil-rgb), 0.24);
   border-radius: 50%;
-}
-
-.council-mark-5::after {
-  inset: 14px;
-  background:
-    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
-    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%);
+  box-shadow: 0 0 0 10px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-6 {
@@ -800,18 +756,10 @@ h3 {
 }
 
 .council-mark-6::before {
-  inset: 12px;
-  background:
-    radial-gradient(circle at 50% 18%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
-    radial-gradient(circle at 18% 50%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
-    radial-gradient(circle at 82% 50%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
-    radial-gradient(circle at 50% 82%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px);
-}
-
-.council-mark-6::after {
-  inset: 16px;
+  inset: 8px;
   border: 1px solid rgba(var(--sigil-rgb), 0.24);
   border-radius: 50%;
+  box-shadow: 0 0 0 12px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-7 {
@@ -819,20 +767,14 @@ h3 {
   --sigil-rgb-soft: 214, 177, 255;
   right: 18px;
   top: 16px;
+  animation: violet-pulse-a 8s ease-in-out infinite;
 }
 
 .council-mark-7::before {
-  inset: 14px;
-  background:
-    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.24) 50%, transparent 51%),
-    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.24) 50%, transparent 51%),
-    radial-gradient(circle at center, transparent 52%, rgba(var(--sigil-rgb), 0.2) 53%, transparent 54%);
-}
-
-.council-mark-7::after {
-  inset: 10px;
+  inset: 8px;
   border: 1px solid rgba(var(--sigil-rgb), 0.22);
   border-radius: 50%;
+  box-shadow: 0 0 0 12px rgba(var(--sigil-rgb), 0.04);
 }
 
 .council-mark-8 {
@@ -840,23 +782,16 @@ h3 {
   --sigil-rgb-soft: 227, 200, 255;
   right: 18px;
   bottom: 16px;
+  animation: violet-pulse-b 8s ease-in-out infinite;
 }
 
 .council-mark-8::before {
-  inset: 10px;
+  inset: 8px;
   border: 1px solid rgba(var(--sigil-rgb), 0.2);
   border-radius: 50%;
   box-shadow:
     0 0 0 10px rgba(var(--sigil-rgb), 0.05),
-    0 0 0 20px rgba(var(--sigil-rgb-soft), 0.04);
-}
-
-.council-mark-8::after {
-  inset: 16px;
-  background:
-    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
-    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
-    radial-gradient(circle at center, rgba(var(--sigil-rgb-soft), 0.24) 0 4px, transparent 5px);
+    0 0 0 18px rgba(var(--sigil-rgb-soft), 0.035);
 }
 
 .metric .council-mark {
@@ -867,6 +802,34 @@ h3 {
 .pathway .council-mark {
   top: 18px;
   right: 18px;
+}
+
+@keyframes violet-pulse-a {
+  0%,
+  38%,
+  100% {
+    box-shadow: none;
+  }
+  18% {
+    box-shadow:
+      0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
+      0 0 18px rgba(var(--sigil-rgb), 0.18),
+      0 0 36px rgba(var(--sigil-rgb-soft), 0.16);
+  }
+}
+
+@keyframes violet-pulse-b {
+  0%,
+  62%,
+  100% {
+    box-shadow: none;
+  }
+  80% {
+    box-shadow:
+      0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
+      0 0 18px rgba(var(--sigil-rgb), 0.18),
+      0 0 36px rgba(var(--sigil-rgb-soft), 0.16);
+  }
 }
 
 .metric-mark {
