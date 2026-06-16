@@ -1,6 +1,10 @@
 :root {
   color-scheme: dark;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-reflection: "EB Garamond", Georgia, serif;
+  --font-system: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --bg: #050712;
   --bg-deep: #090d1d;
   --panel: rgba(13, 12, 28, 0.6);
@@ -31,6 +35,7 @@ body {
   margin: 0;
   min-width: 320px;
   color: var(--text);
+  font-family: var(--font-body);
   background:
     radial-gradient(circle at 15% 15%, rgba(143, 99, 232, 0.14), transparent 25%),
     radial-gradient(circle at 82% 18%, rgba(143, 213, 229, 0.08), transparent 22%),
@@ -195,6 +200,7 @@ a {
 
 .eyebrow {
   margin: 0;
+  font-family: var(--font-system);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.22em;
@@ -211,6 +217,7 @@ p {
 h1,
 h2,
 h3 {
+  font-family: var(--font-display);
   font-weight: 500;
 }
 
@@ -218,7 +225,7 @@ h1 {
   margin-bottom: 0;
   font-size: clamp(3rem, 6vw, 5.7rem);
   line-height: 0.95;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   text-wrap: balance;
 }
 
@@ -232,7 +239,8 @@ h2 {
 
 h3 {
   margin-bottom: 10px;
-  font-size: 1.45rem;
+  font-size: 1.58rem;
+  line-height: 1.08;
   color: var(--lavender);
 }
 
@@ -242,9 +250,15 @@ h3 {
 .status-card p,
 .pathway p,
 .litany li {
+  font-family: var(--font-body);
   color: var(--muted);
   font-size: 1.03rem;
   line-height: 1.72;
+}
+
+.lead {
+  max-width: 34rem;
+  font-size: 1.08rem;
 }
 
 .hero-actions {
@@ -259,6 +273,7 @@ h3 {
   flex-wrap: wrap;
   gap: 10px 14px;
   margin-top: 6px;
+  font-family: var(--font-system);
   color: rgba(199, 208, 229, 0.7);
   font-size: 0.8rem;
   letter-spacing: 0.08em;
@@ -280,6 +295,7 @@ h3 {
   padding: 0 24px;
   border-radius: 999px;
   border: 1px solid transparent;
+  font-family: var(--font-body);
   font-size: 0.96rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -505,6 +521,7 @@ h3 {
 .status-card strong {
   display: block;
   margin-bottom: 10px;
+  font-family: var(--font-reflection);
   font-size: 1.1rem;
   line-height: 1.45;
   color: var(--text);
@@ -518,6 +535,7 @@ h3 {
   border: 1px solid rgba(220, 185, 128, 0.16);
   background: rgba(220, 185, 128, 0.08);
   color: var(--gold);
+  font-family: var(--font-system);
   font-size: 0.73rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -592,6 +610,7 @@ h3 {
 .card-motif {
   margin-bottom: 10px;
   color: var(--gold);
+  font-family: var(--font-system);
   font-size: 0.76rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -673,6 +692,8 @@ h3 {
 .litany {
   margin: 8px 0 0;
   padding-left: 18px;
+  font-family: var(--font-reflection);
+  font-size: 1.1rem;
 }
 
 .litany li {
