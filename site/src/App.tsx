@@ -135,6 +135,7 @@ export default function App() {
               onPointerMove={handleSurfacePointerMove}
               onPointerLeave={handleSurfacePointerLeave}
             >
+              <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true" />
               <span className="metric-mark" />
               <p>{item}</p>
             </div>
@@ -156,6 +157,7 @@ export default function App() {
               onPointerMove={handleSurfacePointerMove}
               onPointerLeave={handleSurfacePointerLeave}
             >
+              <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true" />
               <p className="card-motif">{chamber.motif}</p>
               <h3>{chamber.title}</h3>
               <p>{chamber.text}</p>
@@ -180,6 +182,7 @@ export default function App() {
                 onPointerMove={handleSurfacePointerMove}
                 onPointerLeave={handleSurfacePointerLeave}
               >
+                <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true" />
                 <h3>{pathway.title}</h3>
                 <p>{pathway.text}</p>
               </article>

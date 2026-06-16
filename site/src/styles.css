@@ -583,10 +583,211 @@ h3 {
   pointer-events: none;
 }
 
+.metric > *,
+.card > *,
+.stack > *,
+.pathway > * {
+  position: relative;
+  z-index: 1;
+}
+
 .metric {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+}
+
+.council-mark {
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 1px solid rgba(220, 185, 128, 0.12);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+  filter: drop-shadow(0 0 12px rgba(143, 99, 232, 0.14));
+  transition:
+    opacity 240ms ease,
+    transform 240ms ease,
+    filter 240ms ease,
+    border-color 240ms ease;
+}
+
+.interactive-surface:hover .council-mark {
+  opacity: 0.26;
+  transform: scale(1.04);
+  border-color: rgba(214, 198, 255, 0.2);
+  filter:
+    drop-shadow(0 0 18px rgba(143, 99, 232, 0.24))
+    drop-shadow(0 0 28px rgba(143, 213, 229, 0.1));
+}
+
+.council-mark::before,
+.council-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.council-mark-1 {
+  top: 18px;
+  right: 18px;
+}
+
+.council-mark-1::before {
+  inset: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(220, 185, 128, 0.2);
+  box-shadow:
+    0 -11px 0 -10px rgba(220, 185, 128, 0.24),
+    12px -2px 0 -11px rgba(220, 185, 128, 0.24),
+    -12px -2px 0 -11px rgba(220, 185, 128, 0.24);
+}
+
+.council-mark-1::after {
+  inset: 28px 34px 14px;
+  border-left: 1px solid rgba(214, 198, 255, 0.2);
+  border-right: 1px solid rgba(214, 198, 255, 0.2);
+  border-bottom: 1px solid rgba(214, 198, 255, 0.2);
+  border-radius: 0 0 999px 999px;
+}
+
+.council-mark-2 {
+  right: 24px;
+  bottom: 14px;
+}
+
+.council-mark-2::before {
+  inset: 14px;
+  border: 1px solid rgba(220, 185, 128, 0.18);
+  clip-path: polygon(48% 0%, 58% 0%, 100% 52%, 100% 62%, 54% 100%, 44% 100%, 0% 48%, 0% 38%);
+}
+
+.council-mark-2::after {
+  inset: 18px 32px;
+  background:
+    linear-gradient(145deg, transparent 44%, rgba(214, 198, 255, 0.22) 45%, rgba(214, 198, 255, 0.22) 55%, transparent 56%),
+    linear-gradient(35deg, transparent 44%, rgba(214, 198, 255, 0.16) 45%, rgba(214, 198, 255, 0.16) 55%, transparent 56%);
+}
+
+.council-mark-3 {
+  top: 12px;
+  right: 20px;
+}
+
+.council-mark-3::before {
+  inset: 13px;
+  border: 1px solid rgba(199, 208, 229, 0.2);
+  clip-path: polygon(50% 4%, 94% 82%, 6% 82%);
+}
+
+.council-mark-3::after {
+  inset: 24px;
+  border: 1px solid rgba(220, 185, 128, 0.18);
+  border-radius: 50%;
+}
+
+.council-mark-4 {
+  right: 18px;
+  bottom: 18px;
+}
+
+.council-mark-4::before,
+.council-mark-4::after {
+  width: 28px;
+  height: 28px;
+  top: 22px;
+  border: 1px solid rgba(240, 179, 208, 0.2);
+  border-radius: 50%;
+}
+
+.council-mark-4::before {
+  left: 12px;
+}
+
+.council-mark-4::after {
+  right: 12px;
+}
+
+.council-mark-5 {
+  right: 18px;
+  top: 18px;
+}
+
+.council-mark-5::before {
+  inset: 16px;
+  border: 1px solid rgba(220, 185, 128, 0.2);
+  transform: rotate(45deg);
+}
+
+.council-mark-5::after {
+  inset: 20px;
+  background:
+    linear-gradient(45deg, transparent 47%, rgba(214, 198, 255, 0.18) 48%, rgba(214, 198, 255, 0.18) 52%, transparent 53%),
+    linear-gradient(-45deg, transparent 47%, rgba(214, 198, 255, 0.18) 48%, rgba(214, 198, 255, 0.18) 52%, transparent 53%);
+}
+
+.council-mark-6 {
+  right: 22px;
+  bottom: 18px;
+}
+
+.council-mark-6::before {
+  inset: 14px;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
+    radial-gradient(circle at 18% 50%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
+    radial-gradient(circle at 82% 50%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
+    radial-gradient(circle at 50% 82%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px);
+}
+
+.council-mark-6::after {
+  inset: 22px;
+  border: 1px solid rgba(220, 185, 128, 0.18);
+  border-radius: 50%;
+}
+
+.council-mark-7 {
+  right: 18px;
+  top: 16px;
+}
+
+.council-mark-7::before {
+  inset: 14px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
+    linear-gradient(45deg, transparent 49%, rgba(220, 185, 128, 0.16) 50%, transparent 51%),
+    linear-gradient(-45deg, transparent 49%, rgba(220, 185, 128, 0.16) 50%, transparent 51%);
+}
+
+.council-mark-7::after {
+  inset: 10px;
+  border: 1px solid rgba(220, 185, 128, 0.16);
+  border-radius: 50%;
+}
+
+.council-mark-8 {
+  right: 18px;
+  bottom: 16px;
+}
+
+.council-mark-8::before {
+  inset: 10px;
+  border: 1px solid rgba(220, 185, 128, 0.16);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 10px rgba(220, 185, 128, 0.04),
+    0 0 0 20px rgba(143, 213, 229, 0.03);
+}
+
+.council-mark-8::after {
+  inset: 18px 32px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%);
 }
 
 .metric-mark {
