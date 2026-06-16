@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, type PointerEvent as ReactPointerEvent } from 'react';
 
 const thresholdLines = [
   {
@@ -65,6 +65,34 @@ const closingLines = [
 ];
 
 export default function App() {
+  useEffect(() => {
+    let frame = 0;
+
+    const updateScrollProgress = () => {
+      frame = 0;
+      const root = document.documentElement;
+      const maxScroll = Math.max(document.body.scrollHeight - window.innerHeight, 1);
+      const progress = Math.min(window.scrollY / maxScroll, 1);
+      root.style.setProperty('--scroll-progress', progress.toFixed(4));
+      root.style.setProperty('--scroll-progress-invert', (1 - progress).toFixed(4));
+    };
+
+    const handleScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(updateScrollProgress);
+    };
+
+    updateScrollProgress();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, []);
+
   const handleSurfacePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const element = event.currentTarget;
     const rect = element.getBoundingClientRect();
@@ -88,7 +116,7 @@ export default function App() {
   };
 
   return (
-    <main className="shell">
+    <main className="shell living-observatory">
       <section className="hero">
         <div
           className="hero-copy interactive-surface float-large"
@@ -127,6 +155,15 @@ export default function App() {
           onPointerMove={handleSurfacePointerMove}
           onPointerLeave={handleSurfacePointerLeave}
         >
+          <div className="hero-fog fog-far" />
+          <div className="hero-fog fog-near" />
+          <div className="sunlight-rays" />
+          <div className="ambient-dust ambient-dust-a" />
+          <div className="ambient-dust ambient-dust-b" />
+          <div className="dreamcatcher" />
+          <div className="crystal crystal-left" />
+          <div className="crystal crystal-right" />
+          <div className="crystal crystal-lower" />
           <div className="hero-smoke hero-smoke-left" />
           <div className="hero-smoke hero-smoke-right" />
           <div className="constellation constellation-a" />
@@ -148,7 +185,8 @@ export default function App() {
         </div>
       </section>
 
-      <section className="band">
+      <section className="band band-threshold">
+        <div className="ambient-geometry geometry-threshold" aria-hidden="true" />
         <div className="band-grid">
           {thresholdLines.map((item, index) => (
             <div
@@ -170,7 +208,9 @@ export default function App() {
         </div>
       </section>
 
-      <section className="section" id="chambers">
+      <section className="section section-chambers" id="chambers">
+        <div className="ambient-geometry geometry-chambers" aria-hidden="true" />
+        <div className="ambient-roots roots-chambers" aria-hidden="true" />
         <div className="section-heading">
           <p className="eyebrow">Primary Chambers</p>
           <h2>A symbolic system for meeting what is already alive in you.</h2>
@@ -198,7 +238,9 @@ export default function App() {
         </div>
       </section>
 
-      <section className="section split">
+      <section className="section split section-paths">
+        <div className="ambient-geometry geometry-paths" aria-hidden="true" />
+        <div className="ambient-roots roots-paths" aria-hidden="true" />
         <div
           className="stack stack-map interactive-surface float-medium"
           onPointerMove={handleSurfacePointerMove}
@@ -243,10 +285,12 @@ export default function App() {
       </section>
 
       <section
-        className="section cta interactive-surface float-large"
+        className="section cta section-threshold interactive-surface float-large"
         onPointerMove={handleSurfacePointerMove}
         onPointerLeave={handleSurfacePointerLeave}
       >
+        <div className="ambient-geometry geometry-threshold-final" aria-hidden="true" />
+        <div className="ambient-roots roots-threshold" aria-hidden="true" />
         <div>
           <p className="eyebrow">Enter the Threshold</p>
           <h2>For those who would rather navigate themselves than be simplified.</h2>

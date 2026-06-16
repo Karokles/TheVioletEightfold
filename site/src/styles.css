@@ -1,6 +1,8 @@
 :root {
   color-scheme: dark;
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --scroll-progress: 0;
+  --scroll-progress-invert: 1;
   --font-display: "Cormorant Garamond", Georgia, serif;
   --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-reflection: "EB Garamond", Georgia, serif;
@@ -67,6 +69,7 @@ a {
   margin: 0 auto;
   padding: 34px 0 86px;
   perspective: 1400px;
+  position: relative;
 }
 
 .hero,
@@ -102,6 +105,31 @@ a {
   background: linear-gradient(180deg, rgba(12, 11, 27, 0.42), rgba(8, 9, 19, 0.78));
   backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
+}
+
+.living-observatory::before,
+.living-observatory::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.living-observatory::before {
+  background:
+    radial-gradient(circle at 76% 14%, rgba(255, 221, 165, 0.09), transparent 16%),
+    radial-gradient(circle at 80% 18%, rgba(255, 228, 182, 0.06), transparent 24%),
+    linear-gradient(118deg, transparent 58%, rgba(255, 214, 147, calc(0.03 + var(--scroll-progress) * 0.05)) 66%, transparent 76%);
+  opacity: calc(0.34 + var(--scroll-progress) * 0.28);
+}
+
+.living-observatory::after {
+  background:
+    radial-gradient(circle at 22% 78%, rgba(95, 143, 114, 0.08), transparent 18%),
+    radial-gradient(circle at 80% 72%, rgba(129, 206, 224, 0.05), transparent 18%);
+  filter: blur(28px);
+  opacity: 0.46;
 }
 
 .interactive-surface {
@@ -345,6 +373,147 @@ h3 {
     url("/hero-background.png") center center / cover no-repeat;
 }
 
+.sunlight-rays,
+.ambient-dust,
+.hero-fog,
+.dreamcatcher,
+.crystal,
+.ambient-geometry,
+.ambient-roots {
+  position: absolute;
+  pointer-events: none;
+}
+
+.sunlight-rays {
+  inset: -8% -12% -10% 35%;
+  background:
+    linear-gradient(118deg, transparent 0 28%, rgba(255, 216, 150, 0.11) 34%, transparent 48%),
+    linear-gradient(112deg, transparent 0 42%, rgba(255, 235, 194, 0.08) 47%, transparent 60%),
+    linear-gradient(105deg, transparent 0 55%, rgba(255, 214, 147, 0.06) 60%, transparent 71%);
+  opacity: calc(0.34 + var(--scroll-progress) * 0.22);
+  transform-origin: top right;
+  animation: light-sway 28s ease-in-out infinite alternate;
+  mix-blend-mode: screen;
+}
+
+.ambient-dust {
+  width: 42%;
+  height: 42%;
+  opacity: 0.18;
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(255, 240, 213, 0.75) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 48% 38%, rgba(255, 240, 213, 0.55) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 74% 28%, rgba(255, 240, 213, 0.7) 0 1.2px, transparent 2px),
+    radial-gradient(circle at 68% 70%, rgba(255, 240, 213, 0.45) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 22% 72%, rgba(255, 240, 213, 0.6) 0 1.2px, transparent 2px);
+  filter: blur(0.2px);
+  animation: dust-drift 34s linear infinite;
+}
+
+.ambient-dust-a {
+  top: 10%;
+  right: 10%;
+}
+
+.ambient-dust-b {
+  right: 0;
+  bottom: 12%;
+  animation-duration: 42s;
+  animation-direction: reverse;
+}
+
+.hero-fog {
+  inset: auto -6% -8% -6%;
+  height: 34%;
+  border-radius: 50%;
+  filter: blur(30px);
+  opacity: 0.16;
+  mix-blend-mode: screen;
+  animation: fog-drift 36s ease-in-out infinite alternate;
+}
+
+.fog-far {
+  background: radial-gradient(circle at 50% 50%, rgba(146, 127, 205, 0.22), transparent 62%);
+}
+
+.fog-near {
+  bottom: 6%;
+  background: radial-gradient(circle at 58% 50%, rgba(255, 220, 182, 0.18), transparent 60%);
+  animation-duration: 44s;
+}
+
+.dreamcatcher {
+  top: 4%;
+  right: 6%;
+  width: 112px;
+  height: 180px;
+  opacity: 0.22;
+  transform-origin: top center;
+  animation: pendulum 24s ease-in-out infinite;
+}
+
+.dreamcatcher::before,
+.dreamcatcher::after {
+  content: "";
+  position: absolute;
+}
+
+.dreamcatcher::before {
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 46px;
+  background: linear-gradient(180deg, rgba(220, 185, 128, 0.54), transparent);
+}
+
+.dreamcatcher::after {
+  left: 18px;
+  top: 44px;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 1px solid rgba(220, 185, 128, 0.34);
+  box-shadow:
+    0 0 0 10px rgba(220, 185, 128, 0.05),
+    inset 0 0 0 1px rgba(214, 198, 255, 0.08);
+  background:
+    radial-gradient(circle at center, transparent 40%, rgba(214, 198, 255, 0.12) 41%, transparent 42%),
+    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.16) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(214, 198, 255, 0.16) 50%, transparent 51%);
+}
+
+.crystal {
+  width: 58px;
+  height: 78px;
+  opacity: 0.24;
+  background: linear-gradient(180deg, rgba(255, 234, 202, 0.64), rgba(150, 118, 236, 0.28));
+  clip-path: polygon(50% 0%, 82% 28%, 70% 100%, 30% 100%, 18% 28%);
+  filter:
+    blur(0.2px)
+    drop-shadow(0 0 8px rgba(255, 225, 173, 0.24))
+    drop-shadow(0 0 18px rgba(143, 99, 232, 0.18));
+  animation: crystal-pulse 22s ease-in-out infinite;
+}
+
+.crystal-left {
+  left: 7%;
+  bottom: 12%;
+}
+
+.crystal-right {
+  right: 10%;
+  bottom: 18%;
+  animation-delay: -7s;
+}
+
+.crystal-lower {
+  right: 22%;
+  bottom: 8%;
+  width: 42px;
+  height: 58px;
+  animation-delay: -13s;
+}
+
 .hero-panel::after {
   content: "";
   position: absolute;
@@ -389,7 +558,7 @@ h3 {
   inset: 8% 8% auto auto;
   width: 260px;
   height: 180px;
-  opacity: 0.3;
+  opacity: calc(0.18 + var(--scroll-progress) * 0.24);
 }
 
 .constellation::before,
@@ -421,13 +590,15 @@ h3 {
 .constellation-a {
   right: 8%;
   top: 10%;
+  animation: constellation-awaken 30s ease-in-out infinite alternate;
 }
 
 .constellation-b {
   left: 14%;
   bottom: 18%;
   transform: scale(0.8) rotate(12deg);
-  opacity: 0.18;
+  opacity: calc(0.12 + var(--scroll-progress) * 0.18);
+  animation: constellation-awaken 34s ease-in-out infinite alternate-reverse;
 }
 
 .orbital {
@@ -544,6 +715,101 @@ h3 {
 .band {
   border-radius: 28px;
   overflow: hidden;
+}
+
+.band,
+.section {
+  position: relative;
+}
+
+.band > *,
+.section > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ambient-geometry {
+  inset: 0;
+  z-index: 0;
+  opacity: 0.045;
+  mix-blend-mode: screen;
+  transform: rotate(calc(var(--scroll-progress) * 8deg));
+}
+
+.geometry-threshold {
+  background:
+    radial-gradient(circle at 16% 62%, transparent 46%, rgba(220, 185, 128, 0.34) 47%, transparent 48%),
+    radial-gradient(circle at 16% 62%, transparent 60%, rgba(214, 198, 255, 0.22) 61%, transparent 62%),
+    linear-gradient(90deg, transparent 15%, rgba(214, 198, 255, 0.22) 15.5%, transparent 16%);
+}
+
+.geometry-chambers {
+  background:
+    radial-gradient(circle at 78% 28%, transparent 36%, rgba(220, 185, 128, 0.32) 37%, transparent 38%),
+    radial-gradient(circle at 78% 28%, transparent 54%, rgba(214, 198, 255, 0.2) 55%, transparent 56%),
+    linear-gradient(0deg, transparent 27%, rgba(214, 198, 255, 0.18) 27.5%, transparent 28%);
+}
+
+.geometry-paths {
+  background:
+    radial-gradient(circle at 14% 70%, transparent 30%, rgba(220, 185, 128, 0.3) 31%, transparent 32%),
+    radial-gradient(circle at 14% 70%, transparent 48%, rgba(143, 213, 229, 0.2) 49%, transparent 50%),
+    linear-gradient(120deg, transparent 24%, rgba(214, 198, 255, 0.16) 24.5%, transparent 25.5%);
+}
+
+.geometry-threshold-final {
+  background:
+    radial-gradient(circle at 86% 52%, transparent 34%, rgba(220, 185, 128, 0.28) 35%, transparent 36%),
+    radial-gradient(circle at 86% 52%, transparent 52%, rgba(214, 198, 255, 0.18) 53%, transparent 54%);
+}
+
+.ambient-roots {
+  inset: auto 0 0 0;
+  z-index: 0;
+  height: 40%;
+  opacity: 0.16;
+  transform-origin: bottom center;
+  transform: scaleY(calc(0.72 + var(--scroll-progress) * 0.42));
+  transition: transform 600ms ease;
+}
+
+.ambient-roots::before,
+.ambient-roots::after {
+  content: "";
+  position: absolute;
+  bottom: -2%;
+  width: 44%;
+  height: 100%;
+  filter: blur(0.1px);
+}
+
+.ambient-roots::before {
+  left: -2%;
+  background:
+    linear-gradient(72deg, transparent 0 62%, rgba(93, 129, 102, 0.34) 63%, transparent 64%),
+    linear-gradient(58deg, transparent 0 48%, rgba(93, 129, 102, 0.24) 49%, transparent 50%),
+    linear-gradient(38deg, transparent 0 58%, rgba(220, 185, 128, 0.16) 59%, transparent 60%);
+}
+
+.ambient-roots::after {
+  right: -2%;
+  background:
+    linear-gradient(108deg, transparent 0 62%, rgba(93, 129, 102, 0.34) 63%, transparent 64%),
+    linear-gradient(122deg, transparent 0 48%, rgba(93, 129, 102, 0.24) 49%, transparent 50%),
+    linear-gradient(142deg, transparent 0 58%, rgba(220, 185, 128, 0.16) 59%, transparent 60%);
+}
+
+.roots-chambers {
+  height: 34%;
+}
+
+.roots-paths {
+  height: 42%;
+}
+
+.roots-threshold {
+  height: 30%;
+  opacity: 0.12;
 }
 
 .band-grid {
@@ -971,6 +1237,72 @@ h3 {
   }
 }
 
+@keyframes light-sway {
+  from {
+    transform: translate3d(0, 0, 0) rotate(-1deg);
+  }
+  to {
+    transform: translate3d(-10px, 8px, 0) rotate(1.4deg);
+  }
+}
+
+@keyframes dust-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(16px, -22px, 0);
+  }
+}
+
+@keyframes fog-drift {
+  from {
+    transform: translate3d(-10px, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(14px, -8px, 0) scale(1.06);
+  }
+}
+
+@keyframes pendulum {
+  0%,
+  100% {
+    transform: rotate(-1.8deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes crystal-pulse {
+  0%,
+  100% {
+    opacity: 0.18;
+    filter:
+      blur(0.2px)
+      drop-shadow(0 0 8px rgba(255, 225, 173, 0.2))
+      drop-shadow(0 0 18px rgba(143, 99, 232, 0.14));
+  }
+  50% {
+    opacity: 0.34;
+    filter:
+      blur(0.1px)
+      drop-shadow(0 0 12px rgba(255, 225, 173, 0.32))
+      drop-shadow(0 0 24px rgba(143, 99, 232, 0.24));
+  }
+}
+
+@keyframes constellation-awaken {
+  from {
+    filter: blur(0px);
+    transform: scale(1) rotate(0deg);
+  }
+  to {
+    filter: blur(0.2px);
+    transform: scale(1.02) rotate(4deg);
+  }
+}
+
 @media (max-width: 1024px) {
   .hero,
   .card-grid,
@@ -993,6 +1325,16 @@ h3 {
   .hero-panel {
     min-height: 460px;
   }
+
+  .dreamcatcher {
+    width: 88px;
+    height: 146px;
+    right: 4%;
+  }
+
+  .sunlight-rays {
+    inset: -6% -18% -12% 28%;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1008,6 +1350,21 @@ h3 {
   .shell {
     width: min(100% - 28px, 1220px);
     padding-top: 18px;
+  }
+
+  .dreamcatcher,
+  .crystal-lower,
+  .ambient-dust-b {
+    display: none;
+  }
+
+  .sunlight-rays {
+    inset: -10% -26% -14% 16%;
+    opacity: 0.24;
+  }
+
+  .ambient-roots {
+    height: 24%;
   }
 
   .hero-copy,
@@ -1034,5 +1391,31 @@ h3 {
     right: 18px;
     bottom: 18px;
     width: calc(100% - 36px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-large,
+  .float-medium,
+  .float-subtle,
+  .hero-smoke,
+  .orbital,
+  .constellation-a,
+  .constellation-b,
+  .sunlight-rays,
+  .ambient-dust,
+  .hero-fog,
+  .dreamcatcher,
+  .crystal,
+  .council-mark-7,
+  .council-mark-8 {
+    animation: none !important;
+  }
+
+  .ambient-roots,
+  .ambient-geometry,
+  .interactive-surface,
+  .interactive-surface:hover {
+    transform: none !important;
   }
 }
