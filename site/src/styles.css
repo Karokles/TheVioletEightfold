@@ -4,11 +4,11 @@
   --bg: #08131a;
   --bg-soft: #10212b;
   --panel: rgba(8, 21, 31, 0.78);
-  --line: rgba(182, 229, 242, 0.18);
+  --line: rgba(193, 142, 255, 0.18);
   --text: #eef4ef;
   --muted: #b4c7c6;
-  --accent: #8ed6c9;
-  --accent-strong: #c6f36f;
+  --accent: #b084f5;
+  --accent-strong: #e3b7ff;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
 }
 
@@ -25,8 +25,8 @@ body {
   min-width: 320px;
   background:
     linear-gradient(180deg, rgba(7, 13, 19, 0.3), rgba(7, 13, 19, 0.82)),
-    radial-gradient(circle at top left, rgba(198, 243, 111, 0.1), transparent 28%),
-    radial-gradient(circle at 80% 20%, rgba(142, 214, 201, 0.12), transparent 24%),
+    radial-gradient(circle at top left, rgba(227, 183, 255, 0.12), transparent 28%),
+    radial-gradient(circle at 80% 20%, rgba(176, 132, 245, 0.14), transparent 24%),
     url("/hero-background.png") center center / cover fixed no-repeat,
     linear-gradient(180deg, #0a1116 0%, #09161f 45%, #08131a 100%);
   color: var(--text);
@@ -156,8 +156,8 @@ h3 {
 }
 
 .button-primary {
-  background: linear-gradient(135deg, var(--accent-strong), #9ce0d6);
-  color: #102228;
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  color: #1d1026;
 }
 
 .button-secondary {
@@ -180,7 +180,7 @@ h3 {
 }
 
 .orbital {
-  border: 1px solid rgba(198, 243, 111, 0.35);
+  border: 1px solid rgba(227, 183, 255, 0.35);
   border-radius: 50%;
   inset: 50%;
   transform-origin: center;
@@ -236,7 +236,7 @@ h3 {
   margin-bottom: 10px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(198, 243, 111, 0.12);
+  background: rgba(227, 183, 255, 0.12);
   color: var(--accent-strong);
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -279,7 +279,7 @@ h3 {
   border-radius: 50%;
   margin-top: 4px;
   background: linear-gradient(180deg, var(--accent-strong), var(--accent));
-  box-shadow: 0 0 20px rgba(198, 243, 111, 0.45);
+  box-shadow: 0 0 20px rgba(176, 132, 245, 0.45);
   flex: 0 0 auto;
 }
 
