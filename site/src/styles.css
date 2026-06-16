@@ -588,7 +588,7 @@ h3 {
 .stack > *,
 .pathway > * {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .metric {
@@ -599,14 +599,18 @@ h3 {
 
 .council-mark {
   position: absolute;
-  width: 72px;
-  height: 72px;
+  width: 82px;
+  height: 82px;
   border-radius: 50%;
-  border: 1px solid rgba(220, 185, 128, 0.12);
-  opacity: 0.08;
+  border: 1px solid rgba(220, 185, 128, 0.2);
+  background: radial-gradient(circle at center, rgba(143, 99, 232, 0.05), transparent 68%);
+  opacity: 0.16;
   pointer-events: none;
-  z-index: 0;
-  filter: drop-shadow(0 0 12px rgba(143, 99, 232, 0.14));
+  z-index: 1;
+  mix-blend-mode: screen;
+  filter:
+    drop-shadow(0 0 12px rgba(143, 99, 232, 0.16))
+    drop-shadow(0 0 22px rgba(220, 185, 128, 0.08));
   transition:
     opacity 240ms ease,
     transform 240ms ease,
@@ -615,12 +619,12 @@ h3 {
 }
 
 .interactive-surface:hover .council-mark {
-  opacity: 0.26;
-  transform: scale(1.04);
-  border-color: rgba(214, 198, 255, 0.2);
+  opacity: 0.4;
+  transform: scale(1.07);
+  border-color: rgba(214, 198, 255, 0.3);
   filter:
-    drop-shadow(0 0 18px rgba(143, 99, 232, 0.24))
-    drop-shadow(0 0 28px rgba(143, 213, 229, 0.1));
+    drop-shadow(0 0 18px rgba(143, 99, 232, 0.28))
+    drop-shadow(0 0 32px rgba(143, 213, 229, 0.14));
 }
 
 .council-mark::before,
