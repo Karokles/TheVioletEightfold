@@ -598,19 +598,21 @@ h3 {
 }
 
 .council-mark {
+  --sigil-rgb: 220, 185, 128;
+  --sigil-rgb-soft: 214, 198, 255;
   position: absolute;
   width: 82px;
   height: 82px;
   border-radius: 50%;
-  border: 1px solid rgba(220, 185, 128, 0.2);
-  background: radial-gradient(circle at center, rgba(143, 99, 232, 0.05), transparent 68%);
+  border: 1px solid rgba(var(--sigil-rgb), 0.22);
+  background: radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.08), transparent 68%);
   opacity: 0.16;
   pointer-events: none;
   z-index: 1;
   mix-blend-mode: screen;
   filter:
-    drop-shadow(0 0 12px rgba(143, 99, 232, 0.16))
-    drop-shadow(0 0 22px rgba(220, 185, 128, 0.08));
+    drop-shadow(0 0 12px rgba(var(--sigil-rgb), 0.16))
+    drop-shadow(0 0 22px rgba(var(--sigil-rgb-soft), 0.08));
   transition:
     opacity 240ms ease,
     transform 240ms ease,
@@ -621,10 +623,10 @@ h3 {
 .interactive-surface:hover .council-mark {
   opacity: 0.4;
   transform: scale(1.07);
-  border-color: rgba(214, 198, 255, 0.3);
+  border-color: rgba(var(--sigil-rgb-soft), 0.42);
   filter:
-    drop-shadow(0 0 18px rgba(143, 99, 232, 0.28))
-    drop-shadow(0 0 32px rgba(143, 213, 229, 0.14));
+    drop-shadow(0 0 18px rgba(var(--sigil-rgb), 0.34))
+    drop-shadow(0 0 32px rgba(var(--sigil-rgb-soft), 0.18));
 }
 
 .council-mark::before,
@@ -636,74 +638,80 @@ h3 {
 }
 
 .council-mark-1 {
+  --sigil-rgb: 202, 78, 78;
+  --sigil-rgb-soft: 244, 149, 149;
   top: 18px;
   right: 18px;
 }
 
 .council-mark-1::before {
-  inset: 16px;
-  border-radius: 50%;
-  border: 1px solid rgba(220, 185, 128, 0.2);
-  box-shadow:
-    0 -11px 0 -10px rgba(220, 185, 128, 0.24),
-    12px -2px 0 -11px rgba(220, 185, 128, 0.24),
-    -12px -2px 0 -11px rgba(220, 185, 128, 0.24);
+  inset: 11px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.26);
+  box-shadow: 0 0 0 10px rgba(var(--sigil-rgb), 0.05);
 }
 
 .council-mark-1::after {
-  inset: 28px 34px 14px;
-  border-left: 1px solid rgba(214, 198, 255, 0.2);
-  border-right: 1px solid rgba(214, 198, 255, 0.2);
-  border-bottom: 1px solid rgba(214, 198, 255, 0.2);
-  border-radius: 0 0 999px 999px;
+  inset: 16px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.26) 50%, transparent 51%),
+    radial-gradient(circle at 50% 18%, rgba(var(--sigil-rgb-soft), 0.34) 0 4px, transparent 5px);
 }
 
 .council-mark-2 {
+  --sigil-rgb: 236, 143, 62;
+  --sigil-rgb-soft: 255, 191, 121;
   right: 24px;
   bottom: 14px;
 }
 
 .council-mark-2::before {
-  inset: 14px;
-  border: 1px solid rgba(220, 185, 128, 0.18);
-  clip-path: polygon(48% 0%, 58% 0%, 100% 52%, 100% 62%, 54% 100%, 44% 100%, 0% 48%, 0% 38%);
+  inset: 12px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.24);
+  border-radius: 50%;
 }
 
 .council-mark-2::after {
-  inset: 18px 32px;
+  inset: 18px;
   background:
-    linear-gradient(145deg, transparent 44%, rgba(214, 198, 255, 0.22) 45%, rgba(214, 198, 255, 0.22) 55%, transparent 56%),
-    linear-gradient(35deg, transparent 44%, rgba(214, 198, 255, 0.16) 45%, rgba(214, 198, 255, 0.16) 55%, transparent 56%);
+    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
+    radial-gradient(circle at 50% 50%, transparent 52%, rgba(var(--sigil-rgb), 0.2) 53%, transparent 54%);
 }
 
 .council-mark-3 {
+  --sigil-rgb: 232, 197, 78;
+  --sigil-rgb-soft: 255, 227, 133;
   top: 12px;
   right: 20px;
 }
 
 .council-mark-3::before {
-  inset: 13px;
-  border: 1px solid rgba(199, 208, 229, 0.2);
-  clip-path: polygon(50% 4%, 94% 82%, 6% 82%);
-}
-
-.council-mark-3::after {
-  inset: 24px;
-  border: 1px solid rgba(220, 185, 128, 0.18);
+  inset: 14px;
+  border: 1px solid rgba(var(--sigil-rgb-soft), 0.24);
   border-radius: 50%;
 }
 
+.council-mark-3::after {
+  inset: 16px;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(var(--sigil-rgb-soft), 0.26) 0 4px, transparent 5px),
+    radial-gradient(circle at 24% 70%, rgba(var(--sigil-rgb-soft), 0.2) 0 4px, transparent 5px),
+    radial-gradient(circle at 76% 70%, rgba(var(--sigil-rgb-soft), 0.2) 0 4px, transparent 5px),
+    linear-gradient(180deg, transparent 26%, rgba(var(--sigil-rgb), 0.18) 27%, rgba(var(--sigil-rgb), 0.18) 29%, transparent 30%);
+}
+
 .council-mark-4 {
+  --sigil-rgb: 94, 184, 119;
+  --sigil-rgb-soft: 154, 223, 169;
   right: 18px;
   bottom: 18px;
 }
 
 .council-mark-4::before,
 .council-mark-4::after {
-  width: 28px;
-  height: 28px;
-  top: 22px;
-  border: 1px solid rgba(240, 179, 208, 0.2);
+  width: 32px;
+  height: 32px;
+  top: 20px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.24);
   border-radius: 50%;
 }
 
@@ -715,45 +723,57 @@ h3 {
   right: 12px;
 }
 
+.council-mark-4 {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(var(--sigil-rgb), 0.06) 0 10px, transparent 11px),
+    radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.05), transparent 68%);
+}
+
 .council-mark-5 {
+  --sigil-rgb: 89, 186, 214;
+  --sigil-rgb-soft: 157, 223, 240;
   right: 18px;
   top: 18px;
 }
 
 .council-mark-5::before {
-  inset: 16px;
-  border: 1px solid rgba(220, 185, 128, 0.2);
-  transform: rotate(45deg);
+  inset: 13px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.24);
+  border-radius: 50%;
 }
 
 .council-mark-5::after {
-  inset: 20px;
+  inset: 14px;
   background:
-    linear-gradient(45deg, transparent 47%, rgba(214, 198, 255, 0.18) 48%, rgba(214, 198, 255, 0.18) 52%, transparent 53%),
-    linear-gradient(-45deg, transparent 47%, rgba(214, 198, 255, 0.18) 48%, rgba(214, 198, 255, 0.18) 52%, transparent 53%);
+    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%);
 }
 
 .council-mark-6 {
+  --sigil-rgb: 82, 95, 212;
+  --sigil-rgb-soft: 149, 161, 255;
   right: 22px;
   bottom: 18px;
 }
 
 .council-mark-6::before {
-  inset: 14px;
+  inset: 12px;
   background:
-    radial-gradient(circle at 50% 18%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
-    radial-gradient(circle at 18% 50%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
-    radial-gradient(circle at 82% 50%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px),
-    radial-gradient(circle at 50% 82%, rgba(240, 179, 208, 0.16) 0 10px, transparent 11px);
+    radial-gradient(circle at 50% 18%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
+    radial-gradient(circle at 18% 50%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
+    radial-gradient(circle at 82% 50%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px),
+    radial-gradient(circle at 50% 82%, rgba(var(--sigil-rgb-soft), 0.18) 0 10px, transparent 11px);
 }
 
 .council-mark-6::after {
-  inset: 22px;
-  border: 1px solid rgba(220, 185, 128, 0.18);
+  inset: 16px;
+  border: 1px solid rgba(var(--sigil-rgb), 0.24);
   border-radius: 50%;
 }
 
 .council-mark-7 {
+  --sigil-rgb: 154, 102, 232;
+  --sigil-rgb-soft: 214, 177, 255;
   right: 18px;
   top: 16px;
 }
@@ -761,37 +781,39 @@ h3 {
 .council-mark-7::before {
   inset: 14px;
   background:
-    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
-    linear-gradient(0deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
-    linear-gradient(45deg, transparent 49%, rgba(220, 185, 128, 0.16) 50%, transparent 51%),
-    linear-gradient(-45deg, transparent 49%, rgba(220, 185, 128, 0.16) 50%, transparent 51%);
+    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.24) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.24) 50%, transparent 51%),
+    radial-gradient(circle at center, transparent 52%, rgba(var(--sigil-rgb), 0.2) 53%, transparent 54%);
 }
 
 .council-mark-7::after {
   inset: 10px;
-  border: 1px solid rgba(220, 185, 128, 0.16);
+  border: 1px solid rgba(var(--sigil-rgb), 0.22);
   border-radius: 50%;
 }
 
 .council-mark-8 {
+  --sigil-rgb: 173, 122, 239;
+  --sigil-rgb-soft: 227, 200, 255;
   right: 18px;
   bottom: 16px;
 }
 
 .council-mark-8::before {
   inset: 10px;
-  border: 1px solid rgba(220, 185, 128, 0.16);
+  border: 1px solid rgba(var(--sigil-rgb), 0.2);
   border-radius: 50%;
   box-shadow:
-    0 0 0 10px rgba(220, 185, 128, 0.04),
-    0 0 0 20px rgba(143, 213, 229, 0.03);
+    0 0 0 10px rgba(var(--sigil-rgb), 0.05),
+    0 0 0 20px rgba(var(--sigil-rgb-soft), 0.04);
 }
 
 .council-mark-8::after {
-  inset: 18px 32px;
+  inset: 16px;
   background:
-    linear-gradient(90deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%),
-    linear-gradient(0deg, transparent 49%, rgba(214, 198, 255, 0.2) 50%, transparent 51%);
+    linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
+    linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
+    radial-gradient(circle at center, rgba(var(--sigil-rgb-soft), 0.24) 0 4px, transparent 5px);
 }
 
 .metric-mark {
