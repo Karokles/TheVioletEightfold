@@ -1,6 +1,49 @@
 
 export type Language = 'EN' | 'DE';
 
+export type CommunicationMode = 'HOLD' | 'MIRROR' | 'EXPLORE' | 'GROUND' | 'ACT';
+
+export type ConsentState =
+  | 'IMPLICIT_OK'
+  | 'ASK_BEFORE_DEEPENING'
+  | 'USER_REQUESTED_DIRECTION'
+  | 'LOW_INTERVENTION';
+
+export type EmotionalValence = 'POSITIVE' | 'NEUTRAL' | 'MIXED' | 'NEGATIVE';
+export type EmotionalActivation = 'LOW' | 'MEDIUM' | 'HIGH';
+export type EmotionalClarity = 'CLEAR' | 'UNCERTAIN' | 'OVERLOADED';
+export type EmotionalSupportNeed = 'PRESENCE' | 'MIRRORING' | 'GROUNDING' | 'CLARITY' | 'ACTION';
+
+export interface EmotionalStateScan {
+  schemaVersion: number;
+  valence: EmotionalValence;
+  activation: EmotionalActivation;
+  clarity: EmotionalClarity;
+  primarySignals: string[];
+  supportNeeds: EmotionalSupportNeed[];
+  overloadRisk: boolean;
+  confidence: number; // 0-1, heuristic confidence only
+  updatedAt: string;
+}
+
+export interface CommunicationPreferences {
+  schemaVersion: number;
+  mode: CommunicationMode;
+  consentState: ConsentState;
+  updatedAt: string;
+}
+
+export interface MeaningContext {
+  communicationMode: CommunicationMode;
+  consentState: ConsentState;
+  activeCycleId?: string;
+  activeCycleDay?: number;
+  activeCycleTheme?: string;
+  overloadSignal?: boolean;
+  emotionalState?: EmotionalStateScan;
+  notes?: string[];
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'model' | 'system';
@@ -56,9 +99,44 @@ export interface CalendarEvent {
   id: string;
   date: string; // ISO string YYYY-MM-DD
   title: string;
-  type: 'DEADLINE' | 'MEETING' | 'BIRTHDAY' | 'QUEST' | 'SOCIAL' | 'OTHER' | 'FINANCE';
+  type: 'DEADLINE' | 'MEETING' | 'BIRTHDAY' | 'QUEST' | 'SOCIAL' | 'OTHER' | 'FINANCE' | 'CYCLE';
   description?: string;
   completed?: boolean;
+}
+
+export type CyclePacingMode = 'STABILIZATION' | 'EXPLORATION' | 'INTEGRATION';
+
+export interface CycleOnboardingAnswer {
+  questionId: string;
+  label: string;
+  value: string;
+}
+
+export interface CycleDayRecord {
+  day: number;
+  date: string; // ISO string YYYY-MM-DD, the calendar date this participation day was sealed
+  sense?: string;
+  trace?: string;
+  externalize?: string;
+  reframe?: string;
+  embody?: string;
+  antiEgoCheck?: string;
+  pacing: CyclePacingMode;
+  completedAt?: string;
+}
+
+export interface IntegrationCycle {
+  schemaVersion?: number;
+  id: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
+  title: string;
+  theme: string;
+  startDate: string; // ISO string YYYY-MM-DD
+  createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+  onboardingAnswers: CycleOnboardingAnswer[];
+  dayRecords: CycleDayRecord[];
 }
 
 export interface Transaction {
@@ -173,6 +251,7 @@ export interface MeaningAnalysisResult {
   questLogEntries: QuestLogEntry[];
   soulTimelineEvents: SoulTimelineEvent[];
   breakthroughs: Breakthrough[];
+  emotionalState?: EmotionalStateScan;
   attributeUpdates?: AttributeUpdate[];
   skillUpdates?: SkillUpdate[];
   nextQuestState?: NextQuestState;

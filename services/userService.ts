@@ -1,33 +1,54 @@
-import { UserStats } from '../types';
+import { Language, UserStats } from '../types';
 import { getLoreTemplate, getStatsTemplate } from '../config/loader';
 
 const AUTH_TOKEN_KEY = 'vc_auth_token';
 const USER_ID_KEY = 'vc_user_id';
+const USER_DISPLAY_NAME_KEY = 'vc_user_display_name';
+const USER_LANGUAGE_KEY = 'language_preference';
+const LOCAL_DISPLAY_NAMES: Record<string, string> = {
+  lion: 'karokles',
+};
 
 export interface User {
   id: string;
   token: string;
+  displayName?: string;
 }
 
 export const getCurrentUser = (): User | null => {
   const userId = localStorage.getItem(USER_ID_KEY);
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const storedDisplayName = localStorage.getItem(USER_DISPLAY_NAME_KEY) || undefined;
   
   if (!userId || !token) {
     return null;
   }
+
+  const displayName = storedDisplayName && storedDisplayName !== userId
+    ? storedDisplayName
+    : LOCAL_DISPLAY_NAMES[userId] || storedDisplayName;
   
-  return { id: userId, token };
+  return { id: userId, token, displayName };
 };
 
-export const setCurrentUser = (userId: string, token: string) => {
+export const setCurrentUser = (userId: string, token: string, displayName?: string) => {
   localStorage.setItem(USER_ID_KEY, userId);
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+  setCurrentUserDisplayName(displayName);
+};
+
+export const setCurrentUserDisplayName = (displayName?: string) => {
+  if (displayName?.trim()) {
+    localStorage.setItem(USER_DISPLAY_NAME_KEY, displayName.trim());
+  } else {
+    localStorage.removeItem(USER_DISPLAY_NAME_KEY);
+  }
 };
 
 export const clearCurrentUser = () => {
   localStorage.removeItem(USER_ID_KEY);
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(USER_DISPLAY_NAME_KEY);
 };
 
 // Auth error handler: clears tokens and triggers logout event
@@ -88,6 +109,15 @@ export const loadUserStats = (userId: string): UserStats => {
 export const saveUserStats = (userId: string, stats: UserStats) => {
   const key = getUserScopedKey('stats', userId);
   localStorage.setItem(key, JSON.stringify(stats));
+};
+
+export const loadUserLanguage = (userId: string): Language => {
+  const saved = localStorage.getItem(getUserScopedKey(USER_LANGUAGE_KEY, userId));
+  return saved === 'DE' ? 'DE' : 'EN';
+};
+
+export const saveUserLanguage = (userId: string, language: Language) => {
+  localStorage.setItem(getUserScopedKey(USER_LANGUAGE_KEY, userId), language);
 };
 
 

@@ -2,8 +2,9 @@ import express, { Request, Response } from 'express';
 type NextFunction = (err?: any) => void;
 import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import Stripe from 'stripe';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -12,8 +13,20 @@ import jwt from 'jsonwebtoken';
 import { 
   ensureUserExists, 
   createCouncilSession, 
+  createCouncilMessages,
+  CouncilMessageRecord,
   createLoreEntry, 
+  createOrUpdateConfirmedAuthUser,
+  getSupabaseAuthUser,
+  getUserProfile,
   isSupabaseConfigured,
+  listAdminAccounts,
+  getUserAccess,
+  getUsageCounter,
+  incrementUsageCounter,
+  upsertUserAccess,
+  UserAccessRecord,
+  upsertUserProfile,
   createQuestLogEntry,
   getQuestLogEntries,
   createSoulTimelineEvent,
@@ -21,6 +34,17 @@ import {
   createBreakthrough,
   getBreakthroughs
 } from './supabase.js';
+import { getCredentialWarnings, runtimeConfig, serviceReadiness } from './runtimeConfig.js';
+import { createMockCouncilReply, createMockMeaningResult } from './mockAi.js';
+import { buildOrganicPromptBlock, createResponsePlan, ResponsePlan } from './conversationOrchestrator.js';
+import { loadLocalMeaningState, mergeLocalMeaningState } from './localMeaningStore.js';
+import {
+  archiveLocalCycle,
+  loadLocalCycleState,
+  normalizeCycle as normalizeStoredCycle,
+  saveLocalCurrentCycle,
+  type LocalIntegrationCycle,
+} from './localCycleStore.js';
 
 const require = createRequire(import.meta.url);
 
@@ -35,9 +59,25 @@ console.log('[STARTUP] Environment:', process.env.NODE_ENV || 'development');
 dotenv.config();
 console.log('[STARTUP] Environment variables loaded');
 
-// JWT Configuration - fail fast if secret missing in production
+// Runtime mode and credential checks. Missing paid-service credentials must fail safely.
+console.log('[STARTUP] App environment:', runtimeConfig.appEnvironment);
+console.log('[STARTUP] Feature flags:', {
+  aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+  databaseEnabled: runtimeConfig.databaseEnabled,
+    paymentEnabled: runtimeConfig.paymentEnabled,
+    supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled,
+    authStrictMode: runtimeConfig.authStrictMode,
+  usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+  debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+  localAuthEnabled: runtimeConfig.localAuthEnabled
+});
+for (const warning of getCredentialWarnings()) {
+  console.warn(`[CONFIG] ${warning}`);
+}
+
+// JWT Configuration - strict mode protects staging/production without crashing health checks.
 const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+if (!JWT_SECRET && runtimeConfig.authStrictMode) {
   console.error('='.repeat(80));
   console.error('ERROR: JWT_SECRET environment variable is required in production');
   console.error('='.repeat(80));
@@ -55,11 +95,10 @@ if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
   console.error('');
   console.error('Without JWT_SECRET, the server cannot authenticate users securely.');
   console.error('='.repeat(80));
-  process.exit(1);
+  console.error('[AUTH] Auth-protected endpoints will return a safe configuration error until JWT_SECRET is set.');
 }
-if (!JWT_SECRET) {
-  console.warn('WARNING: JWT_SECRET not set. Using default for development only.');
-  console.warn('Set JWT_SECRET in production to ensure secure token signing.');
+if (!JWT_SECRET && !runtimeConfig.authStrictMode) {
+  console.warn('[AUTH] JWT_SECRET not set. Using local development secret because AUTH_STRICT_MODE=false.');
 }
 
 const JWT_SECRET_FINAL = JWT_SECRET || 'dev-secret-change-in-production';
@@ -73,12 +112,26 @@ console.log('[STARTUP] Server will listen on port:', PORT);
 // Middleware
 // CORS configuration - restrict to allowed origins in production
 const parseAllowedOrigins = (): string[] => {
-  const defaultOrigins = [
+  const localOrigins = [
     'http://localhost:3000',
     'http://localhost:5173',
-    'https://the-violet-eightfold42.vercel.app',
-    'https://the-violet-eightfold42-git-main-the-violet-eightfolds-projects.vercel.app',
   ];
+  const stagingOrigins = [
+    'https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app',
+    'https://app.lazarus-engine.eu',
+  ];
+  const productionOrigins = [
+    'https://the-violet-eightfold-git-main-the-violet-eightfolds-projects.vercel.app',
+    'https://the-violet-eightfold42-git-main-the-violet-eightfolds-projects.vercel.app',
+    'https://the-violet-eightfold.vercel.app',
+    'https://the-violet-eightfold42.vercel.app',
+    'https://app.lazarus-engine.eu',
+  ];
+  const defaultOrigins = runtimeConfig.isLocal
+    ? localOrigins
+    : runtimeConfig.isStaging
+      ? stagingOrigins
+      : productionOrigins;
   
   if (process.env.ALLOWED_ORIGINS) {
     const parsed = process.env.ALLOWED_ORIGINS.split(',')
@@ -93,23 +146,54 @@ const parseAllowedOrigins = (): string[] => {
 };
 
 const allowedOrigins = parseAllowedOrigins();
+const defaultFrontendUrl = runtimeConfig.frontendAppUrl || allowedOrigins[0] || 'http://localhost:5173';
+const stripe = serviceReadiness.payment && runtimeConfig.stripeSecretKey
+  ? new Stripe(runtimeConfig.stripeSecretKey)
+  : null;
+const stripePaymentLinkUrl = runtimeConfig.stripePaymentLinkUrl || '';
+const stripeBetaPriceId = runtimeConfig.stripeBetaPriceId || '';
+const stripeWebhookSecret = runtimeConfig.stripeWebhookSecret || '';
+
+const getFrontendUrlForRequest = (req: Request): string => {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  if (origin && allowedOrigins.includes(origin)) {
+    return origin;
+  }
+  return defaultFrontendUrl;
+};
+
+const buildPaymentLinkUrl = (user: User): string => {
+  if (!stripePaymentLinkUrl) return '';
+
+  try {
+    const url = new URL(stripePaymentLinkUrl);
+    url.searchParams.set('client_reference_id', user.id);
+    if (user.email || isEmailLike(user.username)) {
+      url.searchParams.set('prefilled_email', user.email || user.username);
+    }
+    return url.toString();
+  } catch {
+    return stripePaymentLinkUrl;
+  }
+};
 
 // Log allowed origins on startup (no secrets)
 console.log('[STARTUP] CORS allowed origins:', allowedOrigins.join(', '));
+console.log('[PAYMENT] Stripe status:', {
+  enabled: runtimeConfig.paymentEnabled,
+  checkoutReady: Boolean(stripe && stripeBetaPriceId),
+  paymentLinkReady: Boolean(stripePaymentLinkUrl),
+  webhookReady: Boolean(stripe && stripeWebhookSecret),
+});
 
 // CORS options - credentials: false (no cookies, only JWT in Authorization header)
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.) in development only
-    if (!origin && process.env.NODE_ENV !== 'production') {
+    // Requests without Origin are not browser CORS requests (Render health checks, curl, server clients).
+    if (!origin) {
       return callback(null, true);
     }
-    
-    // In production, require origin
-    if (!origin) {
-      return callback(new Error('CORS: Origin header is required in production'));
-    }
-    
+
     // Check if origin is in allowed list
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -138,24 +222,93 @@ app.use(cors(corsOptions));
 // Explicit OPTIONS handler for all routes (preflight requests)
 app.options('*', cors(corsOptions));
 
-app.use(express.json());
+app.post('/api/payment/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+  if (!stripe || !stripeWebhookSecret) {
+    return res.status(503).json({ error: 'stripe_webhook_not_configured' });
+  }
 
-// Initialize OpenAI
-if (!process.env.OPENAI_API_KEY) {
-  console.error('ERROR: OPENAI_API_KEY environment variable is not set');
-  console.error('The server will start but API calls will fail.');
-}
+  const signature = req.headers['stripe-signature'];
+  if (!signature || Array.isArray(signature)) {
+    return res.status(400).json({ error: 'missing_stripe_signature' });
+  }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '', // Will fail gracefully if not set
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, signature, stripeWebhookSecret);
+  } catch (error: any) {
+    console.warn('[PAYMENT] Stripe webhook signature verification failed:', error?.message || error);
+    return res.status(400).json({ error: 'invalid_stripe_signature' });
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const userId = session.metadata?.userId || session.client_reference_id || '';
+
+      if (!userId) {
+        console.warn('[PAYMENT] Stripe session paid without user metadata', { sessionId: session.id });
+        return res.json({ received: true, ignored: 'missing_user_id' });
+      }
+
+      if (session.payment_status && session.payment_status !== 'paid') {
+        return res.json({ received: true, ignored: 'payment_not_paid' });
+      }
+
+      await activatePaidBetaAccess(userId, {
+        notes: `Stripe beta checkout ${session.id}`,
+        idempotencyKey: session.id,
+      });
+    }
+
+    res.json({ received: true });
+  } catch (error: any) {
+    console.error('[PAYMENT] Stripe webhook processing failed:', error?.message || error);
+    res.status(500).json({ error: 'stripe_webhook_processing_failed' });
+  }
 });
 
+app.use(express.json());
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
+// Initialize OpenAI only when both the feature flag and credentials are present.
+const openai = serviceReadiness.ai
+  ? new OpenAI({ apiKey: runtimeConfig.openAiApiKey })
+  : null;
+if (openai) {
+  console.log('[AI] OpenAI provider enabled');
+} else {
+  console.warn('[AI] OpenAI provider disabled. AI endpoints will return safe mock responses.');
+}
+
 // Simple in-memory user store (for MVP - replace with database later)
+type AdminEntitlement = 'free' | 'paid_beta' | 'founder' | 'blocked';
+
+type AdminAccountSettings = {
+  entitlement?: AdminEntitlement;
+  offlineOnly?: boolean;
+  weeklyFreeInteractions?: number | null;
+  weeklyCouncilSessions?: number | null;
+  weeklyMeaningAnalyses?: number | null;
+  activeUntil?: string | null;
+  betaActivations?: number;
+  betaBonusUsed?: boolean;
+  notes?: string | null;
+};
+
 interface User {
   id: string;
   username: string;
   secretHash: string;
   token?: string;
+  email?: string;
+  displayName?: string;
+  adminSettings?: AdminAccountSettings;
 }
 
 const users: User[] = [
@@ -164,6 +317,7 @@ const users: User[] = [
   {
     id: 'lion',
     username: 'lion',
+    displayName: 'karokles',
     secretHash: createHash('sha256').update('TuerOhneWiederkehr2025').digest('hex'),
   },
   {
@@ -216,7 +370,279 @@ const users: User[] = [
     username: 'anna',
     secretHash: createHash('sha256').update('amethyst').digest('hex'),
   },
+  {
+    id: 'beta-test',
+    username: 'betatest',
+    displayName: 'Beta Test',
+    secretHash: createHash('sha256').update('beta-test-242').digest('hex'),
+  },
 ];
+
+const parseIdentifierList = (value: string): string[] => {
+  return value
+    .split(',')
+    .map(item => item.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const wildcardMatch = (pattern: string, value: string): boolean => {
+  if (!pattern || !value) return false;
+  if (pattern === value) return true;
+  if (!pattern.includes('*')) return false;
+  const escaped = pattern
+    .split('*')
+    .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${escaped}$`, 'i').test(value);
+};
+
+const userMatchesIdentifiers = (user: Pick<User, 'id' | 'username' | 'email'> | undefined, identifiers: string): boolean => {
+  if (!user) return false;
+  const candidates = [user.id, user.username, user.email]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .map(candidate => candidate.toLowerCase());
+  return parseIdentifierList(identifiers).some(pattern => candidates.some(candidate => wildcardMatch(pattern, candidate)));
+};
+
+const STAGING_ADMIN_EMAILS = new Set(['lionceaunicolai@yahoo.de']);
+const STAGING_DISPLAY_NAMES: Record<string, string> = {
+  'lionceaunicolai@yahoo.de': 'Karokles',
+};
+
+const normalizeEmail = (value?: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.includes('@') ? trimmed : null;
+};
+
+const getEmailLocalPart = (email?: string | null): string | null => {
+  const normalized = normalizeEmail(email);
+  return normalized ? normalized.split('@')[0] : null;
+};
+
+const isEmailLike = (value?: string | null): boolean => {
+  return Boolean(normalizeEmail(value));
+};
+
+const getStagingDisplayName = (email?: string | null): string | null => {
+  const normalized = normalizeEmail(email);
+  return normalized ? STAGING_DISPLAY_NAMES[normalized] || null : null;
+};
+
+const chooseDisplayName = (
+  preferred?: string | null,
+  fallbackEmail?: string | null,
+  fallbackId?: string | null,
+): string => {
+  const stagingName = getStagingDisplayName(fallbackEmail);
+  if (stagingName) return stagingName;
+
+  const trimmed = typeof preferred === 'string' ? preferred.trim() : '';
+  if (trimmed && !isEmailLike(trimmed)) {
+    return trimmed.slice(0, 80);
+  }
+
+  const localPart = getEmailLocalPart(fallbackEmail);
+  if (localPart) return localPart.slice(0, 80);
+
+  return (fallbackId || 'User').slice(0, 80);
+};
+
+const isProtectedLocalLionUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (!user) return false;
+  return [user.id, user.username, user.email]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .some(candidate => ['lion', 'karokles'].includes(candidate.toLowerCase()));
+};
+
+const isOfflineOnlyUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (isProtectedLocalLionUser(user)) {
+    return true;
+  }
+
+  return Boolean((user as User | undefined)?.adminSettings?.offlineOnly)
+    || userMatchesIdentifiers(user, runtimeConfig.offlineOnlyIdentifiers);
+};
+
+const hasFounderAccess = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  if (isProtectedLocalLionUser(user)) {
+    return true;
+  }
+
+  return (user as User | undefined)?.adminSettings?.entitlement === 'founder'
+    || userMatchesIdentifiers(user, runtimeConfig.founderAccessIdentifiers);
+};
+
+const isAdminUser = (user?: Pick<User, 'id' | 'username' | 'email'>): boolean => {
+  const email = normalizeEmail(user?.email || user?.username);
+  if (runtimeConfig.isStaging && email && STAGING_ADMIN_EMAILS.has(email)) {
+    return true;
+  }
+
+  return userMatchesIdentifiers(user, runtimeConfig.adminIdentifiers);
+};
+
+const getProfileAdminSettings = (preferences: any): AdminAccountSettings => {
+  const admin = preferences && typeof preferences === 'object' ? preferences.admin : null;
+  const entitlement = ['founder', 'blocked', 'free', 'paid_beta'].includes(admin?.entitlement)
+    ? admin.entitlement as AdminEntitlement
+    : undefined;
+  const readLimit = (value: unknown): number | null | undefined => {
+    if (value === null) return null;
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue >= 0 ? Math.floor(numberValue) : undefined;
+  };
+
+  return {
+    entitlement,
+    offlineOnly: admin?.offlineOnly === true,
+    weeklyFreeInteractions: readLimit(admin?.weeklyFreeInteractions),
+    weeklyCouncilSessions: readLimit(admin?.weeklyCouncilSessions),
+    weeklyMeaningAnalyses: readLimit(admin?.weeklyMeaningAnalyses),
+    activeUntil: typeof admin?.activeUntil === 'string' ? admin.activeUntil : null,
+    betaActivations: Number.isFinite(Number(admin?.betaActivations)) ? Math.max(0, Math.floor(Number(admin.betaActivations))) : 0,
+    betaBonusUsed: admin?.betaBonusUsed === true,
+    notes: typeof admin?.notes === 'string' ? admin.notes.slice(0, 1000) : null,
+  };
+};
+
+const sanitizeAdminSettings = (value: any): AdminAccountSettings => {
+  const entitlement = ['founder', 'blocked', 'free', 'paid_beta'].includes(value?.entitlement)
+    ? value.entitlement as AdminEntitlement
+    : 'free';
+  const sanitizeLimit = (input: unknown): number | null => {
+    if (input === null || input === '' || input === undefined) return null;
+    const numberValue = Number(input);
+    if (!Number.isFinite(numberValue)) return null;
+    return Math.max(0, Math.min(10000, Math.floor(numberValue)));
+  };
+
+  return {
+    entitlement,
+    offlineOnly: value?.offlineOnly === true,
+    weeklyFreeInteractions: sanitizeLimit(value?.weeklyFreeInteractions),
+    weeklyCouncilSessions: sanitizeLimit(value?.weeklyCouncilSessions),
+    weeklyMeaningAnalyses: sanitizeLimit(value?.weeklyMeaningAnalyses),
+    activeUntil: typeof value?.activeUntil === 'string' && value.activeUntil.trim() ? value.activeUntil.trim() : null,
+    betaActivations: Number.isFinite(Number(value?.betaActivations)) ? Math.max(0, Math.floor(Number(value.betaActivations))) : 0,
+    betaBonusUsed: value?.betaBonusUsed === true,
+    notes: typeof value?.notes === 'string' ? value.notes.trim().slice(0, 1000) : null,
+  };
+};
+
+const requireAdmin = (req: AuthenticatedRequest, res: Response): boolean => {
+  if (!req.user || !isAdminUser(req.user)) {
+    res.status(403).json({ error: 'forbidden', message: 'Admin access required.' });
+    return false;
+  }
+  return true;
+};
+
+const asObject = (value: unknown): Record<string, any> => {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+};
+
+const getCycleTimestamp = (cycle?: LocalIntegrationCycle | null): number => {
+  if (!cycle) return 0;
+  return new Date(cycle.updatedAt || cycle.completedAt || cycle.createdAt).getTime() || 0;
+};
+
+const chooseNewestCycle = (
+  localCycle?: LocalIntegrationCycle | null,
+  remoteCycle?: LocalIntegrationCycle | null,
+): LocalIntegrationCycle | null => {
+  if (!localCycle) return remoteCycle || null;
+  if (!remoteCycle) return localCycle;
+  return getCycleTimestamp(remoteCycle) > getCycleTimestamp(localCycle) ? remoteCycle : localCycle;
+};
+
+const dedupeCyclesById = (cycles: LocalIntegrationCycle[]): LocalIntegrationCycle[] => {
+  const seen = new Set<string>();
+  return cycles.filter(cycle => {
+    if (!cycle?.id || seen.has(cycle.id)) return false;
+    seen.add(cycle.id);
+    return true;
+  });
+};
+
+const normalizeArchivedCycles = (value: unknown): LocalIntegrationCycle[] => {
+  if (!Array.isArray(value)) return [];
+  return dedupeCyclesById(
+    value
+      .map(normalizeStoredCycle)
+      .filter((cycle): cycle is LocalIntegrationCycle => Boolean(cycle))
+      .map(cycle => ({ ...cycle, status: 'ARCHIVED' as const }))
+  ).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+};
+
+const loadRemoteCycleState = async (user: User): Promise<{
+  currentCycle: LocalIntegrationCycle | null;
+  archivedCycles: LocalIntegrationCycle[];
+}> => {
+  if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
+    return { currentCycle: null, archivedCycles: [] };
+  }
+
+  const profile = await getUserProfile(user.id);
+  const preferences = asObject(profile?.preferences);
+  const integrationCycle = asObject(preferences.integrationCycle);
+
+  const currentCycle = normalizeStoredCycle(integrationCycle.currentCycle);
+  return {
+    currentCycle: currentCycle && currentCycle.status !== 'ARCHIVED' ? currentCycle : null,
+    archivedCycles: normalizeArchivedCycles(integrationCycle.archivedCycles),
+  };
+};
+
+const saveRemoteCycleState = async (
+  user: User,
+  patch: {
+    currentCycle?: LocalIntegrationCycle | null;
+    archivedCycles?: LocalIntegrationCycle[];
+  },
+): Promise<boolean> => {
+  if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
+    return false;
+  }
+
+  const profile = await getUserProfile(user.id);
+  const existingPreferences = asObject(profile?.preferences);
+  const existingIntegrationCycle = asObject(existingPreferences.integrationCycle);
+  const nextIntegrationCycle: Record<string, any> = {
+    ...existingIntegrationCycle,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if ('currentCycle' in patch) {
+    nextIntegrationCycle.currentCycle = patch.currentCycle;
+  }
+  if (patch.archivedCycles) {
+    nextIntegrationCycle.archivedCycles = normalizeArchivedCycles(patch.archivedCycles).slice(0, 100);
+  }
+
+  const savedProfile = await upsertUserProfile({
+    user_id: user.id,
+    display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
+    language: profile?.language || null,
+    active_archetype: profile?.active_archetype || null,
+    preferences: {
+      ...existingPreferences,
+      integrationCycle: nextIntegrationCycle,
+    },
+  });
+
+  return Boolean(savedProfile);
+};
+
+const countCouncilSpeakers = (reply: string): number => {
+  const speakerMatches = reply.match(/\[\[\s*SPEAKER\s*:\s*([A-Z_]+)\s*\]\]/gi) || [];
+  const speakers = new Set(
+    speakerMatches
+      .map(match => match.replace(/\[\[\s*SPEAKER\s*:\s*/i, '').replace(/\s*\]\]/, '').trim().toUpperCase())
+      .filter(Boolean)
+  );
+  return speakers.size;
+};
 
 // Authentication middleware
 interface AuthenticatedRequest extends Request {
@@ -225,7 +651,46 @@ interface AuthenticatedRequest extends Request {
   body: Request['body'];
 }
 
-const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void | Response => {
+const attachSupabaseUser = async (req: AuthenticatedRequest, token: string): Promise<boolean> => {
+  const authUser = await getSupabaseAuthUser(token);
+  if (!authUser) {
+    return false;
+  }
+
+  const username = authUser.email || authUser.user_metadata?.display_name || authUser.id;
+  const metadataDisplayName = authUser.user_metadata?.display_name
+    || authUser.user_metadata?.name
+    || authUser.user_metadata?.full_name
+    || authUser.user_metadata?.preferred_username;
+  const displayName = chooseDisplayName(metadataDisplayName, authUser.email, authUser.id);
+  const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
+
+  req.user = {
+    id: authUser.id,
+    username,
+    secretHash,
+    email: authUser.email || undefined,
+    displayName,
+  };
+
+  if (!isOfflineOnlyUser(req.user)) {
+    await ensureUserExists(authUser.id, username, secretHash);
+    const existingProfile = await getUserProfile(authUser.id);
+    req.user.adminSettings = getProfileAdminSettings(existingProfile?.preferences);
+    const nextDisplayName = chooseDisplayName(existingProfile?.display_name || displayName, authUser.email, authUser.id);
+    await upsertUserProfile({
+      user_id: authUser.id,
+      display_name: nextDisplayName,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: existingProfile?.preferences || {}
+    });
+  }
+
+  return true;
+};
+
+const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void | Response> => {
   // Skip authentication for OPTIONS requests (preflight)
   if (req.method === 'OPTIONS') {
     return next();
@@ -272,7 +737,7 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   if (isJWT) {
     // JWT token - verify cryptographically
     try {
-      if (!JWT_SECRET) {
+      if (!JWT_SECRET && runtimeConfig.authStrictMode) {
         console.error('[AUTH] JWT_SECRET not configured');
         return res.status(500).json({ 
           error: 'unauthorized',
@@ -283,6 +748,14 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       
       // Explicitly set algorithm to HS256 for consistency
       const decoded = jwt.verify(token, JWT_SECRET_FINAL, { algorithms: ['HS256'] }) as { sub: string; username: string; iat: number; exp: number };
+
+      if (!runtimeConfig.localAuthEnabled) {
+        return res.status(401).json({
+          error: 'unauthorized',
+          reason: 'local_auth_disabled',
+          message: 'Local test-user tokens are disabled in this runtime mode.'
+        });
+      }
       
       // Find user by sub (user.id) from JWT claims
       const user = users.find(u => u.id === decoded.sub);
@@ -299,8 +772,19 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
       
       // Attach user to request
       req.user = user;
+      if (isSupabaseConfigured()) {
+        const profile = await getUserProfile(user.id);
+        req.user.adminSettings = getProfileAdminSettings(profile?.preferences);
+      }
       return next();
     } catch (error: any) {
+      if (serviceReadiness.supabaseAuth) {
+        const attached = await attachSupabaseUser(req, token);
+        if (attached) {
+          return next();
+        }
+      }
+
       // Log auth failure with safe details (no secrets, no full token)
       const tokenHash = createHash('sha256').update(token).digest('hex').substring(0, 12);
       const tokenLength = token.length;
@@ -340,6 +824,357 @@ const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 };
 
+type UsageBucket = {
+  week: string;
+  interactions: number;
+  councilSessions: number;
+  meaningAnalyses: number;
+};
+
+const usageBuckets = new Map<string, UsageBucket>();
+const featureUsageBuckets = new Map<string, number>();
+const localAccessRecords = new Map<string, UserAccessRecord>();
+const BETA_ACCESS_DAYS = Number(process.env.BETA_ACCESS_DAYS || 14);
+const BETA_PRICE_EUR = process.env.BETA_PRICE_EUR || '2.42';
+const FREE_SINGLE_VOICE_REPLIES = Number(process.env.FREE_SINGLE_VOICE_REPLIES || 12);
+const FREE_COUNCIL_SESSIONS = Number(process.env.FREE_COUNCIL_SESSIONS || 1);
+const FREE_COUNCIL_REPLIES_PER_SESSION = Number(process.env.FREE_COUNCIL_REPLIES_PER_SESSION || 3);
+const FREE_BLUEPRINT_SAVES = Number(process.env.FREE_BLUEPRINT_SAVES || 1);
+const FREE_CYCLE_DAYS = Number(process.env.FREE_CYCLE_DAYS || 5);
+
+type AccessSnapshot = {
+  tier: AdminEntitlement;
+  activeUntil: string | null;
+  betaActivations: number;
+  betaBonusUsed: boolean;
+  notes: string | null;
+  source: 'protected_local' | 'profile' | 'database' | 'default';
+};
+
+type UsageFeature =
+  | 'single_voice_reply'
+  | 'council_session'
+  | 'blueprint_save'
+  | 'cycle_day_6';
+
+const getWeekKey = () => {
+  const now = new Date();
+  const firstDayOfYear = Date.UTC(now.getUTCFullYear(), 0, 1);
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const week = Math.ceil(((today - firstDayOfYear) / 86400000 + 1) / 7);
+  return `${now.getUTCFullYear()}-W${week}`;
+};
+
+const getWeeklyResetAt = (): string => {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const daysUntilMonday = (8 - day) % 7 || 7;
+  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 0, 0, 0));
+  return reset.toISOString();
+};
+
+const isAccessActive = (access: AccessSnapshot): boolean => {
+  if (access.tier === 'founder') return true;
+  if (access.tier !== 'paid_beta') return false;
+  if (!access.activeUntil) return false;
+  return new Date(access.activeUntil).getTime() > Date.now();
+};
+
+const getAccessFromRecord = (record: UserAccessRecord | null): AccessSnapshot | null => {
+  if (!record) return null;
+  return {
+    tier: record.tier === 'founder' || record.tier === 'blocked' || record.tier === 'paid_beta' ? record.tier : 'free',
+    activeUntil: record.active_until || null,
+    betaActivations: record.beta_activations || 0,
+    betaBonusUsed: Boolean(record.beta_bonus_used),
+    notes: record.notes || null,
+    source: 'database',
+  };
+};
+
+const getEffectiveAccess = async (user: User): Promise<AccessSnapshot> => {
+  if (isProtectedLocalLionUser(user)) {
+    return {
+      tier: 'founder',
+      activeUntil: null,
+      betaActivations: 0,
+      betaBonusUsed: false,
+      notes: 'Protected local offline-only account.',
+      source: 'protected_local',
+    };
+  }
+
+  const localAccess = getAccessFromRecord(localAccessRecords.get(user.id) || null);
+  if (localAccess) {
+    return {
+      ...localAccess,
+      source: 'default',
+    };
+  }
+
+  if (isSupabaseConfigured() && !isOfflineOnlyUser(user)) {
+    const dbAccess = getAccessFromRecord(await getUserAccess(user.id));
+    if (dbAccess) {
+      return dbAccess;
+    }
+  }
+
+  const profileSettings = user.adminSettings;
+  if (profileSettings?.entitlement) {
+    return {
+      tier: profileSettings.entitlement,
+      activeUntil: profileSettings.activeUntil || null,
+      betaActivations: profileSettings.betaActivations || 0,
+      betaBonusUsed: Boolean(profileSettings.betaBonusUsed),
+      notes: profileSettings.notes || null,
+      source: 'profile',
+    };
+  }
+
+  return {
+    tier: 'free',
+    activeUntil: null,
+    betaActivations: 0,
+    betaBonusUsed: false,
+    notes: null,
+    source: 'default',
+  };
+};
+
+async function activatePaidBetaAccess(
+  userId: string,
+  options: { notes: string; idempotencyKey?: string },
+): Promise<UserAccessRecord> {
+  const currentRecord = isSupabaseConfigured()
+    ? await getUserAccess(userId)
+    : localAccessRecords.get(userId) || null;
+  const current = getAccessFromRecord(currentRecord) || getAccessFromRecord(localAccessRecords.get(userId) || null);
+
+  if (
+    options.idempotencyKey &&
+    current?.tier === 'paid_beta' &&
+    current.notes?.includes(options.idempotencyKey)
+  ) {
+    return {
+      user_id: userId,
+      tier: current.tier,
+      active_until: current.activeUntil,
+      beta_activations: current.betaActivations,
+      beta_bonus_used: current.betaBonusUsed,
+      notes: current.notes,
+    };
+  }
+
+  const bonusAvailable = Boolean(current && current.betaActivations >= 2 && !current.betaBonusUsed);
+  const now = Date.now();
+  const baseTime = current?.activeUntil && new Date(current.activeUntil).getTime() > now
+    ? new Date(current.activeUntil).getTime()
+    : now;
+  const activeUntil = new Date(baseTime + BETA_ACCESS_DAYS * 86400000).toISOString();
+  const nextAccess: UserAccessRecord = {
+    user_id: userId,
+    tier: 'paid_beta',
+    active_until: activeUntil,
+    beta_activations: bonusAvailable ? current!.betaActivations : (current?.betaActivations || 0) + 1,
+    beta_bonus_used: bonusAvailable ? true : Boolean(current?.betaBonusUsed),
+    notes: options.notes,
+  };
+
+  localAccessRecords.set(userId, nextAccess);
+  await upsertUserAccess(nextAccess);
+  return nextAccess;
+}
+
+const getFreeLimitForFeature = (feature: UsageFeature): number => {
+  if (feature === 'single_voice_reply') return FREE_SINGLE_VOICE_REPLIES;
+  if (feature === 'council_session') return FREE_COUNCIL_SESSIONS;
+  if (feature === 'blueprint_save') return FREE_BLUEPRINT_SAVES;
+  return 0;
+};
+
+const getFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+  if (isSupabaseConfigured()) {
+    const record = await getUsageCounter(userId, periodKey, feature);
+    if (record) return record.count || 0;
+  }
+
+  return featureUsageBuckets.get(`${userId}:${periodKey}:${feature}`) || 0;
+};
+
+const incrementFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+  if (isSupabaseConfigured()) {
+    const record = await incrementUsageCounter(userId, periodKey, feature);
+    if (record) return record.count || 0;
+  }
+
+  const key = `${userId}:${periodKey}:${feature}`;
+  const next = (featureUsageBuckets.get(key) || 0) + 1;
+  featureUsageBuckets.set(key, next);
+  return next;
+};
+
+const sendPaywallResponse = (
+  res: Response,
+  feature: UsageFeature,
+  message: string,
+  extra: Record<string, unknown> = {},
+): void => {
+  res.status(402).json({
+    error: 'paywall_required',
+    feature,
+    message,
+    beta: {
+      priceEur: BETA_PRICE_EUR,
+      accessDays: BETA_ACCESS_DAYS,
+      provider: stripe ? 'stripe' : 'mock',
+      checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+      paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
+    },
+    ...extra,
+  });
+};
+
+const enforceFeatureAccess = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  feature: UsageFeature,
+  options: { increment?: boolean; sessionReplyCount?: number } = {},
+): Promise<boolean> => {
+  if (!req.user) return false;
+  const access = await getEffectiveAccess(req.user);
+
+  if (access.tier === 'blocked') {
+    res.status(403).json({
+      error: 'account_blocked',
+      message: 'This account is currently blocked by an administrator.',
+    });
+    return false;
+  }
+
+  if (hasFounderAccess(req.user) || isAccessActive(access)) {
+    return true;
+  }
+
+  if (feature === 'cycle_day_6') {
+    sendPaywallResponse(res, feature, `Cycle day ${FREE_CYCLE_DAYS + 1} requires beta access.`);
+    return false;
+  }
+
+  if (options.sessionReplyCount !== undefined && options.sessionReplyCount > FREE_COUNCIL_REPLIES_PER_SESSION) {
+    sendPaywallResponse(res, feature, 'This free council session has reached its reply limit.', {
+      limit: FREE_COUNCIL_REPLIES_PER_SESSION,
+      usage: options.sessionReplyCount,
+    });
+    return false;
+  }
+
+  const periodKey = getWeekKey();
+  const current = await getFeatureUsage(req.user.id, periodKey, feature);
+  const limit = getFreeLimitForFeature(feature);
+
+  if (current >= limit) {
+    sendPaywallResponse(res, feature, 'Weekly free usage limit reached.', {
+      limit,
+      usage: current,
+      periodKey,
+      resetAt: getWeeklyResetAt(),
+    });
+    return false;
+  }
+
+  if (options.increment !== false) {
+    await incrementFeatureUsage(req.user.id, periodKey, feature);
+  }
+
+  return true;
+};
+
+const getFirstLockedCompletedCycleDay = (cycle: LocalIntegrationCycle): number | null => {
+  const lockedRecord = cycle.dayRecords
+    .filter(record => record.completedAt && record.day > FREE_CYCLE_DAYS)
+    .sort((a, b) => a.day - b.day)[0];
+
+  return lockedRecord?.day ?? null;
+};
+
+const getUsageBucket = (userId: string): UsageBucket => {
+  const week = getWeekKey();
+  const existing = usageBuckets.get(userId);
+  if (existing?.week === week) {
+    return existing;
+  }
+
+  const fresh = { week, interactions: 0, councilSessions: 0, meaningAnalyses: 0 };
+  usageBuckets.set(userId, fresh);
+  return fresh;
+};
+
+const enforceUsageLimit = (
+  req: AuthenticatedRequest,
+  res: Response,
+  type: 'interaction' | 'council' | 'meaning'
+): boolean => {
+  if (!runtimeConfig.usageLimitsEnabled || !req.user) {
+    return true;
+  }
+  if (req.user.adminSettings?.entitlement === 'blocked') {
+    res.status(403).json({
+      error: 'account_blocked',
+      message: 'This account is currently blocked by an administrator.'
+    });
+    return false;
+  }
+  if (hasFounderAccess(req.user)) {
+    return true;
+  }
+
+  const usage = getUsageBucket(req.user.id);
+  const current = type === 'meaning'
+    ? usage.meaningAnalyses
+    : type === 'council'
+      ? usage.councilSessions
+      : usage.interactions;
+  const configuredLimit = type === 'meaning'
+    ? req.user.adminSettings?.weeklyMeaningAnalyses
+    : type === 'council'
+      ? req.user.adminSettings?.weeklyCouncilSessions
+      : req.user.adminSettings?.weeklyFreeInteractions;
+  const limit = configuredLimit ?? (type === 'meaning'
+    ? runtimeConfig.weeklyMeaningAnalyses
+    : type === 'council'
+      ? runtimeConfig.weeklyCouncilSessions
+      : runtimeConfig.weeklyFreeInteractions);
+
+  if (current >= limit) {
+    res.status(429).json({
+      error: 'usage_limit_reached',
+      message: 'Weekly free usage limit reached. Real entitlement checks can be connected when payments are enabled.',
+      limit,
+      usage: current,
+      resetWindow: usage.week
+    });
+    return false;
+  }
+
+  if (type === 'meaning') {
+    usage.meaningAnalyses += 1;
+  } else if (type === 'council') {
+    usage.councilSessions += 1;
+  } else {
+    usage.interactions += 1;
+  }
+
+  return true;
+};
+
+const requireDebugEndpoint = (req: Request, res: Response, next: NextFunction): void | Response => {
+  if (runtimeConfig.debugEndpointsEnabled) {
+    return next();
+  }
+
+  return res.status(404).json({ error: 'Route not found' });
+};
+
 // Fast health check endpoint (public) - must respond quickly for Render
 app.get('/api/health', (req: Request, res: Response) => {
   // Return immediately - no blocking operations
@@ -350,7 +1185,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 // Detailed health check endpoint (public) - for diagnostics
-app.get('/api/health/detailed', (req: Request, res: Response) => {
+app.get('/api/health/detailed', requireDebugEndpoint, (req: Request, res: Response) => {
   const uptime = process.uptime();
   // Try to get git commit hash if available (non-blocking)
   let commitHash = 'unknown';
@@ -363,23 +1198,73 @@ app.get('/api/health/detailed', (req: Request, res: Response) => {
   
   // Check Supabase connectivity (non-blocking, non-sensitive)
   let supabaseStatus = 'not_configured';
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (serviceReadiness.database) {
     supabaseStatus = 'configured';
+  } else if (runtimeConfig.databaseEnabled) {
+    supabaseStatus = 'missing_credentials';
+  } else {
+    supabaseStatus = 'disabled';
   }
   
   res.json({ 
     status: 'ok',
     uptime: Math.floor(uptime),
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
+    environment: runtimeConfig.appEnvironment,
     commitHash: commitHash,
     jwtSecretSet: !!process.env.JWT_SECRET,
-    supabaseStatus: supabaseStatus
+    supabaseStatus: supabaseStatus,
+    featureFlags: {
+      aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+      databaseEnabled: runtimeConfig.databaseEnabled,
+      paymentEnabled: runtimeConfig.paymentEnabled,
+      authStrictMode: runtimeConfig.authStrictMode,
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+      debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+      localAuthEnabled: runtimeConfig.localAuthEnabled,
+      supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled
+    },
+    serviceReadiness
+  });
+});
+
+app.get('/api/runtime/status', requireDebugEndpoint, (req: Request, res: Response) => {
+  res.json({
+    environment: runtimeConfig.appEnvironment,
+    modes: {
+      local: runtimeConfig.isLocal,
+      staging: runtimeConfig.isStaging,
+      production: runtimeConfig.isProduction
+    },
+    featureFlags: {
+      aiProviderEnabled: runtimeConfig.aiProviderEnabled,
+      databaseEnabled: runtimeConfig.databaseEnabled,
+      paymentEnabled: runtimeConfig.paymentEnabled,
+      authStrictMode: runtimeConfig.authStrictMode,
+      usageLimitsEnabled: runtimeConfig.usageLimitsEnabled,
+      debugEndpointsEnabled: runtimeConfig.debugEndpointsEnabled,
+      localAuthEnabled: runtimeConfig.localAuthEnabled,
+      supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled
+    },
+    services: {
+      ai: serviceReadiness.ai ? 'requires paid service later: connected' : 'mocked safely',
+      database: serviceReadiness.database ? 'requires paid service later: connected' : 'working without budget now',
+      supabaseAuth: serviceReadiness.supabaseAuth ? 'working without budget now: staging auth connected' : 'mocked safely',
+      payment: serviceReadiness.payment ? 'requires paid service later: connected' : 'blocked until credentials/budget exist',
+      auth: serviceReadiness.auth ? 'working without budget now' : 'blocked until credentials/budget exist'
+    },
+    credentialsPresent: {
+      ai: !!runtimeConfig.openAiApiKey,
+      database: runtimeConfig.hasDatabaseCredentials,
+      supabaseAuth: serviceReadiness.supabaseAuth,
+      payment: runtimeConfig.hasPaymentCredentials,
+      jwtSecret: !!runtimeConfig.jwtSecret
+    }
   });
 });
 
 // Auth health endpoint (for auth-specific diagnostics)
-app.get('/api/auth/health', (req: Request, res: Response) => {
+app.get('/api/auth/health', requireDebugEndpoint, (req: Request, res: Response) => {
   let build = 'unknown';
   try {
     const { execSync } = require('node:child_process');
@@ -397,7 +1282,7 @@ app.get('/api/auth/health', (req: Request, res: Response) => {
 });
 
 // Auth diagnose endpoint (public, safe - no secrets exposed)
-app.get('/auth/diagnose', (req: Request, res: Response) => {
+app.get('/auth/diagnose', requireDebugEndpoint, (req: Request, res: Response) => {
   try {
     const authHeader = req.headers?.authorization || '';
     
@@ -459,7 +1344,7 @@ app.get('/auth/diagnose', (req: Request, res: Response) => {
       if (tokenLooksLikeJwt) {
         // Try JWT verification
         try {
-          if (!JWT_SECRET) {
+          if (!JWT_SECRET && runtimeConfig.authStrictMode) {
             verifyResult = 'missing_secret';
           } else {
             const decoded = jwt.verify(token, JWT_SECRET_FINAL);
@@ -521,6 +1406,9 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
     res.json({
       userId: req.user.id,
       username: req.user.username,
+      displayName: req.user.displayName || chooseDisplayName(req.user.username, req.user.email, req.user.id),
+      authProvider: users.some(user => user.id === req.user?.id) ? 'local' : 'supabase',
+      isAdmin: isAdminUser(req.user),
     });
   } catch (error: any) {
     console.error('GET /api/me error:', error);
@@ -532,8 +1420,466 @@ app.get('/api/me', authenticate, (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    if (isOfflineOnlyUser(req.user)) {
+      return res.json({
+        userId: req.user.id,
+        displayName: req.user.displayName || chooseDisplayName(req.user.username, req.user.email, req.user.id),
+        language: null,
+        activeArchetype: null,
+        preferences: {
+          offlineOnly: true,
+          entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
+        },
+        isAdmin: isAdminUser(req.user)
+      });
+    }
+
+    const profile = await getUserProfile(req.user.id);
+    res.json({
+      userId: req.user.id,
+      displayName: chooseDisplayName(profile?.display_name || req.user.displayName, req.user.email || req.user.username, req.user.id),
+      language: profile?.language || null,
+      activeArchetype: profile?.active_archetype || null,
+      preferences: profile?.preferences || {},
+      isAdmin: isAdminUser(req.user)
+    });
+  } catch (error: any) {
+    console.error('GET /api/profile error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message
+    });
+  }
+});
+
+app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const { displayName, language, activeArchetype, preferences } = req.body as {
+      displayName?: string;
+      language?: string;
+      activeArchetype?: string | null;
+      preferences?: Record<string, unknown>;
+    };
+
+    const safeDisplayName = typeof displayName === 'string' ? displayName.trim().slice(0, 80) : undefined;
+    const safeLanguage = language === 'DE' || language === 'EN' ? language : undefined;
+    const safeActiveArchetype = typeof activeArchetype === 'string' ? activeArchetype.trim().slice(0, 64) : null;
+
+    if (isOfflineOnlyUser(req.user)) {
+      return res.json({
+        userId: req.user.id,
+        displayName: chooseDisplayName(safeDisplayName || req.user.displayName, req.user.email || req.user.username, req.user.id),
+        language: safeLanguage || null,
+        activeArchetype: safeActiveArchetype,
+        preferences: {
+          offlineOnly: true,
+          entitlement: hasFounderAccess(req.user) ? 'founder' : undefined
+        },
+        isAdmin: isAdminUser(req.user),
+        persistenceStatus: 'offline_only_local'
+      });
+    }
+
+    const existingProfile = await getUserProfile(req.user.id);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const nextPreferences = preferences && typeof preferences === 'object'
+      ? { ...existingPreferences, ...preferences, admin: existingPreferences.admin }
+      : existingPreferences;
+
+    const profile = await upsertUserProfile({
+      user_id: req.user.id,
+      display_name: chooseDisplayName(safeDisplayName || existingProfile?.display_name || req.user.displayName, req.user.email || req.user.username, req.user.id),
+      language: safeLanguage || existingProfile?.language || null,
+      active_archetype: safeActiveArchetype || existingProfile?.active_archetype || null,
+      preferences: nextPreferences
+    });
+
+    res.json({
+      userId: req.user.id,
+      displayName: chooseDisplayName(profile?.display_name || safeDisplayName || req.user.displayName, req.user.email || req.user.username, req.user.id),
+      language: profile?.language || safeLanguage || null,
+      activeArchetype: profile?.active_archetype || safeActiveArchetype,
+      preferences: profile?.preferences || {},
+      isAdmin: isAdminUser(req.user)
+    });
+  } catch (error: any) {
+    console.error('PUT /api/profile error:', error);
+    if (req.user) {
+      const fallbackDisplayName = typeof req.body?.displayName === 'string' && req.body.displayName.trim()
+        ? req.body.displayName.trim().slice(0, 80)
+        : chooseDisplayName(req.user.displayName || req.user.username, req.user.email, req.user.id);
+
+      return res.json({
+        userId: req.user.id,
+        displayName: fallbackDisplayName,
+        language: req.body?.language === 'DE' || req.body?.language === 'EN' ? req.body.language : null,
+        activeArchetype: typeof req.body?.activeArchetype === 'string' ? req.body.activeArchetype : null,
+        preferences: {},
+        persistenceStatus: 'failed_safe_fallback'
+      });
+    }
+
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message
+    });
+  }
+});
+
+app.get('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const localState = await loadLocalCycleState(req.user.id);
+    let remoteState: Awaited<ReturnType<typeof loadRemoteCycleState>> = { currentCycle: null, archivedCycles: [] };
+    let remoteAvailable = false;
+
+    try {
+      remoteState = await loadRemoteCycleState(req.user);
+      remoteAvailable = isSupabaseConfigured() && !isOfflineOnlyUser(req.user);
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to load remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    const currentCycle = chooseNewestCycle(localState.currentCycle, remoteState.currentCycle);
+    const archivedCycles = dedupeCyclesById([
+      ...localState.archivedCycles,
+      ...remoteState.archivedCycles,
+    ]).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+
+    if (currentCycle) {
+      const currentTimestamp = getCycleTimestamp(currentCycle);
+      if (currentTimestamp > getCycleTimestamp(localState.currentCycle)) {
+        await saveLocalCurrentCycle(req.user.id, currentCycle);
+      }
+      if (remoteAvailable && currentTimestamp > getCycleTimestamp(remoteState.currentCycle)) {
+        try {
+          await saveRemoteCycleState(req.user, { currentCycle });
+        } catch (error: any) {
+          console.warn(`[CYCLE] Failed to backfill remote cycle state for user ${req.user.id}:`, error.message);
+        }
+      }
+    }
+
+    res.json({
+      currentCycle,
+      archivedCycles,
+      persistenceStatus: remoteAvailable ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error loading current cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
+app.put('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const requestedCycle = normalizeStoredCycle(req.body?.cycle);
+    if (!requestedCycle || requestedCycle.status === 'ARCHIVED') {
+      return res.status(400).json({ error: 'A valid active or completed cycle is required.' });
+    }
+
+    const lockedDay = getFirstLockedCompletedCycleDay(requestedCycle);
+    if (lockedDay && !(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+      return;
+    }
+
+    const localState = await saveLocalCurrentCycle(req.user.id, requestedCycle);
+    let remoteSaved = false;
+
+    try {
+      remoteSaved = await saveRemoteCycleState(req.user, { currentCycle: localState.currentCycle });
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to save remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    res.json({
+      currentCycle: localState.currentCycle,
+      persistenceStatus: remoteSaved ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error saving current cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
+app.post('/api/cycle/archive', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const requestedCycle = normalizeStoredCycle(req.body?.cycle);
+    if (!requestedCycle) {
+      return res.status(400).json({ error: 'A valid cycle is required.' });
+    }
+
+    const lockedDay = getFirstLockedCompletedCycleDay(requestedCycle);
+    if (lockedDay && !(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+      return;
+    }
+
+    const localState = await archiveLocalCycle(req.user.id, requestedCycle);
+    let remoteSaved = false;
+
+    try {
+      const remoteState = await loadRemoteCycleState(req.user);
+      const archivedCycles = dedupeCyclesById([
+        ...localState.archivedCycles,
+        ...remoteState.archivedCycles,
+      ]).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
+
+      remoteSaved = await saveRemoteCycleState(req.user, {
+        currentCycle: null,
+        archivedCycles,
+      });
+    } catch (error: any) {
+      console.warn(`[CYCLE] Failed to archive remote cycle state for user ${req.user.id}:`, error.message);
+    }
+
+    res.json({
+      currentCycle: null,
+      archivedCycles: localState.archivedCycles,
+      persistenceStatus: remoteSaved ? 'remote_and_local' : 'local',
+    });
+  } catch (error: any) {
+    console.error('[CYCLE] Error archiving cycle:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
+app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.json({ accounts: [], databaseStatus: 'disabled' });
+    }
+
+    const accounts = await listAdminAccounts();
+    res.json({
+      databaseStatus: 'configured',
+      accounts: accounts.map(account => {
+        const settings = getProfileAdminSettings(account.preferences);
+        const access = getAccessFromRecord(account.access || null);
+        const effectiveTier = access?.tier || settings.entitlement || 'free';
+        const displayName = chooseDisplayName(
+          account.display_name,
+          account.username,
+          account.user_id,
+        );
+        return {
+          userId: account.user_id,
+          username: account.username || null,
+          displayName,
+          language: account.language || null,
+          createdAt: account.profile_created_at || account.created_at || null,
+          updatedAt: account.profile_updated_at || account.updated_at || null,
+          entitlement: effectiveTier,
+          offlineOnly: Boolean(settings.offlineOnly),
+          activeUntil: access?.activeUntil || settings.activeUntil || null,
+          betaActivations: access?.betaActivations ?? settings.betaActivations ?? 0,
+          betaBonusUsed: access?.betaBonusUsed ?? settings.betaBonusUsed ?? false,
+          notes: access?.notes || settings.notes || null,
+          limits: {
+            weeklyFreeInteractions: settings.weeklyFreeInteractions ?? null,
+            weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
+            weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
+          },
+        };
+      }),
+    });
+  } catch (error: any) {
+    console.error('GET /api/admin/accounts error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+});
+
+app.post('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    const email = normalizeEmail(req.body?.email);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const displayNameInput = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+    const emailConfirm = req.body?.emailConfirm !== false;
+
+    if (!email) {
+      return res.status(400).json({ error: 'invalid_email', message: 'A valid email address is required.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'invalid_password', message: 'Password must be at least 6 characters.' });
+    }
+
+    const displayName = chooseDisplayName(displayNameInput, email);
+    const authResult = await createOrUpdateConfirmedAuthUser({
+      email,
+      password,
+      displayName,
+      emailConfirm,
+    });
+    const authUser = authResult.user;
+    const secretHash = createHash('sha256').update(`supabase-auth:${authUser.id}`).digest('hex');
+
+    await ensureUserExists(authUser.id, email, secretHash);
+
+    const existingProfile = await getUserProfile(authUser.id);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const adminSettings = sanitizeAdminSettings(req.body?.admin || {});
+    const profile = await upsertUserProfile({
+      user_id: authUser.id,
+      display_name: displayName,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: {
+        ...existingPreferences,
+        admin: adminSettings,
+      },
+    });
+
+    const accessRecord: UserAccessRecord = {
+      user_id: authUser.id,
+      tier: adminSettings.entitlement === 'paid_beta' ? 'paid_beta' : adminSettings.entitlement || 'free',
+      active_until: adminSettings.activeUntil || null,
+      beta_activations: adminSettings.betaActivations || 0,
+      beta_bonus_used: Boolean(adminSettings.betaBonusUsed),
+      notes: adminSettings.notes || null,
+    };
+    localAccessRecords.set(authUser.id, accessRecord);
+    await upsertUserAccess(accessRecord);
+
+    res.status(authResult.action === 'created' ? 201 : 200).json({
+      action: authResult.action,
+      emailConfirmed: Boolean(authUser.email_confirmed_at || authUser.confirmed_at),
+      account: {
+        userId: authUser.id,
+        username: email,
+        displayName,
+        language: profile?.language || null,
+        createdAt: profile?.created_at || null,
+        updatedAt: profile?.updated_at || new Date().toISOString(),
+        entitlement: adminSettings.entitlement || 'free',
+        offlineOnly: Boolean(adminSettings.offlineOnly),
+        activeUntil: adminSettings.activeUntil || null,
+        betaActivations: adminSettings.betaActivations || 0,
+        betaBonusUsed: Boolean(adminSettings.betaBonusUsed),
+        notes: adminSettings.notes || null,
+        limits: {
+          weeklyFreeInteractions: adminSettings.weeklyFreeInteractions ?? null,
+          weeklyCouncilSessions: adminSettings.weeklyCouncilSessions ?? null,
+          weeklyMeaningAnalyses: adminSettings.weeklyMeaningAnalyses ?? null,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error('POST /api/admin/accounts error:', error?.message || error);
+    res.status(400).json({
+      error: 'account_create_failed',
+      message: error?.message || 'Account creation failed.',
+    });
+  }
+});
+
+app.put('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    const targetUserId = String(req.params.userId || '').trim();
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'user_id_required' });
+    }
+
+    const existingProfile = await getUserProfile(targetUserId);
+    const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
+      ? existingProfile.preferences
+      : {};
+    const adminSettings = sanitizeAdminSettings(req.body?.admin || req.body || {});
+    const profile = await upsertUserProfile({
+      user_id: targetUserId,
+      display_name: existingProfile?.display_name || null,
+      language: existingProfile?.language || null,
+      active_archetype: existingProfile?.active_archetype || null,
+      preferences: {
+        ...existingPreferences,
+        admin: adminSettings,
+      },
+    });
+    const accessRecord: UserAccessRecord = {
+      user_id: targetUserId,
+      tier: adminSettings.entitlement === 'paid_beta' ? 'paid_beta' : adminSettings.entitlement || 'free',
+      active_until: adminSettings.activeUntil || null,
+      beta_activations: adminSettings.betaActivations || 0,
+      beta_bonus_used: Boolean(adminSettings.betaBonusUsed),
+      notes: adminSettings.notes || null,
+    };
+    localAccessRecords.set(targetUserId, accessRecord);
+    await upsertUserAccess(accessRecord);
+
+    res.json({
+      userId: targetUserId,
+      entitlement: adminSettings.entitlement,
+      offlineOnly: adminSettings.offlineOnly,
+      activeUntil: adminSettings.activeUntil || null,
+      betaActivations: adminSettings.betaActivations || 0,
+      betaBonusUsed: Boolean(adminSettings.betaBonusUsed),
+      limits: {
+        weeklyFreeInteractions: adminSettings.weeklyFreeInteractions,
+        weeklyCouncilSessions: adminSettings.weeklyCouncilSessions,
+        weeklyMeaningAnalyses: adminSettings.weeklyMeaningAnalyses,
+      },
+      updatedAt: profile?.updated_at || new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('PUT /api/admin/accounts/:userId error:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+});
+
 // Auth debug endpoint (protected, for detailed diagnostics)
-app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/auth/debug', requireDebugEndpoint, authenticate, (req: AuthenticatedRequest, res: Response) => {
   try {
     const authHeader = req.headers?.authorization || '';
     
@@ -586,6 +1932,13 @@ app.get('/api/auth/debug', authenticate, (req: AuthenticatedRequest, res: Respon
 // Login endpoint
 app.post('/api/login', async (req: Request, res: Response) => {
   try {
+    if (!runtimeConfig.localAuthEnabled) {
+      return res.status(503).json({
+        error: 'local_auth_disabled',
+        message: 'Local test-user login is disabled in this runtime mode. Configure a production auth provider before accepting real users.'
+      });
+    }
+
     const { username, secret } = req.body;
 
     if (!username || !secret) {
@@ -600,12 +1953,12 @@ app.post('/api/login', async (req: Request, res: Response) => {
     }
 
     // Ensure user exists in Supabase (if configured)
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(user)) {
       await ensureUserExists(user.id, user.username, user.secretHash);
     }
 
     // Generate JWT token (stateless, restart-proof)
-    if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+    if (!JWT_SECRET && runtimeConfig.authStrictMode) {
       console.error('[AUTH] JWT_SECRET required in production');
       return res.status(500).json({ error: 'Server configuration error' });
     }
@@ -633,6 +1986,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     res.json({
       userId: user.id,
       token,
+      displayName: user.displayName || user.username,
     });
   } catch (error: any) {
     console.error('Login API error:', error);
@@ -668,14 +2022,44 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     
     // Determine mode: direct chat (activeArchetype set) or council session
     const mode = userProfile?.activeArchetype ? 'direct' : 'council';
+    const userMessageCount = messages.filter((msg: any) => msg?.role === 'user').length;
+    if (mode === 'direct') {
+      if (!(await enforceFeatureAccess(req, res, 'single_voice_reply'))) {
+        return;
+      }
+    } else {
+      const isInitialCouncilCall = userMessageCount <= 1;
+      if (isInitialCouncilCall) {
+        if (!(await enforceFeatureAccess(req, res, 'council_session'))) {
+          return;
+        }
+      } else if (!(await enforceFeatureAccess(req, res, 'council_session', {
+        increment: false,
+        sessionReplyCount: Math.max(0, userMessageCount - 1),
+      }))) {
+        return;
+      }
+    }
     
     // Log request (no secrets) - CRITICAL for debugging mode detection
     console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
 
+    const latestUserMessage = String(messages[messages.length - 1]?.content || '')
+      .replace(/^\[(Antworte auf Deutsch\.|Respond in English\.)\]\s*/i, '')
+      .trim();
+    const responsePlan = createResponsePlan(latestUserMessage, {
+      mode,
+      activeArchetype: userProfile?.activeArchetype,
+      language: userProfile?.language,
+      conversationLength: messages.length,
+      communicationMode: userProfile?.meaningContext?.communicationMode,
+      overloadRisk: Boolean(userProfile?.meaningContext?.overloadSignal || userProfile?.meaningContext?.emotionalState?.overloadRisk),
+    });
+
     // Build system prompt - COMPLETELY SEPARATE for direct vs council
     const systemPrompt = mode === 'direct' 
-      ? buildDirectChatPrompt(userProfile)
-      : buildCouncilSystemPrompt(userProfile);
+      ? buildDirectChatPrompt(userProfile, responsePlan)
+      : buildCouncilSystemPrompt(userProfile, responsePlan);
 
     // Build conversation history
     const conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = messages.map((msg: any) => ({
@@ -683,12 +2067,87 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       content: String(msg.content),
     }));
 
-    // Validate OpenAI API key before making request
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('[COUNCIL] OpenAI API key not configured');
-      return res.status(500).json({ 
-        error: 'OpenAI API key not configured',
-        message: 'The server is missing the OpenAI API key. Please contact the administrator.'
+    const persistCouncilExchange = async (reply: string) => {
+      // Best-effort persistence: database issues must not break no-budget/mock responses.
+      if (!isSupabaseConfigured() || isOfflineOnlyUser(req.user)) {
+        return;
+      }
+
+      try {
+        const responseProvider = openai ? 'real' : 'mock';
+        const sessionId = await createCouncilSession({
+          user_id: userId,
+          mode: mode,
+          topic: mode === 'council' ? messages[0]?.content : undefined,
+          messages: {
+            messages: messages,
+            reply: reply,
+            userProfile: userProfile
+          }
+        });
+
+        if (sessionId) {
+          const persistedMessages: CouncilMessageRecord[] = messages
+            .filter((msg: any) => msg?.content)
+            .map((msg: any, index: number) => ({
+              session_id: sessionId,
+              user_id: userId,
+              role: msg.role === 'user'
+                ? 'user'
+                : msg.role === 'system'
+                  ? 'system'
+                  : 'assistant',
+              archetype_id: msg.archetypeId || null,
+              content: String(msg.content),
+              sequence_index: index,
+              provider: responseProvider
+            }));
+
+          persistedMessages.push({
+            session_id: sessionId,
+            user_id: userId,
+            role: 'assistant',
+            archetype_id: mode === 'direct' ? userProfile?.activeArchetype || null : null,
+            content: reply,
+            sequence_index: persistedMessages.length,
+            provider: responseProvider
+          });
+
+          await createCouncilMessages(persistedMessages);
+        }
+
+        await createLoreEntry({
+          user_id: userId,
+          type: mode === 'direct' ? 'direct' : 'council',
+          content: {
+            messages: messages,
+            reply: reply,
+            archetype: userProfile?.activeArchetype,
+            language: userProfile?.language
+          }
+        });
+
+        if (sessionId) {
+          console.log(`[SUPABASE] Created session ${sessionId} with message rows for user ${userId}`);
+        }
+      } catch (error: any) {
+        console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);
+      }
+    };
+
+    if (!openai) {
+      const reply = createMockCouncilReply({
+        mode,
+        activeArchetype: userProfile?.activeArchetype,
+        language: userProfile?.language,
+        topic: latestUserMessage,
+        responsePlan
+      });
+      await persistCouncilExchange(reply);
+      return res.json({
+        reply,
+        provider: 'mock',
+        serviceStatus: runtimeConfig.aiProviderEnabled ? 'missing_credentials' : 'disabled'
       });
     }
 
@@ -699,7 +2158,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     let completion;
     try {
       completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini', // Using gpt-4o-mini as specified
+        model: runtimeConfig.openAiModel,
         messages: [
           { role: 'system', content: systemPrompt },
           ...conversationHistory,
@@ -709,7 +2168,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       });
       
       // Log mode and temperature for debugging
-      console.log(`[API] OpenAI call - mode: ${mode.toUpperCase()}, temperature: ${temperature}, promptLength: ${systemPrompt.length}`);
+      console.log(`[API] OpenAI call - mode: ${mode.toUpperCase()}, model: ${runtimeConfig.openAiModel}, temperature: ${temperature}, promptLength: ${systemPrompt.length}`);
     } catch (openaiError: any) {
       // Handle OpenAI API errors gracefully
       console.error('[COUNCIL] OpenAI API error:', {
@@ -754,7 +2213,47 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       console.warn('[API] Empty reply from OpenAI', { userId, mode });
       reply = 'I apologize, but I could not generate a response. Please try again.';
     }
-    
+
+    if (mode === 'council' && responsePlan.shouldUseCouncil && openai && countCouncilSpeakers(reply) < 2) {
+      console.warn('[COUNCIL] Too few council speakers; retrying with strict multi-voice format', {
+        userId,
+        speakerCount: countCouncilSpeakers(reply),
+        replyPreview: reply.substring(0, 160),
+      });
+
+      try {
+        const retryCompletion = await openai.chat.completions.create({
+          model: runtimeConfig.openAiModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...conversationHistory,
+            {
+              role: 'system',
+              content:
+                'FORMAT REPAIR: Your previous council response had too few distinct voices for a true council moment. Return a brief council round with 2-4 distinct [[SPEAKER: ARCHETYPE_ID]] sections, using only valid IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLORER, ALCHEMIST. Do not force closure. End with one living question unless the user explicitly asked for a decision or action plan. Do not explain the repair.',
+            },
+          ] as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+          temperature: 0.65,
+          stream: false,
+        });
+
+        const repairedReply = retryCompletion?.choices?.[0]?.message?.content || '';
+        if (countCouncilSpeakers(repairedReply) >= 2) {
+          reply = repairedReply;
+        } else {
+          console.warn('[COUNCIL] Format repair still had too few speakers; returning original reply', {
+            userId,
+            repairedSpeakerCount: countCouncilSpeakers(repairedReply),
+          });
+        }
+      } catch (repairError: any) {
+        console.warn('[COUNCIL] Format repair retry failed; returning original reply', {
+          userId,
+          message: repairError?.message,
+        });
+      }
+    }
+
     // CRITICAL: In DIRECT mode, strip any council structure that might have leaked through
     if (mode === 'direct') {
       const originalReply = reply;
@@ -781,42 +2280,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       }
     }
 
-    // Persist to Supabase (if configured) - best-effort, don't break response
-    if (isSupabaseConfigured()) {
-      try {
-        // Create council session record
-        const sessionId = await createCouncilSession({
-          user_id: userId,
-          mode: mode,
-          topic: mode === 'council' ? messages[0]?.content : undefined,
-          messages: {
-            messages: messages,
-            reply: reply,
-            userProfile: userProfile
-          }
-        });
-        
-        // Create lore entry
-        await createLoreEntry({
-          user_id: userId,
-          type: mode === 'direct' ? 'direct' : 'council',
-          content: {
-            messages: messages,
-            reply: reply,
-            archetype: userProfile?.activeArchetype,
-            language: userProfile?.language
-          }
-        });
-        
-        if (sessionId) {
-          console.log(`[SUPABASE] Created session ${sessionId} for user ${userId}`);
-        }
-      } catch (error: any) {
-        // Log DB write failure as warning (no secrets)
-        console.warn(`[SUPABASE] DB write failed for user ${userId}, mode ${mode}: ${error.message}`);
-        // Don't throw - continue with response
-      }
-    }
+    await persistCouncilExchange(reply);
 
     res.json({ reply });
   } catch (error: any) {
@@ -844,7 +2308,7 @@ app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: 
     }
     
     // Persist integration to Supabase (if configured)
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         await createLoreEntry({
           user_id: userId,
@@ -880,6 +2344,201 @@ app.post('/api/integrate', authenticate, async (req: AuthenticatedRequest, res: 
   }
 });
 
+app.get('/api/payment/status', authenticate, (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  res.json({
+    userId: req.user.id,
+    provider: stripe ? 'stripe' : 'mock',
+    status: stripe && stripeBetaPriceId
+      ? 'checkout_ready'
+      : stripePaymentLinkUrl
+        ? 'payment_link_ready'
+        : serviceReadiness.payment
+          ? 'missing_stripe_price'
+          : 'disabled',
+    entitlement: 'free',
+    featureStatus: runtimeConfig.paymentEnabled
+      ? 'server-side payment checks enabled'
+      : 'mocked safely',
+    checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+    paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
+    webhookReady: Boolean(stripe && stripeWebhookSecret),
+    message: stripe
+      ? 'Stripe is configured server-side. Use checkout sessions for automatic access activation.'
+      : 'Payment checks are server-side and mocked until Stripe credentials are configured.'
+  });
+});
+
+app.post('/api/payment/create-checkout-session', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    if (isOfflineOnlyUser(req.user)) {
+      return res.status(409).json({
+        error: 'offline_only_account',
+        message: 'This account is protected as local-only and cannot be activated remotely.',
+      });
+    }
+
+    const access = await getEffectiveAccess(req.user);
+    if (hasFounderAccess(req.user) || isAccessActive(access)) {
+      return res.json({
+        active: true,
+        tier: access.tier,
+        activeUntil: access.activeUntil,
+      });
+    }
+
+    if (!stripe || !stripeBetaPriceId) {
+      const fallbackUrl = buildPaymentLinkUrl(req.user);
+      if (fallbackUrl) {
+        return res.json({
+          provider: 'stripe_payment_link',
+          url: fallbackUrl,
+          automaticActivation: false,
+          message: 'Payment link fallback is configured. Add STRIPE_BETA_PRICE_ID and STRIPE_WEBHOOK_SECRET for automatic activation.',
+        });
+      }
+
+      return res.status(503).json({
+        error: 'stripe_checkout_not_configured',
+        message: 'Stripe checkout is not configured on this backend.',
+      });
+    }
+
+    const frontendUrl = getFrontendUrlForRequest(req).replace(/\/$/, '');
+    const successUrl = `${frontendUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${frontendUrl}/?payment=cancelled`;
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{ price: stripeBetaPriceId, quantity: 1 }],
+      client_reference_id: req.user.id,
+      customer_email: req.user.email || (isEmailLike(req.user.username) ? req.user.username : undefined),
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        userId: req.user.id,
+        accessTier: 'paid_beta',
+        accessDays: String(BETA_ACCESS_DAYS),
+        source: 'lazarus_engine_beta',
+      },
+    });
+
+    if (!session.url) {
+      return res.status(500).json({ error: 'stripe_checkout_url_missing' });
+    }
+
+    res.json({
+      provider: 'stripe_checkout',
+      sessionId: session.id,
+      url: session.url,
+      automaticActivation: Boolean(stripeWebhookSecret),
+    });
+  } catch (error: any) {
+    console.error('[PAYMENT] Checkout session creation failed:', error?.message || error);
+    res.status(500).json({
+      error: 'checkout_session_failed',
+      message: process.env.NODE_ENV === 'production' ? 'Unable to start checkout.' : error?.message || 'Unable to start checkout.',
+    });
+  }
+});
+
+app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  const access = await getEffectiveAccess(req.user);
+  const periodKey = getWeekKey();
+  const [singleVoiceReplies, councilSessions, blueprintSaves] = await Promise.all([
+    getFeatureUsage(req.user.id, periodKey, 'single_voice_reply'),
+    getFeatureUsage(req.user.id, periodKey, 'council_session'),
+    getFeatureUsage(req.user.id, periodKey, 'blueprint_save'),
+  ]);
+
+  res.json({
+    userId: req.user.id,
+    tier: access.tier,
+    active: hasFounderAccess(req.user) || isAccessActive(access),
+    activeUntil: access.activeUntil,
+    betaActivations: access.betaActivations,
+    betaBonusUsed: access.betaBonusUsed,
+    source: access.source,
+    weeklyResetAt: getWeeklyResetAt(),
+    freeLimits: {
+      singleVoiceReplies: FREE_SINGLE_VOICE_REPLIES,
+      councilSessions: FREE_COUNCIL_SESSIONS,
+      councilRepliesPerSession: FREE_COUNCIL_REPLIES_PER_SESSION,
+      blueprintSaves: FREE_BLUEPRINT_SAVES,
+      cycleDays: FREE_CYCLE_DAYS,
+    },
+    usage: {
+      singleVoiceReplies,
+      councilSessions,
+      blueprintSaves,
+    },
+    beta: {
+      priceEur: BETA_PRICE_EUR,
+      accessDays: BETA_ACCESS_DAYS,
+      provider: stripe ? 'stripe' : 'mock',
+      checkoutAvailable: Boolean(stripe && stripeBetaPriceId),
+      paymentLinkAvailable: Boolean(stripePaymentLinkUrl),
+      bonusAvailable: access.betaActivations >= 2 && !access.betaBonusUsed,
+    },
+  });
+});
+
+app.post('/api/access/check-cycle-day', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+
+  const day = Number(req.body?.day || 0);
+  if (day <= FREE_CYCLE_DAYS) {
+    return res.json({ allowed: true, freeUntilDay: FREE_CYCLE_DAYS });
+  }
+
+  if (!(await enforceFeatureAccess(req, res, 'cycle_day_6', { increment: false }))) {
+    return;
+  }
+
+  res.json({ allowed: true, freeUntilDay: FREE_CYCLE_DAYS });
+});
+
+app.post('/api/access/mock-activate-beta', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized: User not found' });
+  }
+  if (runtimeConfig.isProduction || runtimeConfig.paymentEnabled) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+  if (isOfflineOnlyUser(req.user)) {
+    return res.status(409).json({
+      error: 'offline_only_account',
+      message: 'This account is protected as local-only and cannot be activated remotely.',
+    });
+  }
+
+  const current = await getEffectiveAccess(req.user);
+  const bonusAvailable = current.betaActivations >= 2 && !current.betaBonusUsed;
+  const nextAccess = await activatePaidBetaAccess(req.user.id, {
+    notes: bonusAvailable ? 'Mock bonus beta period after two activations.' : 'Mock beta activation.',
+  });
+
+  res.json({
+    tier: nextAccess.tier,
+    activeUntil: nextAccess.active_until,
+    betaActivations: nextAccess.beta_activations,
+    betaBonusUsed: nextAccess.beta_bonus_used,
+    charged: !bonusAvailable,
+    provider: 'mock',
+  });
+});
+
 // Meaning Agent endpoint - analyzes session transcript and returns canonical JSON
 app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -892,28 +2551,47 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       sessionId, 
       mode, 
       activeArchetype, 
+      language,
       messages, 
       userLore, 
-      currentQuestState 
+      currentQuestState,
+      meaningContext,
+      persist,
     } = req.body as { 
       sessionId?: string;
       mode?: 'single' | 'council';
       activeArchetype?: string;
+      language?: 'EN' | 'DE';
       messages?: Array<{ role: string; content: string; meta?: any }>;
       userLore?: string;
       currentQuestState?: { title?: string; state?: string; objective?: string };
+      meaningContext?: any;
+      persist?: boolean;
     };
     
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages array is required and cannot be empty' });
     }
-    
-    // Validate OpenAI API key
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('[MEANING] OpenAI API key not configured');
-      return res.status(500).json({ 
-        error: 'OpenAI API key not configured',
-        message: 'The server is missing the OpenAI API key.'
+
+    if (persist === true && !(await enforceFeatureAccess(req, res, 'blueprint_save', { increment: false }))) {
+      return;
+    }
+
+    if (!openai) {
+      if (persist === true && !(await enforceFeatureAccess(req, res, 'blueprint_save'))) {
+        return;
+      }
+
+      const mockResult = createMockMeaningResult();
+
+      if (persist === true) {
+        await mergeLocalMeaningState(userId, mockResult);
+      }
+
+      return res.json({
+        ...mockResult,
+        provider: 'mock',
+        serviceStatus: runtimeConfig.aiProviderEnabled ? 'missing_credentials' : 'disabled'
       });
     }
     
@@ -931,6 +2609,17 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       })
       .join('\n\n');
     
+    const outputLanguage = language === 'DE' ? 'DE' : 'EN';
+    const outputLanguageInstruction = outputLanguage === 'DE'
+      ? `OUTPUT LANGUAGE:
+- Write every user-facing string value in German.
+- This includes questLogEntries.title/content, soulTimelineEvents.label/summary, breakthroughs.title/insight/trigger/action, and nextQuestState fields.
+- Keep JSON property names exactly in English.
+- Type constants such as "BREAKTHROUGH" and "EVENT" must remain English constants.`
+      : `OUTPUT LANGUAGE:
+- Write every user-facing string value in English.
+- Keep JSON property names and type constants exactly as specified.`;
+
     // Build analysis prompt
     const analysisPrompt = `You are the Meaning Agent. Analyze this conversation transcript and extract meaningful insights.
 
@@ -939,12 +2628,20 @@ ${transcript}
 
 ${userLore ? `USER CONTEXT:\n${userLore}\n` : ''}
 ${currentQuestState ? `CURRENT QUEST: ${currentQuestState.title || 'None'}\nCURRENT STATE: ${currentQuestState.state || 'None'}\n` : ''}
+${meaningContext?.emotionalState ? `CURRENT EMOTIONAL STATE SCAN:
+${JSON.stringify(meaningContext.emotionalState, null, 2)}
+
+Use this as a soft communication signal only. It is not a diagnosis. Preserve user agency and avoid labeling the user.
+` : ''}
+
+${outputLanguageInstruction}
 
 Analyze this conversation and return JSON ONLY (no prose, no explanations). Extract:
 
 1. **Questlog Entry**: One meaningful questlog entry summarizing the session's main topic/objective
 2. **Soul Timeline Event**: One significant event or moment from the conversation
 3. **Breakthrough**: One breakthrough or realization (if any occurred, otherwise empty array)
+4. **Emotional State**: A gentle communication scan for tone/pacing, not a diagnosis
 
 Rules:
 - Return STRICT JSON only (no markdown, no code blocks, no explanations)
@@ -953,12 +2650,14 @@ Rules:
 - If session is empty or trivial, return empty arrays
 - Use ISO date strings for createdAt fields
 - Generate unique IDs (use short UUIDs or timestamps)
+- emotionalState must use schemaVersion 1, valence POSITIVE/NEUTRAL/MIXED/NEGATIVE, activation LOW/MEDIUM/HIGH, clarity CLEAR/UNCERTAIN/OVERLOADED, supportNeeds from PRESENCE/MIRRORING/GROUNDING/CLARITY/ACTION, and confidence from 0 to 1.
 
 Return this exact JSON structure:
 {
   "questLogEntries": [{"id": "...", "createdAt": "...", "title": "...", "content": "...", "tags": [], "relatedArchetypes": [], "sourceSessionId": "..."}],
   "soulTimelineEvents": [{"id": "...", "createdAt": "...", "label": "...", "summary": "...", "intensity": 5, "type": "EVENT", "tags": [], "sourceSessionId": "..."}],
   "breakthroughs": [{"id": "...", "createdAt": "...", "title": "...", "insight": "...", "trigger": "...", "action": "...", "tags": [], "sourceSessionId": "..."}],
+  "emotionalState": {"schemaVersion": 1, "valence": "MIXED", "activation": "MEDIUM", "clarity": "UNCERTAIN", "primarySignals": [], "supportNeeds": [], "overloadRisk": false, "confidence": 0.5, "updatedAt": "..."},
   "attributeUpdates": [],
   "skillUpdates": [],
   "nextQuestState": null
@@ -973,7 +2672,7 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     let completion;
     try {
       completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: runtimeConfig.openAiModel,
         messages: [
           { role: 'system', content: 'You are a JSON-only API. Return valid JSON only, no markdown, no explanations.' },
           { role: 'user', content: analysisPrompt }
@@ -1048,6 +2747,19 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     if (!analysisResult.breakthroughs || !Array.isArray(analysisResult.breakthroughs)) {
       analysisResult.breakthroughs = [];
     }
+    if (analysisResult.emotionalState && typeof analysisResult.emotionalState === 'object') {
+      analysisResult.emotionalState = {
+        schemaVersion: 1,
+        valence: analysisResult.emotionalState.valence || 'NEUTRAL',
+        activation: analysisResult.emotionalState.activation || 'MEDIUM',
+        clarity: analysisResult.emotionalState.clarity || 'UNCERTAIN',
+        primarySignals: Array.isArray(analysisResult.emotionalState.primarySignals) ? analysisResult.emotionalState.primarySignals : [],
+        supportNeeds: Array.isArray(analysisResult.emotionalState.supportNeeds) ? analysisResult.emotionalState.supportNeeds : [],
+        overloadRisk: Boolean(analysisResult.emotionalState.overloadRisk),
+        confidence: typeof analysisResult.emotionalState.confidence === 'number' ? analysisResult.emotionalState.confidence : 0.5,
+        updatedAt: analysisResult.emotionalState.updatedAt || new Date().toISOString()
+      };
+    }
     
     // Ensure all timeline events have required fields
     analysisResult.soulTimelineEvents.forEach((event: any) => {
@@ -1117,9 +2829,15 @@ IMPORTANT: If you identify a breakthrough, you MUST:
         existingTimelineEvent.intensity = 10;
       }
     });
-    
-    // Persist to Supabase (if configured) - best-effort, don't break response
-    if (isSupabaseConfigured()) {
+
+    const shouldPersistMeaning = persist === true;
+
+    if (shouldPersistMeaning && !(await enforceFeatureAccess(req, res, 'blueprint_save'))) {
+      return;
+    }
+
+    // Persist to Supabase only when the user explicitly saves/integrates.
+    if (shouldPersistMeaning && isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         // Persist questlog entries
         for (const entry of analysisResult.questLogEntries) {
@@ -1168,11 +2886,20 @@ IMPORTANT: If you identify a breakthrough, you MUST:
         // Don't fail the request if DB write fails
       }
     }
+
+    if (shouldPersistMeaning) {
+      try {
+        await mergeLocalMeaningState(userId, analysisResult);
+      } catch (error: any) {
+        console.warn(`[LOCAL_STORE] Error persisting meaning analysis for user ${userId}:`, error.message);
+      }
+    }
     
     console.log(`[MEANING] Analysis complete for user ${userId}`, {
       questLogEntries: analysisResult.questLogEntries.length,
       timelineEvents: analysisResult.soulTimelineEvents.length,
-      breakthroughs: analysisResult.breakthroughs.length
+      breakthroughs: analysisResult.breakthroughs.length,
+      persisted: shouldPersistMeaning
     });
     
     res.json(analysisResult);
@@ -1193,9 +2920,10 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
     }
     
     const userId = req.user.id;
+    const localState = await loadLocalMeaningState(userId);
     
     // Load from Supabase if configured
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isOfflineOnlyUser(req.user)) {
       try {
         const [questLogEntries, timelineEvents, breakthroughs] = await Promise.all([
           getQuestLogEntries(userId),
@@ -1205,7 +2933,8 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
         
         // Transform to frontend format
         const result = {
-          questLogEntries: questLogEntries.map(entry => ({
+          questLogEntries: [
+            ...questLogEntries.map(entry => ({
             id: entry.id!,
             createdAt: entry.created_at || new Date().toISOString(),
             title: entry.title,
@@ -1213,8 +2942,11 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             tags: entry.tags || [],
             relatedArchetypes: entry.related_archetypes || [],
             sourceSessionId: entry.source_session_id
-          })),
-          soulTimelineEvents: timelineEvents.map(event => ({
+            })),
+            ...localState.questLogEntries,
+          ],
+          soulTimelineEvents: [
+            ...timelineEvents.map(event => ({
             id: event.id!,
             createdAt: event.created_at || new Date().toISOString(),
             label: event.label,
@@ -1223,8 +2955,11 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             type: event.type || 'EVENT',
             tags: event.tags || [],
             sourceSessionId: event.source_session_id
-          })),
-          breakthroughs: breakthroughs.map(bt => ({
+            })),
+            ...localState.soulTimelineEvents,
+          ],
+          breakthroughs: [
+            ...breakthroughs.map(bt => ({
             id: bt.id!,
             createdAt: bt.created_at || new Date().toISOString(),
             title: bt.title,
@@ -1233,7 +2968,13 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
             action: bt.action,
             tags: bt.tags || [],
             sourceSessionId: bt.source_session_id
-          }))
+            })),
+            ...localState.breakthroughs,
+          ],
+          emotionalState: localState.emotionalState,
+          attributeUpdates: localState.attributeUpdates,
+          skillUpdates: localState.skillUpdates,
+          nextQuestState: localState.nextQuestState,
         };
         
         console.log(`[MEANING] Loaded state for user ${userId}`, {
@@ -1249,12 +2990,7 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
       }
     }
     
-    // Return empty state if Supabase not configured or error
-    res.json({
-      questLogEntries: [],
-      soulTimelineEvents: [],
-      breakthroughs: []
-    });
+    res.json(localState);
   } catch (error: any) {
     console.error('[MEANING] Error loading state:', error);
     res.status(500).json({ 
@@ -1279,7 +3015,7 @@ function loadArchetypesConfig() {
 
 // Helper function to build system prompt
 // COMPLETELY SEPARATE prompt builder for DIRECT CHAT mode
-function buildDirectChatPrompt(userProfile: any): string {
+function buildDirectChatPrompt(userProfile: any, responsePlan?: ResponsePlan): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
   const activeArchetype = userProfile?.activeArchetype;
@@ -1292,6 +3028,8 @@ function buildDirectChatPrompt(userProfile: any): string {
   const archetypeConfig = archetypesConfig[activeArchetype];
   const archetypeName = archetypeConfig.name?.[language] || archetypeConfig.name?.EN || activeArchetype;
   const baseSystemPrompt = archetypeConfig.systemPrompt?.[language] || archetypeConfig.systemPrompt?.EN || '';
+  const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'direct', archetypeName);
+  const organicPromptBlock = responsePlan ? buildOrganicPromptBlock(responsePlan) : '';
   
   // Clean the base prompt - remove any council references
   const cleanedPrompt = baseSystemPrompt
@@ -1301,6 +3039,10 @@ function buildDirectChatPrompt(userProfile: any): string {
   
   // STRICT DIRECT MODE PROMPT - NO COUNCIL STRUCTURE ALLOWED
   const directChatPrompt = `${cleanedPrompt}
+
+${communicationContract}
+
+${organicPromptBlock}
 
 ═══════════════════════════════════════════════════════════════
 CRITICAL: SINGLE VOICE MODE - YOU MUST FOLLOW THESE RULES EXACTLY
@@ -1336,8 +3078,8 @@ YOU ARE IN SINGLE VOICE MODE. This means:
    ❌ Multiple paragraphs with different archetype voices
 
 5. EXAMPLES OF CORRECT RESPONSES (DO THIS):
-   ✅ "The shadow work requires deep honesty. I see patterns that need transformation. Here's what I suggest: [your direct advice]"
-   ✅ "As ${archetypeName}, I believe [your perspective]. The path forward is [your conclusion]."
+   ✅ "One thing I notice is this pattern. In this situation, it may help to look at [specific angle]."
+   ✅ "As ${archetypeName}, I would read it this way: [your perspective]. That is one lens, not the whole truth."
 
 REMEMBER: You are ${archetypeName} speaking ONE-ON-ONE with the user. No council. No other voices. Just you.`;
 
@@ -1354,12 +3096,97 @@ Integrate this context into your understanding. DO NOT recite these facts explic
   return directChatPrompt;
 }
 
-function buildCouncilSystemPrompt(userProfile: any): string {
+function buildCommunicationContract(meaningContext: any, language: string, mode: 'direct' | 'council', voiceName?: string): string {
+  const communicationMode = meaningContext?.communicationMode || 'MIRROR';
+  const consentState = meaningContext?.consentState || 'ASK_BEFORE_DEEPENING';
+  const cycleLine = meaningContext?.activeCycleTheme
+    ? `Active integration cycle: day ${meaningContext.activeCycleDay || '?'} around "${meaningContext.activeCycleTheme}".`
+    : 'No active integration cycle context was provided.';
+  const emotionalState = meaningContext?.emotionalState;
+  const emotionalLine = emotionalState
+    ? `Emotional scan: valence=${emotionalState.valence || 'UNKNOWN'}, activation=${emotionalState.activation || 'UNKNOWN'}, clarity=${emotionalState.clarity || 'UNKNOWN'}, overloadRisk=${Boolean(emotionalState.overloadRisk)}, supportNeeds=${Array.isArray(emotionalState.supportNeeds) ? emotionalState.supportNeeds.join(', ') : 'none'}. Treat this as a soft pacing signal, never as a diagnosis.`
+    : 'No emotional scan was provided.';
+  const identityLine = mode === 'direct' && voiceName
+    ? `Apply this as ${voiceName}'s own voice, not as a meta-system announcement.`
+    : 'Apply this across the council without turning it into a generic moderator lecture.';
+
+  const descriptions: Record<string, { EN: string; DE: string }> = {
+    HOLD: {
+      EN: 'Hold space. Let the story breathe. Use fewer interpretations, fewer solutions, and more presence.',
+      DE: 'Halte Raum. Lass die Geschichte atmen. Nutze weniger Deutung, weniger Lösung, mehr Präsenz.',
+    },
+    MIRROR: {
+      EN: 'Mirror clearly. Reflect what is alive without rushing toward a fix.',
+      DE: 'Spiegle klar. Reflektiere, was lebendig ist, ohne vorschnell zu reparieren.',
+    },
+    EXPLORE: {
+      EN: 'Explore gently. Ask careful questions and deepen only one layer at a time.',
+      DE: 'Erkunde vorsichtig. Stelle sorgfältige Fragen und vertiefe nur eine Schicht auf einmal.',
+    },
+    GROUND: {
+      EN: 'Ground. Reduce intensity, simplify the field, and protect the user from overload.',
+      DE: 'Erde. Senke die Intensität, vereinfache das Feld und schütze vor Überlastung.',
+    },
+    ACT: {
+      EN: 'Act. Translate insight into one small, clean, realistic next move.',
+      DE: 'Handle. Übersetze Einsicht in eine kleine, klare, realistische nächste Bewegung.',
+    },
+  };
+
+  const description = descriptions[communicationMode]?.[language === 'DE' ? 'DE' : 'EN'] || descriptions.MIRROR.EN;
+
+  if (language === 'DE') {
+    return `KOMMUNIKATIONSVERTRAG:
+- Aktueller Modus: ${communicationMode}. ${description}
+- Consent-State: ${consentState}. Frage nach Erlaubnis, bevor du tief deutest, umlenkst oder einen Exit Room öffnest, wenn der Nutzer überlastet wirken könnte.
+- Geschichten dürfen leben. Nicht jede Intensität ist ein Problem; nicht jede Wiederholung braucht sofort eine Lösung.
+- Exit Rooms sind verfügbar, aber nicht reflexhaft. Nutze sie nur bei klarer Überlastung, Feststecken, Selbstverlust oder ausdrücklichem Wunsch.
+- Wenn nötig, frage knapp: "Soll ich das halten, spiegeln, sortieren, erden oder in eine kleine Handlung übersetzen?"
+- ${emotionalLine}
+- Wenn Aktivierung hoch oder Overload-Risiko wahr ist: langsamer, klarer, weniger Optionen, zuerst Halt/Erden.
+- ${cycleLine}
+- ${identityLine}`;
+  }
+
+  return `COMMUNICATION CONTRACT:
+- Current mode: ${communicationMode}. ${description}
+- Consent state: ${consentState}. Ask for permission before deep interpretation, redirection, or opening an exit room when the user may be overloaded.
+- Stories are allowed to breathe. Not every intensity is a problem; not every repetition needs an immediate solution.
+- Exit rooms are available, but not reflexive. Use them only when there is clear overload, stuckness, self-loss, or explicit user desire.
+- When needed, ask briefly: "Do you want me to hold this, mirror it, sort it, ground it, or translate it into one small action?"
+- ${emotionalLine}
+- If activation is high or overload risk is true: slow down, reduce options, and prioritize presence/grounding first.
+- ${cycleLine}
+- ${identityLine}`;
+}
+
+function buildCouncilSystemPrompt(userProfile: any, responsePlan?: ResponsePlan): string {
   const archetypesConfig = loadArchetypesConfig();
   const language = userProfile?.language || 'EN';
+  const languageInstruction = language === 'DE'
+    ? `LANGUAGE CONTRACT:
+- The user selected German.
+- Respond in German (Deutsch) for every archetype's spoken content and any optional synthesis/action sections.
+- Keep technical speaker headers exactly as [[SPEAKER: ARCHETYPE_ID]] using the English IDs.
+- Do not switch to English unless the user explicitly asks you to translate or answer in English.`
+    : `LANGUAGE CONTRACT:
+- The user selected English.
+- Respond in English for every archetype's spoken content and any optional synthesis/action sections.
+- Keep technical speaker headers exactly as [[SPEAKER: ARCHETYPE_ID]].`;
 
   // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
-  const basePrompt = `You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
+  const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'council');
+  const organicPromptBlock = responsePlan ? buildOrganicPromptBlock(responsePlan) : '';
+  const councilFormatRule = responsePlan?.shouldUseCouncil
+    ? '7. This is a true council moment. Include 2-4 distinct [[SPEAKER: ...]] sections. Prefer fewer voices when the user needs intimacy or pacing.'
+    : '7. This is NOT automatically a full council moment. Use 0-1 [[SPEAKER: ...]] section unless the user explicitly asked for multiple perspectives. Mirror, hold, clarify, ground, or integrate according to the response plan.';
+  const basePrompt = `${languageInstruction}
+
+${communicationContract}
+
+${organicPromptBlock}
+
+You are the "Violet Council" (The Violet Eightfold), a simulation of 8 internal archetypes within the user's psyche.
 The user is present in the session. This is an ongoing conversation.
 
 The eight archetypes are:
@@ -1379,6 +3206,13 @@ Instructions:
 4. The Sovereign should usually speak last to synthesize, but this is not a hard rule.
 5. You may direct questions to the user.
 6. After a round of debate, STOP generating to allow the user to respond. Do not simulate the user.
+${councilFormatRule}
+8. Do not force closure. The council may leave a question open, let tension remain alive, or invite the user back into the conversation.
+9. Only include SOVEREIGN DECISION and NEXT STEPS when the user explicitly asks for a conclusion/action plan, when the situation clearly requires closure, or when the user is ending/integrating the session.
+10. When the user asks for the council's perspective on them, do not flatter. Avoid generic praise such as "remarkable", "inspiring", "great potential", "valuable quality", or "you are on the right path". Speak in neutral observations: patterns, tensions, likely blind spots, recurring strengths under pressure, and what each archetype notices from its own angle.
+11. Archetypal perspective is not approval. Each voice should name one concrete observation and one edge/question, without turning everything into criticism.
+12. For personal perspective requests, prefer this internal shape without labeling it mechanically: "I observe X pattern. The edge is Y." Avoid capability-praise phrasing such as "du hast Potenzial", "du bist bemerkenswert", "du bist inspirierend", "es ist offensichtlich, dass...". Translate traits into visible behavior.
+13. Avoid second-person compliment shells like "deine Disziplin ist spürbar" or "deine Kreativität ist stark". Rephrase as behavior: "Ich sehe wiederholte Bewegung in Richtung Disziplin, aber..." or "Der kreative Impuls taucht auf, bleibt aber..."
 
 CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
 
@@ -1388,9 +3222,11 @@ CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
    [[SPEAKER: ARCHETYPE_ID]]
    [Their vivid, character-appropriate response - be specific, not generic, sharp and decisive]
 
-3. After all archetypes have spoken, end with:
+3. After the archetypes have spoken, usually end with one living invitation or question to the user. Do not summarize everything into closure by default.
+
+4. Optional closure format, only when closure is actually needed or explicitly requested:
    SOVEREIGN DECISION:
-   [The final ruling or synthesis from The Sovereign - be decisive and clear, in the Sovereign's authoritative tone]
+   [The final ruling or synthesis from The Sovereign - decisive and clear, not generic]
 
    NEXT STEPS:
    - [Action item 1]
@@ -1411,12 +3247,12 @@ But what does your heart say? What work makes you feel alive? That matters more 
 Both can coexist. We can build a bridge between passion and security. Innovation doesn't require abandoning stability.
 
 [[SPEAKER: SOVEREIGN]]
-The council has spoken. We see a path forward.
+The council has not closed this yet. There is a real tension between longing and safety, and it deserves one more honest answer from you before we turn it into a plan: which part feels most alive right now, and which part feels most defended?
 
-SOVEREIGN DECISION:
+OPEN INVITATION:
 We will pursue the path that aligns passion with practical security. This is not a compromise—it is integration.
 
-NEXT STEPS:
+ONLY IF CLOSURE IS REQUESTED, NEXT STEPS CAN LOOK LIKE:
 - Research hybrid roles that combine your passion with market demand
 - Create a 90-day transition plan with clear milestones
 - Set up weekly check-ins with the council to track progress
@@ -1426,7 +3262,9 @@ Valid Archetype IDs: SOVEREIGN, WARRIOR, SAGE, LOVER, CREATOR, CAREGIVER, EXPLOR
 IMPORTANT: 
 - Make responses vivid, specific, and character-appropriate. Avoid generic therapy-moderator fluff.
 - Keep it short and sharp, like the original example ("greeting is the first compression… Reductive Protocol…").
-- The Sovereign's tone should be authoritative and decisive, not generic.`;
+- The Sovereign's tone should be authoritative and decisive, but not prematurely conclusive.
+- Never turn every user reply into a completed session. Let the conversation breathe unless closure is warranted.
+- No sycophancy. Do not perform admiration. If the user asks what the council sees in them, answer as witnesses, not fans.`;
 
   // Add user profile context if provided
   if (userProfile && userProfile.lore) {
@@ -1460,4 +3298,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[STARTUP] Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log('='.repeat(80));
 });
+
 

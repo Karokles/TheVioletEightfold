@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
+import { runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 
 // Supabase configuration with feature flag
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -7,7 +9,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let supabaseClient: ReturnType<typeof createClient> | null = null;
 
 // Initialize Supabase client if env vars are set
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+if (serviceReadiness.database && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
@@ -16,7 +18,7 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   });
   console.log('[SUPABASE] Client initialized');
 } else {
-  console.warn('[SUPABASE] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. Database features disabled.');
+  console.warn(`[SUPABASE] Database disabled. DATABASE_ENABLED=${runtimeConfig.databaseEnabled}, credentials=${runtimeConfig.hasDatabaseCredentials}.`);
 }
 
 export const getSupabaseClient = () => {
@@ -28,6 +30,121 @@ export const getSupabaseClient = () => {
 
 export const isSupabaseConfigured = () => {
   return !!supabaseClient;
+};
+
+export const getSupabaseAuthUser = async (accessToken: string): Promise<SupabaseAuthUser | null> => {
+  if (!isSupabaseConfigured() || !serviceReadiness.supabaseAuth) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient().auth.getUser(accessToken);
+    if (error) {
+      console.warn('[SUPABASE_AUTH] Token verification failed:', error.message);
+      return null;
+    }
+
+    return data.user || null;
+  } catch (error: any) {
+    console.warn('[SUPABASE_AUTH] Error verifying token:', error.message);
+    return null;
+  }
+};
+
+export interface AdminAuthUserInput {
+  email: string;
+  password: string;
+  displayName: string;
+  emailConfirm?: boolean;
+}
+
+export interface AdminAuthUserResult {
+  action: 'created' | 'updated_existing';
+  user: {
+    id: string;
+    email?: string | null;
+    email_confirmed_at?: string | null;
+    confirmed_at?: string | null;
+  };
+}
+
+const isExistingUserError = (message: string): boolean => {
+  return /already|registered|exists|duplicate/i.test(message);
+};
+
+const findAuthUserByEmail = async (email: string): Promise<AdminAuthUserResult['user'] | null> => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await getSupabaseClient().auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const found = data.users.find(user => user.email?.toLowerCase() === normalizedEmail);
+    if (found) {
+      return found;
+    }
+    if (data.users.length < perPage) {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+export const createOrUpdateConfirmedAuthUser = async (
+  input: AdminAuthUserInput,
+): Promise<AdminAuthUserResult> => {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase client not initialized.');
+  }
+
+  const email = input.email.trim().toLowerCase();
+  const displayName = input.displayName.trim();
+  const userMetadata = {
+    display_name: displayName,
+    full_name: displayName,
+    name: displayName,
+  };
+  const emailConfirm = input.emailConfirm !== false;
+
+  const { data, error } = await getSupabaseClient().auth.admin.createUser({
+    email,
+    password: input.password,
+    email_confirm: emailConfirm,
+    user_metadata: userMetadata,
+  });
+
+  if (!error && data.user) {
+    return { action: 'created', user: data.user };
+  }
+
+  const message = error?.message || 'Unable to create auth user.';
+  if (!isExistingUserError(message)) {
+    throw new Error(message);
+  }
+
+  const existingUser = await findAuthUserByEmail(email);
+  if (!existingUser) {
+    throw new Error('Auth user exists, but could not be found for update.');
+  }
+
+  const update = await getSupabaseClient().auth.admin.updateUserById(existingUser.id, {
+    password: input.password,
+    email_confirm: emailConfirm,
+    user_metadata: {
+      ...(existingUser as any).user_metadata,
+      ...userMetadata,
+    },
+  } as any);
+
+  if (update.error || !update.data.user) {
+    throw new Error(update.error?.message || 'Unable to update existing auth user.');
+  }
+
+  return { action: 'updated_existing', user: update.data.user };
 };
 
 // User management
@@ -66,6 +183,343 @@ export const ensureUserExists = async (userId: string, username: string, secretH
   }
 };
 
+// User profiles
+export interface UserProfileRecord {
+  user_id: string;
+  display_name?: string | null;
+  language?: string | null;
+  active_archetype?: string | null;
+  preferences?: any;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getUserProfile = async (userId: string): Promise<UserProfileRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching user profile:', error.message);
+      return null;
+    }
+
+    return data ? (data as UserProfileRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUserProfile:', error.message);
+    return null;
+  }
+};
+
+export const upsertUserProfile = async (profile: UserProfileRecord): Promise<UserProfileRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_profiles')
+      .upsert({
+        ...profile,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error upserting user profile:', error.message);
+      return null;
+    }
+
+    return (data as UserProfileRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in upsertUserProfile:', error.message);
+    return null;
+  }
+};
+
+export interface AdminAccountRecord {
+  user_id: string;
+  username?: string | null;
+  display_name?: string | null;
+  language?: string | null;
+  preferences?: any;
+  access?: UserAccessRecord | null;
+  usage?: UsageCounterRecord[];
+  created_at?: string | null;
+  updated_at?: string | null;
+  profile_created_at?: string | null;
+  profile_updated_at?: string | null;
+}
+
+export type AccessTier = 'free' | 'paid_beta' | 'founder' | 'blocked';
+
+export interface UserAccessRecord {
+  user_id: string;
+  tier: AccessTier;
+  beta_activations: number;
+  beta_bonus_used: boolean;
+  active_until?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UsageCounterRecord {
+  user_id: string;
+  period_key: string;
+  feature: string;
+  count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getUserAccess = async (userId: string): Promise<UserAccessRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching user access:', error.message);
+      return null;
+    }
+
+    return data ? (data as UserAccessRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUserAccess:', error.message);
+    return null;
+  }
+};
+
+export const upsertUserAccess = async (access: UserAccessRecord): Promise<UserAccessRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .upsert({
+        ...access,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error upserting user access:', error.message);
+      return null;
+    }
+
+    return (data as UserAccessRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in upsertUserAccess:', error.message);
+    return null;
+  }
+};
+
+export const listUserAccessRecords = async (): Promise<UserAccessRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('user_access')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('[SUPABASE] Error listing user access records:', error.message);
+      return [];
+    }
+
+    return (data as UserAccessRecord[]) || [];
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listUserAccessRecords:', error.message);
+    return [];
+  }
+};
+
+export const getUsageCounter = async (
+  userId: string,
+  periodKey: string,
+  feature: string,
+): Promise<UsageCounterRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('period_key', periodKey)
+      .eq('feature', feature)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SUPABASE] Error fetching usage counter:', error.message);
+      return null;
+    }
+
+    return data ? (data as UsageCounterRecord) : null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in getUsageCounter:', error.message);
+    return null;
+  }
+};
+
+export const incrementUsageCounter = async (
+  userId: string,
+  periodKey: string,
+  feature: string,
+): Promise<UsageCounterRecord | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const existing = await getUsageCounter(userId, periodKey, feature);
+    const nextCount = (existing?.count || 0) + 1;
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .upsert({
+        user_id: userId,
+        period_key: periodKey,
+        feature,
+        count: nextCount,
+        updated_at: new Date().toISOString()
+      } as any, {
+        onConflict: 'user_id,period_key,feature'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error incrementing usage counter:', error.message);
+      return null;
+    }
+
+    return (data as UsageCounterRecord) || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in incrementUsageCounter:', error.message);
+    return null;
+  }
+};
+
+export const listUsageCountersForPeriod = async (periodKey: string): Promise<UsageCounterRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('usage_counters')
+      .select('*')
+      .eq('period_key', periodKey);
+
+    if (error) {
+      console.error('[SUPABASE] Error listing usage counters:', error.message);
+      return [];
+    }
+
+    return (data as UsageCounterRecord[]) || [];
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listUsageCountersForPeriod:', error.message);
+    return [];
+  }
+};
+
+export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const [
+      { data: users, error: usersError },
+      { data: profiles, error: profilesError },
+      accessRecords,
+    ] = await Promise.all([
+      getSupabaseClient()
+        .from('users')
+        .select('id, username, created_at, updated_at')
+        .order('updated_at', { ascending: false }),
+      getSupabaseClient()
+        .from('user_profiles')
+        .select('user_id, display_name, language, preferences, created_at, updated_at')
+        .order('updated_at', { ascending: false }),
+      listUserAccessRecords(),
+    ]);
+
+    if (usersError) {
+      console.error('[SUPABASE] Error listing admin users:', usersError.message);
+    }
+    if (profilesError) {
+      console.error('[SUPABASE] Error listing admin profiles:', profilesError.message);
+    }
+
+    const byId = new Map<string, AdminAccountRecord>();
+    ((users || []) as any[]).forEach(user => {
+      byId.set(user.id, {
+        user_id: user.id,
+        username: user.username,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      });
+    });
+
+    ((profiles || []) as any[]).forEach(profile => {
+      const existing = byId.get(profile.user_id) || { user_id: profile.user_id };
+      byId.set(profile.user_id, {
+        ...existing,
+        display_name: profile.display_name,
+        language: profile.language,
+        preferences: profile.preferences || {},
+        profile_created_at: profile.created_at,
+        profile_updated_at: profile.updated_at,
+      });
+    });
+
+    accessRecords.forEach(access => {
+      const existing = byId.get(access.user_id) || { user_id: access.user_id };
+      byId.set(access.user_id, {
+        ...existing,
+        access,
+      });
+    });
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const left = a.profile_updated_at || a.updated_at || a.created_at || '';
+      const right = b.profile_updated_at || b.updated_at || b.created_at || '';
+      return right.localeCompare(left);
+    });
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listAdminAccounts:', error.message);
+    return [];
+  }
+};
+
 // Council sessions
 export interface CouncilSession {
   id?: string;
@@ -98,6 +552,38 @@ export const createCouncilSession = async (session: CouncilSession): Promise<str
   } catch (error: any) {
     console.error('[SUPABASE] Error in createCouncilSession:', error.message);
     return null;
+  }
+};
+
+// Council messages
+export interface CouncilMessageRecord {
+  id?: string;
+  session_id: string;
+  user_id: string;
+  role: 'user' | 'assistant' | 'system' | 'model';
+  archetype_id?: string | null;
+  content: string;
+  sequence_index: number;
+  token_count?: number | null;
+  provider?: 'mock' | 'real' | 'disabled' | 'planned';
+  created_at?: string;
+}
+
+export const createCouncilMessages = async (messages: CouncilMessageRecord[]): Promise<void> => {
+  if (!isSupabaseConfigured() || messages.length === 0) {
+    return;
+  }
+
+  try {
+    const { error } = await getSupabaseClient()
+      .from('council_messages')
+      .insert(messages as any);
+
+    if (error) {
+      console.error('[SUPABASE] Error creating council messages:', error.message);
+    }
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in createCouncilMessages:', error.message);
   }
 };
 

@@ -1,21 +1,34 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { RoundTable } from './components/RoundTable';
 import { ChatInterface } from './components/ChatInterface';
 import { CouncilSession } from './components/CouncilSession';
 import { StatsInterface } from './components/StatsInterface';
+import { CycleInterface } from './components/CycleInterface';
+import { AdminInterface } from './components/AdminInterface';
 import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
-import { Language, UserStats, ScribeAnalysis } from './types';
-import { getCurrentUser, loadUserLore, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler } from './services/userService';
-import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp } from 'lucide-react';
+import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle, Language, UserStats, ScribeAnalysis } from './types';
+import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser, setCurrentUser } from './services/userService';
+import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
+import { getProfile, updateProfile } from './services/profileService';
+import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, hydrateCurrentCycle, loadCurrentCycle, persistArchivedCycle, persistCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
+import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPreferences, suggestCommunicationMode } from './services/communicationService';
+import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
+import { mergeLocalMeaningState } from './services/meaningStateService';
+import { scanEmotionalState } from './services/emotionalStateService';
+import { tutorialEventBus } from './services/tutorialProgressService';
+import { checkCycleDayAccess, redirectToBetaCheckout } from './services/accessService';
+import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
 
 enum AppMode {
   DIRECT_CHAT = 'DIRECT_CHAT',
   COUNCIL_SESSION = 'COUNCIL_SESSION',
+  CYCLE = 'CYCLE',
   STATS = 'STATS',
+  ADMIN = 'ADMIN',
 }
 
 // --- Helper for Smart Merging ---
@@ -37,18 +50,30 @@ const mergeStrings = (initial: string[], saved: string[]): string[] => {
 };
 
 export default function App() {
+  // Get current user before any state initializer needs user-scoped storage.
+  const currentUser = getCurrentUser();
+  const currentUserId = currentUser?.id;
+
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!getCurrentUser());
   const [hasEntered, setHasEntered] = useState(false);
   const [currentMode, setCurrentMode] = useState<AppMode>(AppMode.DIRECT_CHAT);
   const [activeArchetype, setActiveArchetype] = useState<ArchetypeId>(ArchetypeId.SOVEREIGN);
-  const [language, setLanguage] = useState<Language>('EN');
+  const [language, setLanguage] = useState<Language>(() => currentUser ? loadUserLanguage(currentUser.id) : 'EN');
   const [statsRefreshKey, setStatsRefreshKey] = useState(0); // Force StatsInterface refresh
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [cycle, setCycle] = useState<IntegrationCycle | null>(() => {
+    if (!currentUser) return null;
+    return loadCurrentCycle(currentUser.id);
+  });
+  const [communicationPreferences, setCommunicationPreferences] = useState(() => {
+    if (!currentUser) return loadCommunicationPreferences('local');
+    return loadCommunicationPreferences(currentUser.id);
+  });
+  const [recentUserSignals, setRecentUserSignals] = useState<string[]>([]);
+  const [emotionalState, setEmotionalState] = useState<EmotionalStateScan | undefined>(undefined);
   
   // Mobile specific state
   const [showMobileArchetypes, setShowMobileArchetypes] = useState(false);
-
-  // Get current user
-  const currentUser = getCurrentUser();
 
   // --- Persistent State for Lifelong System (Per-User Scoped) ---
   
@@ -76,16 +101,51 @@ export default function App() {
 
   // Save changes to persistence (per-user scoped)
   useEffect(() => { 
-    if (currentUser) {
-      saveUserLore(currentUser.id, lore);
+    if (currentUserId) {
+      saveUserLore(currentUserId, lore);
     }
-  }, [lore, currentUser]);
+  }, [lore, currentUserId]);
 
   useEffect(() => { 
-    if (currentUser) {
-      saveUserStats(currentUser.id, stats);
+    if (currentUserId) {
+      saveUserStats(currentUserId, stats);
     }
-  }, [stats, currentUser]);
+  }, [stats, currentUserId]);
+
+  useEffect(() => {
+    if (currentUserId && cycle) {
+      saveCurrentCycle(currentUserId, cycle);
+      persistCurrentCycle(currentUserId, cycle).catch(error => {
+        console.warn('[CYCLE] Remote persistence failed; local backup kept.', error);
+      });
+    }
+  }, [cycle, currentUserId]);
+
+  useEffect(() => {
+    if (currentUserId) {
+      saveCommunicationPreferences(currentUserId, communicationPreferences);
+    }
+  }, [communicationPreferences, currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    saveUserLanguage(currentUserId, language);
+  }, [currentUserId, language]);
+
+  const meaningContext = useMemo(
+    () => buildMeaningContext(communicationPreferences, cycle, emotionalState),
+    [communicationPreferences, cycle, emotionalState],
+  );
+
+  const handleUserSignal = (content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    setRecentUserSignals(prev => {
+      const next = [...prev, trimmed].slice(-6);
+      setEmotionalState(scanEmotionalState(next));
+      return next;
+    });
+  };
 
   // --- Data Manipulation Handlers ---
   const handleScribeUpdate = (updates: ScribeAnalysis) => {
@@ -108,20 +168,208 @@ export default function App() {
     setStatsRefreshKey(prev => prev + 1);
   };
 
-  const handleLoginSuccess = () => {
-    setIsAuthenticated(true);
-    // Reload user data after login
+  const loadSignedInUserState = async () => {
+    const profile = await getProfile({ retries: 2 });
     const user = getCurrentUser();
     if (user) {
+      const preferredLanguage = profile?.language === 'DE' || profile?.language === 'EN'
+        ? profile.language
+        : loadUserLanguage(user.id);
+      setLanguage(preferredLanguage);
+      saveUserLanguage(user.id, preferredLanguage);
       setLore(loadUserLore(user.id));
       setStats(loadUserStats(user.id));
+      setCycle(loadCurrentCycle(user.id));
+      hydrateCurrentCycle(user.id)
+        .then(nextCycle => {
+          if (getCurrentUser()?.id === user.id) {
+            setCycle(nextCycle);
+          }
+        })
+        .catch(error => {
+          console.warn('[CYCLE] Deferred cycle hydration failed; local backup kept.', error);
+        });
+      setCommunicationPreferences(loadCommunicationPreferences(user.id));
+      setRecentUserSignals([]);
+      setEmotionalState(undefined);
+      if (profile) {
+        setIsAdmin(prev => prev || Boolean(profile.isAdmin));
+      }
     }
+  };
+
+  const handleLoginSuccess = async () => {
+    setIsAuthenticated(true);
+    await loadSignedInUserState();
   };
 
   const handleAuthError = () => {
     // Clear auth state and force re-login
+    clearCurrentUser();
     setIsAuthenticated(false);
     setHasEntered(false);
+    setIsAdmin(false);
+  };
+
+  const handleLogout = async () => {
+    await signOutSupabase();
+    clearCurrentUser();
+    setIsAuthenticated(false);
+    setHasEntered(false);
+    setIsAdmin(false);
+    setLore('');
+    setStats({
+      title: '',
+      level: '',
+      state: '',
+      currentQuest: '',
+      attributes: [],
+      milestones: [],
+      inventory: [],
+      calendarEvents: [],
+    });
+    setCycle(null);
+    setRecentUserSignals([]);
+    setEmotionalState(undefined);
+  };
+
+  const handleCommunicationModeChange = (mode: CommunicationMode) => {
+    setCommunicationPreferences(prev => ({
+      ...prev,
+      mode,
+      consentState: mode === 'GROUND' || mode === 'HOLD' ? 'LOW_INTERVENTION' : 'ASK_BEFORE_DEEPENING',
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const handleArchetypeSelect = (id: ArchetypeId) => {
+    setActiveArchetype(id);
+    tutorialEventBus.emit({
+      type: 'archetype_selected',
+      payload: { archetypeId: id },
+    });
+  };
+
+  const handleMobileArchetypeSelect = (id: ArchetypeId) => {
+    handleArchetypeSelect(id);
+    setShowMobileArchetypes(false);
+  };
+
+  const handleOpenMobileArchetypes = () => {
+    setShowMobileArchetypes(true);
+    tutorialEventBus.emit({
+      type: 'mobile_archetype_panel_opened',
+    });
+  };
+
+  const handleStartCycle = (title: string, answers: IntegrationCycle['onboardingAnswers']) => {
+    const nextCycle = startIntegrationCycle(title, answers);
+    setCycle(nextCycle);
+    setStats(prev => ({
+      ...prev,
+      level: language === 'DE' ? 'Tag 1' : 'Day 1',
+      currentQuest: `Cycle: ${nextCycle.theme}`,
+      state: language === 'DE' ? 'Im Integrationszyklus' : 'In integration cycle',
+    }));
+  };
+
+  const handleUpdateCycle = async (record: Omit<CycleDayRecord, 'date'>) => {
+    if (!cycle) {
+      return;
+    }
+
+    if (!record.completedAt) {
+      const nextParticipationDay = getCycleDayNumber(cycle);
+      const existingRecord = cycle.dayRecords.find(dayRecord => dayRecord.day === record.day);
+      if (record.day !== nextParticipationDay && !existingRecord) {
+        console.warn('[CYCLE] Ignored invalid draft save attempt', record.day);
+        return;
+      }
+
+      setCycle(upsertCycleDayRecord(cycle, record));
+      return;
+    }
+
+    const existingCompletedRecord = cycle.dayRecords.find(dayRecord => dayRecord.day === record.day && dayRecord.completedAt);
+    if (!existingCompletedRecord) {
+      const completionCheck = canCompleteCycleDay(cycle, record.day);
+      if (!completionCheck.allowed) {
+        console.warn('[CYCLE] Ignored invalid completion attempt', completionCheck.reason);
+        return;
+      }
+
+      if (record.day > 5 && currentUserId !== 'lion') {
+        try {
+          const access = await checkCycleDayAccess(record.day);
+          if (!access.allowed) {
+            const message = access.message || (language === 'DE' ? 'Beta-Zugang erforderlich.' : 'Beta access required.');
+            const wantsCheckout = window.confirm(
+              language === 'DE'
+                ? `${message}\n\nBeta jetzt freischalten?`
+                : `${message}\n\nUnlock beta now?`
+            );
+            if (wantsCheckout) {
+              await redirectToBetaCheckout();
+            }
+            return;
+          }
+        } catch (error) {
+          console.warn('[CYCLE] Access check failed; keeping local flow available for now.', error);
+        }
+      }
+    }
+
+    const nextCycle = upsertCycleDayRecord(cycle, record);
+    setCycle(nextCycle);
+    setStats(prev => ({
+      ...prev,
+      level: language === 'DE' ? `Tag ${getCycleDayNumber(nextCycle)}` : `Day ${getCycleDayNumber(nextCycle)}`,
+      state: nextCycle.status === 'COMPLETED'
+        ? (language === 'DE' ? 'Zyklus abgeschlossen' : 'Cycle completed')
+        : prev.state,
+    }));
+
+    if (existingCompletedRecord || !currentUserId || !isBlueprintCycleMilestone(record.day)) {
+      return;
+    }
+
+    const savedRecord = nextCycle.dayRecords.find(dayRecord => dayRecord.day === record.day);
+    if (!savedRecord) {
+      return;
+    }
+
+    const meaningPatch = buildCycleMilestoneMeaning(nextCycle, savedRecord, language);
+    if (meaningPatch) {
+      mergeLocalMeaningState(currentUserId, meaningPatch);
+      setStats(prev => applyCycleMilestoneToStats(prev, nextCycle, savedRecord, language));
+      setStatsRefreshKey(prev => prev + 1);
+    }
+  };
+
+  const handleUpdateCycleStarter = (answers: IntegrationCycle['onboardingAnswers']) => {
+    setCycle(prev => {
+      if (!prev) return prev;
+
+      const theme = answers.find(answer => answer.questionId === 'pattern')?.value.trim() || prev.theme;
+
+      return {
+        ...prev,
+        theme,
+        title: prev.title.trim() ? prev.title : theme,
+        onboardingAnswers: answers,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
+  const handleArchiveCycle = () => {
+    if (!currentUser || !cycle) return;
+    const cycleToArchive = cycle;
+    archiveCycle(currentUser.id, cycle);
+    persistArchivedCycle(cycleToArchive).catch(error => {
+      console.warn('[CYCLE] Remote archive failed; local archive kept.', error);
+    });
+    setCycle(null);
   };
 
   // Register auth error handler on mount
@@ -132,6 +380,55 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+    const hydrateSupabaseRedirect = async () => {
+      try {
+        const session = await getSupabaseSession();
+        if (!isMounted || !session) {
+          return;
+        }
+
+        setCurrentUser(session.userId, session.token, session.displayName || session.email);
+        if (session.isStagingAdmin) {
+          setIsAdmin(true);
+        }
+        setIsAuthenticated(true);
+        await loadSignedInUserState();
+      } catch (error) {
+        console.warn('[AUTH] Supabase redirect hydration skipped:', error);
+      }
+    };
+
+    hydrateSupabaseRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserId) return;
+
+    let isMounted = true;
+    hydrateCurrentCycle(currentUserId)
+      .then(nextCycle => {
+        if (isMounted && getCurrentUser()?.id === currentUserId) {
+          setCycle(nextCycle);
+        }
+      })
+      .catch(error => {
+        console.warn('[CYCLE] Boot cycle hydration failed; local backup kept.', error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, currentUserId]);
+
   // Boot verification: check if token is still valid on mount
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -141,26 +438,65 @@ export default function App() {
     
     // One-time boot verification: call /api/me to verify token
     const verifyToken = async () => {
+      const maxAttempts = 3;
+      const retryDelayMs = 700;
+
       try {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        const supabaseSession = await getSupabaseSession();
+        if (supabaseSession) {
+          setCurrentUser(
+            supabaseSession.userId,
+            supabaseSession.token,
+            supabaseSession.displayName || supabaseSession.email
+          );
+          if (supabaseSession.isStagingAdmin) {
+            setIsAdmin(true);
+          }
+        }
+        const latestUser = getCurrentUser();
+        if (!latestUser) {
+          return;
+        }
         
         // Normalize token: remove any existing "Bearer " prefix
-        let token = user.token.trim();
+        let token = latestUser.token.trim();
         while (token.startsWith('Bearer ')) {
           token = token.substring(7).trim();
         }
         
-        const response = await fetch(`${API_BASE_URL}/api/me`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-        
-        if (!response.ok && response.status === 401) {
-          // Token invalid - clear auth and show login
-          console.warn('[AUTH] Boot verification failed: token invalid');
-          handleAuthError();
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const response = await fetch(`${API_BASE_URL}/api/me?ts=${Date.now()}`, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (response.ok) {
+            try {
+              const verified = await response.json();
+              if (typeof verified?.isAdmin === 'boolean') {
+                setIsAdmin(prev => prev || verified.isAdmin);
+              }
+            } catch {
+              // Token validity is enough here; profile hydration handles the rest.
+            }
+            return;
+          }
+
+          if (response.status !== 401 || attempt === maxAttempts) {
+            if (response.status === 401) {
+              console.warn('[AUTH] Boot verification failed: token invalid after retries');
+              handleAuthError();
+            } else {
+              console.warn(`[AUTH] Boot verification returned HTTP ${response.status}; keeping session for retry on next action.`);
+            }
+            return;
+          }
+
+          await new Promise(resolve => window.setTimeout(resolve, retryDelayMs));
         }
       } catch (error) {
         // Network error - don't clear auth, just log
@@ -172,7 +508,17 @@ export default function App() {
   }, [isAuthenticated]);
 
   const toggleLanguage = () => {
-    setLanguage(prev => prev === 'EN' ? 'DE' : 'EN');
+    setLanguage(prev => {
+      const next = prev === 'EN' ? 'DE' : 'EN';
+      const user = getCurrentUser();
+      if (user?.id) {
+        saveUserLanguage(user.id, next);
+        updateProfile({ language: next }).catch(error => {
+          console.warn('[PROFILE] Failed to persist language preference remotely', error);
+        });
+      }
+      return next;
+    });
   };
 
   // Show login screen if not authenticated
@@ -182,7 +528,19 @@ export default function App() {
 
   // Show landing screen if not entered
   if (!hasEntered) {
-    return <LandingScreen onEnter={() => setHasEntered(true)} />;
+    return (
+      <div className="relative min-h-screen bg-violet-950">
+        <button
+          onClick={handleLogout}
+          className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-lg border border-purple-400/25 bg-[#0f0716]/80 px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-purple-200 shadow-lg shadow-black/20 backdrop-blur-md transition-all hover:border-purple-300/50 hover:bg-purple-900/40"
+          title="Logout"
+        >
+          <LogOut size={15} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
+        <LandingScreen onEnter={() => setHasEntered(true)} />
+      </div>
+    );
   }
 
   const ui = getUIText(language);
@@ -194,8 +552,15 @@ export default function App() {
     frontendEnvironment === 'production' ||
     currentHostname === 'the-violet-eightfold42.vercel.app' ||
     apiBaseUrl.toLowerCase().includes('thevioleteightfold-4224');
+  const showStagingMarker =
+    !showProductionMarker &&
+    (frontendEnvironment === 'staging' ||
+      apiBaseUrl.toLowerCase().includes('stage') ||
+      currentHostname.includes('staging') ||
+      currentHostname.includes('git-staging'));
   const showLocalMarker =
     !showProductionMarker &&
+    !showStagingMarker &&
     (frontendEnvironment === 'local' ||
       currentHostname === 'localhost' ||
       currentHostname === '127.0.0.1' ||
@@ -205,8 +570,20 @@ export default function App() {
   const navItems = [
     { mode: AppMode.DIRECT_CHAT, icon: MessageSquare, label: ui.DIRECT_COUNSEL },
     { mode: AppMode.COUNCIL_SESSION, icon: ScrollText, label: ui.COUNCIL_SESSION },
+    { mode: AppMode.CYCLE, icon: CalendarDays, label: language === 'DE' ? 'Zyklus' : 'Cycle' },
     { mode: AppMode.STATS, icon: LayoutDashboard, label: ui.BLUEPRINT },
+    ...(isAdmin ? [{ mode: AppMode.ADMIN, icon: Shield, label: 'Admin' }] : []),
   ];
+
+  const communicationModes: Array<{ mode: CommunicationMode; label: string }> = [
+    { mode: 'HOLD', label: language === 'DE' ? 'Halten' : 'Hold' },
+    { mode: 'MIRROR', label: language === 'DE' ? 'Spiegeln' : 'Mirror' },
+    { mode: 'EXPLORE', label: language === 'DE' ? 'Erkunden' : 'Explore' },
+    { mode: 'GROUND', label: language === 'DE' ? 'Erden' : 'Ground' },
+    { mode: 'ACT', label: language === 'DE' ? 'Handeln' : 'Act' },
+  ];
+  const suggestedCommunicationMode = suggestCommunicationMode(cycle, currentMode);
+  const suggestedCommunicationModeLabel = communicationModes.find(item => item.mode === suggestedCommunicationMode.mode)?.label || suggestedCommunicationMode.mode;
 
   const hideSidePanel = currentMode !== AppMode.DIRECT_CHAT && currentMode !== AppMode.COUNCIL_SESSION; 
 
@@ -219,7 +596,8 @@ export default function App() {
         {/* Logo / Mobile Archetype Toggle */}
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => setShowMobileArchetypes(true)}
+            onClick={handleOpenMobileArchetypes}
+            data-tutorial-id="mobile-archetype-toggle"
             className="w-10 h-10 relative flex items-center justify-center group cursor-pointer transition-transform hover:scale-105 active:scale-95 md:cursor-default"
           >
             <div className="absolute inset-0 bg-purple-500/20 rounded-full blur-md group-hover:bg-purple-500/30 transition-all duration-500"></div>
@@ -254,6 +632,43 @@ export default function App() {
                 <span className={language === 'DE' ? 'text-white' : 'text-purple-500/70'}>DE</span>
             </button>
 
+            <div className="hidden xl:flex items-center gap-1 rounded-full border border-purple-500/15 bg-violet-950/35 p-1">
+                {communicationModes.map(item => (
+                    <button
+                        key={item.mode}
+                        onClick={() => handleCommunicationModeChange(item.mode)}
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] transition-all ${
+                          communicationPreferences.mode === item.mode
+                            ? 'bg-purple-500/25 text-white ring-1 ring-purple-200/20'
+                            : 'text-purple-400/65 hover:bg-purple-500/10 hover:text-purple-100'
+                        }`}
+                        title={language === 'DE' ? `Kommunikationsmodus: ${item.label}` : `Communication mode: ${item.label}`}
+                    >
+                      {item.label}
+                    </button>
+                ))}
+            </div>
+
+            {communicationPreferences.mode !== suggestedCommunicationMode.mode && (
+                <button
+                    onClick={() => handleCommunicationModeChange(suggestedCommunicationMode.mode)}
+                    className="hidden 2xl:flex max-w-[260px] items-center gap-2 rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-sky-100 transition-all hover:border-sky-200/40 hover:bg-sky-400/15"
+                    title={suggestedCommunicationMode.reason[language]}
+                >
+                    <Sparkles size={13} />
+                    <span>{language === 'DE' ? 'Vorschlag' : 'Suggestion'}: {suggestedCommunicationModeLabel}</span>
+                </button>
+            )}
+
+            <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-950/40 border border-purple-500/20 text-xs font-bold text-purple-200 hover:bg-red-950/40 hover:border-red-400/40 hover:text-red-100 transition-all duration-300"
+                title="Logout"
+            >
+                <LogOut size={14} className="text-purple-400" />
+                <span className="hidden sm:inline uppercase tracking-[0.12em]">Logout</span>
+            </button>
+
             {/* Desktop Navigation (Hidden on Mobile) */}
             <nav className="hidden md:flex items-center gap-1 bg-[#0a0510]/50 p-1.5 rounded-xl border border-purple-500/10 shadow-inner">
                 {navItems.map(item => (
@@ -284,7 +699,8 @@ export default function App() {
             <div className="w-full flex flex-col items-center p-4 z-10 my-auto">
                 <RoundTable 
                   activeArchetype={activeArchetype} 
-                  onSelectArchetype={setActiveArchetype} 
+                  onSelectArchetype={handleArchetypeSelect}
+                  onCoreClick={() => setHasEntered(false)}
                   language={language}
                   mini={false}
                 />
@@ -315,18 +731,47 @@ export default function App() {
            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-32 bg-purple-600/5 blur-[100px] pointer-events-none" />
            
            {currentMode === AppMode.DIRECT_CHAT && (
-             <ChatInterface activeArchetype={activeArchetype} language={language} currentLore={lore} />
+             <ChatInterface
+                activeArchetype={activeArchetype}
+                language={language}
+                currentLore={lore}
+                meaningContext={meaningContext}
+                onUserSignal={handleUserSignal}
+             />
            )}
            {currentMode === AppMode.COUNCIL_SESSION && (
              <CouncilSession 
                 language={language} 
                 currentStats={stats} 
                 currentLore={lore} 
+                meaningContext={meaningContext}
+                onUserSignal={handleUserSignal}
                 onIntegrate={handleScribeUpdate} 
              />
            )}
+           {currentMode === AppMode.CYCLE && (
+             <CycleInterface
+                language={language}
+                cycle={cycle}
+                onStartCycle={handleStartCycle}
+                onUpdateCycleStarter={handleUpdateCycleStarter}
+                onUpdateCycle={handleUpdateCycle}
+                onArchiveCycle={handleArchiveCycle}
+             />
+           )}
            {currentMode === AppMode.STATS && (
-             <StatsInterface key={statsRefreshKey} language={language} stats={stats} />
+             <StatsInterface
+                key={`${statsRefreshKey}-${language}`}
+                language={language}
+                stats={stats}
+                cycle={cycle}
+                meaningContext={meaningContext}
+                currentLore={lore}
+                onUpdateCycleStarter={handleUpdateCycleStarter}
+             />
+           )}
+           {currentMode === AppMode.ADMIN && isAdmin && (
+             <AdminInterface language={language} />
            )}
         </div>
       </main>
@@ -356,6 +801,12 @@ export default function App() {
              );
          })}
       </div>
+
+      {showStagingMarker && (
+        <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-amber-300/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200 shadow-[0_0_18px_rgba(251,191,36,0.12)] backdrop-blur-md pointer-events-none">
+          Staging
+        </div>
+      )}
 
       {showProductionMarker && (
         <div className="fixed left-4 bottom-24 md:bottom-4 z-[55] rounded-md border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-200 shadow-[0_0_18px_rgba(52,211,153,0.12)] backdrop-blur-md pointer-events-none">
@@ -389,7 +840,11 @@ export default function App() {
                   <div className="scale-110">
                     <RoundTable 
                         activeArchetype={activeArchetype} 
-                        onSelectArchetype={setActiveArchetype} 
+                        onSelectArchetype={handleMobileArchetypeSelect}
+                        onCoreClick={() => {
+                          setShowMobileArchetypes(false);
+                          setHasEntered(false);
+                        }}
                         language={language}
                         mini={false}
                     />

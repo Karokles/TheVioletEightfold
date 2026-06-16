@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "ts-node --esm server.ts",
+    "dev": "node scripts/dev-server.js",
     "build": "tsc",
     "start": "node dist/server.js",
     "test:smoke": "node scripts/smoke-test.js",
+    "test:no-budget": "node scripts/no-budget-smoke-test.js",
     "test:smoke:prod": "node scripts/smoke-test.js https://thevioleteightfold-4224.onrender.com"
   },
   "dependencies": {
@@ -19,7 +20,8 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
-    "openai": "^4.20.1"
+    "openai": "^4.20.1",
+    "stripe": "^22.2.1"
   },
   "devDependencies": {
     "ts-node": "^10.9.2",

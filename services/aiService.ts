@@ -1,6 +1,7 @@
 import { ArchetypeId } from '../constants';
-import { Language, Message } from '../types';
+import { Language, MeaningContext, Message } from '../types';
 import { getCurrentUser } from './userService';
+import { loadLocalMeaningState, normalizeMeaningState, saveLocalMeaningState } from './meaningStateService';
 
 // Production safety check: ensure API base URL is set in production builds
 const getApiBaseUrl = (): string => {
@@ -40,13 +41,68 @@ const getAuthHeaders = () => {
   };
 };
 
+export class PaywallRequiredError extends Error {
+  details: any;
+
+  constructor(message: string, details: any) {
+    super(message);
+    this.name = 'PaywallRequiredError';
+    this.details = details;
+  }
+}
+
+const readErrorBody = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch {
+    return { error: `HTTP ${response.status}: ${response.statusText}` };
+  }
+};
+
+const handleUnauthorizedResponse = async (response: Response): Promise<never> => {
+  const errorData = await readErrorBody(response);
+  const reason = errorData.reason || '';
+  const { handleAuthError } = await import('./userService');
+  handleAuthError();
+  const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
+
+  if (
+    reason.startsWith('invalid_') ||
+    reason === 'expired' ||
+    reason === 'missing_token' ||
+    reason === 'legacy_token_invalid'
+  ) {
+    throw new Error(message);
+  }
+
+  throw new Error(message);
+};
+
+const throwApiResponseError = async (response: Response, context: string): Promise<never> => {
+  if (response.status === 401) {
+    return handleUnauthorizedResponse(response);
+  }
+
+  const errorData = await readErrorBody(response);
+  const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+  console.error(`${context} API error:`, errorMsg, 'Status:', response.status);
+
+  if (response.status === 402 || errorData.error === 'paywall_required') {
+    throw new PaywallRequiredError(errorMsg, errorData);
+  }
+
+  throw new Error(errorMsg);
+};
+
 // Direct chat with an archetype (for ChatInterface)
 export const sendMessageToArchetype = async (
   archetypeId: ArchetypeId,
   message: string,
   lang: Language,
   currentLore: string,
-  conversationHistory?: Message[]
+  conversationHistory?: Message[],
+  meaningContext?: MeaningContext,
+  signal?: AbortSignal
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -90,45 +146,14 @@ export const sendMessageToArchetype = async (
         lore: currentLore,
         activeArchetype: archetypeId, // This signals direct chat mode
         language: lang,
+        meaningContext,
       },
     }),
+    signal,
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Direct chat API error:', errorMsg, 'Status:', response.status, 'URL:', API_BASE_URL);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Direct chat');
   }
 
   const data = await response.json();
@@ -143,7 +168,8 @@ export const sendMessageToArchetype = async (
 export const startCouncilSession = async (
   topic: string,
   lang: Language,
-  currentLore: string
+  currentLore: string,
+  meaningContext?: MeaningContext
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -159,7 +185,7 @@ export const startCouncilSession = async (
     {
       id: '1',
       role: 'user',
-      content: topic,
+      content: `${lang === 'DE' ? '[Antworte auf Deutsch.]' : '[Respond in English.]'} ${topic}`,
       timestamp: Date.now(),
     },
   ];
@@ -173,45 +199,13 @@ export const startCouncilSession = async (
       userProfile: {
         lore: currentLore,
         language: lang,
+        meaningContext,
       },
     }),
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Council API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Council');
   }
 
   const data = await response.json();
@@ -225,7 +219,8 @@ export const sendMessageToCouncil = async (
   message: string,
   conversationHistory: Message[],
   lang: Language,
-  currentLore: string
+  currentLore: string,
+  meaningContext?: MeaningContext
 ): Promise<AsyncIterable<{ text: string }>> => {
   const user = getCurrentUser();
   if (!user || !user.id) {
@@ -243,7 +238,7 @@ export const sendMessageToCouncil = async (
     {
       id: Date.now().toString(),
       role: 'user',
-      content: message,
+      content: `${lang === 'DE' ? '[Antworte auf Deutsch.]' : '[Respond in English.]'} ${message}`,
       timestamp: Date.now(),
     },
   ];
@@ -262,45 +257,13 @@ export const sendMessageToCouncil = async (
       userProfile: {
         lore: currentLore,
         language: lang,
+        meaningContext,
       },
     }),
   });
 
   if (!response.ok) {
-    // Handle 401 Unauthorized: clear tokens and force re-login
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      // Check for invalid_* reasons to trigger auto-logout
-      const reason = errorData.reason || '';
-      // Handle all 401 reasons: invalid_signature, expired, missing_token, legacy_token_invalid, etc.
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      // Other 401 reasons (malformed, etc.) - still clear token
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Council API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Council');
   }
 
   const data = await response.json();
@@ -311,7 +274,7 @@ export const sendMessageToCouncil = async (
 };
 
 // Login function
-export const login = async (username: string, secret: string): Promise<{ userId: string; token: string }> => {
+export const login = async (username: string, secret: string): Promise<{ userId: string; token: string; displayName?: string }> => {
   const response = await fetch(`${API_BASE_URL}/api/login`, {
     method: 'POST',
     headers: {
@@ -335,8 +298,11 @@ export async function analyzeMeaning(
     sessionId?: string;
     mode?: 'single' | 'council';
     activeArchetype?: string;
+    language?: Language;
     userLore?: string;
     currentQuestState?: { title?: string; state?: string; objective?: string };
+    meaningContext?: MeaningContext;
+    persist?: boolean;
   }
 ): Promise<import('../types').MeaningAnalysisResult> {
   const user = getCurrentUser();
@@ -351,84 +317,57 @@ export async function analyzeMeaning(
       sessionId: options?.sessionId,
       mode: options?.mode || 'council',
       activeArchetype: options?.activeArchetype,
+      language: options?.language,
       messages: messages.map(msg => ({
         role: msg.role,
         content: msg.content,
         meta: msg.archetypeId ? { archetypeId: msg.archetypeId } : undefined
       })),
       userLore: options?.userLore,
-      currentQuestState: options?.currentQuestState
+      currentQuestState: options?.currentQuestState,
+      meaningContext: options?.meaningContext,
+      persist: Boolean(options?.persist)
     }),
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-      throw new Error(message);
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
-    }
-    const errorMsg = errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-    console.error('Meaning analysis API error:', errorMsg, 'Status:', response.status);
-    throw new Error(errorMsg);
+    await throwApiResponseError(response, 'Meaning analysis');
   }
 
   const data = await response.json();
   
-  // Persist to localStorage as fallback
-  try {
-    const user = getCurrentUser();
-    if (user?.id) {
-      const storageKey = `user_${user.id}_meaning_state`;
-      const existing = localStorage.getItem(storageKey);
-      let existingData: import('../types').MeaningAnalysisResult = {
-        questLogEntries: [],
-        soulTimelineEvents: [],
-        breakthroughs: []
-      };
-      
-      if (existing) {
-        try {
-          existingData = JSON.parse(existing);
-        } catch (e) {
-          console.warn('Failed to parse existing meaning state from localStorage');
-        }
-      }
-      
-      // Merge new data with deduplication by id
-      const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
-        const seen = new Set<string>();
-        return arr.filter(item => {
-          if (seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
+  if (options?.persist) {
+    // Persist to localStorage as fallback only when the user explicitly saves/integrates.
+    try {
+      const user = getCurrentUser();
+      if (user?.id) {
+        const existingData = loadLocalMeaningState(user.id);
+
+        // Merge new data with deduplication by id
+        const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
+          const seen = new Set<string>();
+          return arr.filter(item => {
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+        };
+
+        const merged = normalizeMeaningState({
+          questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
+          soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
+          breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs]),
+          emotionalState: data.emotionalState || existingData.emotionalState,
+          attributeUpdates: data.attributeUpdates || existingData.attributeUpdates,
+          skillUpdates: data.skillUpdates || existingData.skillUpdates,
+          nextQuestState: data.nextQuestState || existingData.nextQuestState,
         });
-      };
-      
-      const merged: import('../types').MeaningAnalysisResult = {
-        questLogEntries: dedupeById([...data.questLogEntries, ...existingData.questLogEntries]),
-        soulTimelineEvents: dedupeById([...data.soulTimelineEvents, ...existingData.soulTimelineEvents]),
-        breakthroughs: dedupeById([...data.breakthroughs, ...existingData.breakthroughs])
-      };
-      
-      localStorage.setItem(storageKey, JSON.stringify(merged));
+
+        saveLocalMeaningState(user.id, merged);
+      }
+    } catch (e) {
+      console.warn('Failed to persist meaning state to localStorage:', e);
     }
-  } catch (e) {
-    console.warn('Failed to persist meaning state to localStorage:', e);
   }
   
   return data;
@@ -445,6 +384,32 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
     };
   }
 
+  const loadLocalState = (): import('../types').MeaningAnalysisResult => {
+    return loadLocalMeaningState(user.id);
+  };
+
+  const dedupeById = <T extends { id: string }>(arr: T[]): T[] => {
+    const seen = new Set<string>();
+    return arr.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  };
+
+  const mergeMeaningState = (
+    primary: import('../types').MeaningAnalysisResult,
+    secondary: import('../types').MeaningAnalysisResult,
+  ): import('../types').MeaningAnalysisResult => normalizeMeaningState({
+    questLogEntries: dedupeById([...(primary.questLogEntries || []), ...(secondary.questLogEntries || [])]),
+    soulTimelineEvents: dedupeById([...(primary.soulTimelineEvents || []), ...(secondary.soulTimelineEvents || [])]),
+    breakthroughs: dedupeById([...(primary.breakthroughs || []), ...(secondary.breakthroughs || [])]),
+    emotionalState: primary.emotionalState || secondary.emotionalState,
+    attributeUpdates: primary.attributeUpdates || secondary.attributeUpdates,
+    skillUpdates: primary.skillUpdates || secondary.skillUpdates,
+    nextQuestState: primary.nextQuestState || secondary.nextQuestState,
+  });
+
   // Try backend first
   try {
     const response = await fetch(`${API_BASE_URL}/api/meaning/state`, {
@@ -453,10 +418,19 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
     });
 
     if (response.ok) {
-      const data = await response.json();
+      const backendData = await response.json();
+      const data = mergeMeaningState(loadLocalState(), {
+        questLogEntries: Array.isArray(backendData.questLogEntries) ? backendData.questLogEntries : [],
+        soulTimelineEvents: Array.isArray(backendData.soulTimelineEvents) ? backendData.soulTimelineEvents : [],
+        breakthroughs: Array.isArray(backendData.breakthroughs) ? backendData.breakthroughs : [],
+        emotionalState: backendData.emotionalState,
+        attributeUpdates: backendData.attributeUpdates,
+        skillUpdates: backendData.skillUpdates,
+        nextQuestState: backendData.nextQuestState,
+      });
       // Also update localStorage as backup
       try {
-        localStorage.setItem(`user_${user.id}_meaning_state`, JSON.stringify(data));
+        saveLocalMeaningState(user.id, data);
       } catch (e) {
         console.warn('Failed to backup meaning state to localStorage');
       }
@@ -467,21 +441,7 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
   }
 
   // Fallback to localStorage
-  try {
-    const storageKey = `user_${user.id}_meaning_state`;
-    const existing = localStorage.getItem(storageKey);
-    if (existing) {
-      return JSON.parse(existing);
-    }
-  } catch (e) {
-    console.warn('Failed to load meaning state from localStorage');
-  }
-
-  return {
-    questLogEntries: [],
-    soulTimelineEvents: [],
-    breakthroughs: []
-  };
+  return loadLocalState();
 }
 
 // Integration endpoint (for questlog integration) - DEPRECATED: Use analyzeMeaning instead
@@ -499,34 +459,7 @@ export async function integrateSession(
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch {
-        errorData = { error: 'unauthorized' };
-      }
-      
-      const reason = errorData.reason || '';
-      if (reason.startsWith('invalid_') || reason === 'expired' || reason === 'missing_token' || reason === 'legacy_token_invalid') {
-        const { handleAuthError } = await import('./userService');
-        handleAuthError();
-        const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
-        throw new Error(message);
-      }
-      
-      const { handleAuthError } = await import('./userService');
-      handleAuthError();
-      throw new Error(errorData.message || 'Session expired. Please sign in again.');
-    }
-    
-    let errorData;
-    try {
-      errorData = await response.json();
-    } catch {
-      errorData = { error: 'Unknown error' };
-    }
-    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    await throwApiResponseError(response, 'Integration');
   }
 
   return await response.json();

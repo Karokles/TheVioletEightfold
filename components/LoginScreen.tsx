@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { login } from '../services/aiService';
+import React, { useEffect, useState } from 'react';
+import { login as localLogin } from '../services/aiService';
+import { consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail, signUpWithEmail } from '../services/supabaseAuth';
 import { setCurrentUser } from '../services/userService';
 import { getUIText } from '../config/loader';
 import { Language } from '../types';
-import { LogIn, Sparkles } from 'lucide-react';
+import { LogIn, Sparkles, UserPlus } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -11,26 +12,139 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, language }) => {
+  const authMode = import.meta.env.VITE_AUTH_MODE || 'local';
+  const supabaseEnabled = authMode === 'supabase' && isSupabaseAuthAvailable;
+  const supabaseMisconfigured = authMode === 'supabase' && !isSupabaseAuthAvailable;
+  const [formMode, setFormMode] = useState<'signIn' | 'signUp' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
   const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
+  const [email, setEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState('');
 
   const ui = getUIText(language);
+  const normalizeEmailInput = (value: string) => value.trim().toLowerCase();
+
+  const confirmedMessage = language === 'DE'
+    ? 'Email bestaetigt. Du wirst angemeldet...'
+    : 'Email confirmed. Signing you in...';
+  const confirmEmailMessage = language === 'DE'
+    ? 'Account erstellt. Bitte bestaetige deine Email-Adresse und melde dich danach an.'
+    : 'Account created. Please confirm your email address, then sign in.';
+  const resendMessage = language === 'DE'
+    ? 'Bestaetigungs-Email erneut gesendet.'
+    : 'Confirmation email sent again.';
+  const notConfirmedMessage = language === 'DE'
+    ? 'Diese Email ist noch nicht bestaetigt. Pruefe dein Postfach oder sende die Bestaetigung erneut.'
+    : 'This email is not confirmed yet. Check your inbox or resend the confirmation.';
+
+  useEffect(() => {
+    if (!supabaseEnabled || !hasSupabaseAuthRedirectParams()) return;
+
+    let isMounted = true;
+    setLoading(true);
+    setMessage(language === 'DE' ? 'Email-Bestaetigung wird verarbeitet...' : 'Processing email confirmation...');
+    setError('');
+
+    consumeSupabaseAuthRedirect()
+      .then(authResult => {
+        if (!isMounted) return;
+        if (authResult) {
+          setMessage(confirmedMessage);
+          setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || email);
+          onLoginSuccess();
+          return;
+        }
+
+        setMessage(language === 'DE' ? 'Email bestaetigt. Du kannst dich jetzt anmelden.' : 'Email confirmed. You can sign in now.');
+        setFormMode('signIn');
+      })
+      .catch(err => {
+        if (!isMounted) return;
+        setError(err.message || (language === 'DE' ? 'Email-Bestaetigung fehlgeschlagen.' : 'Email confirmation failed.'));
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [confirmedMessage, email, language, onLoginSuccess, supabaseEnabled]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setMessage('');
     setLoading(true);
 
     try {
-      const { userId, token } = await login(username, secret);
-      setCurrentUser(userId, token);
+      if (formMode === 'signUp') {
+        const normalizedEmail = normalizeEmailInput(email);
+        const result = await signUpWithEmail(normalizedEmail, secret, displayName);
+        if (result.authResult) {
+          setCurrentUser(
+            result.authResult.userId,
+            result.authResult.token,
+            result.authResult.displayName || result.authResult.email || normalizedEmail
+          );
+          onLoginSuccess();
+          return;
+        }
+
+        if (result.requiresEmailConfirmation) {
+          setPendingConfirmationEmail(result.email || normalizedEmail);
+          setMessage(confirmEmailMessage);
+        } else {
+          setMessage(language === 'DE' ? 'Account erstellt. Du kannst dich jetzt anmelden.' : 'Account created. You can sign in now.');
+        }
+        return;
+      }
+
+      if (formMode === 'signIn') {
+        const normalizedEmail = normalizeEmailInput(email);
+        const authResult = await signInWithEmail(normalizedEmail, secret);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || normalizedEmail);
+      } else {
+        const authResult = await localLogin(username, secret);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || username);
+      }
       onLoginSuccess();
     } catch (err: any) {
-      setError(err.message || ui.LOGIN_ERROR);
+      const message = err.message || ui.LOGIN_ERROR;
+      if (formMode === 'signIn' && message.toLowerCase().includes('email not confirmed')) {
+        setPendingConfirmationEmail(normalizeEmailInput(email));
+        setError(notConfirmedMessage);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const targetEmail = normalizeEmailInput(pendingConfirmationEmail || email);
+    if (!targetEmail) return;
+
+    setError('');
+    setMessage('');
+    setResending(true);
+
+    try {
+      await resendSignupConfirmation(targetEmail);
+      setPendingConfirmationEmail(targetEmail);
+      setMessage(resendMessage);
+    } catch (err: any) {
+      setError(err.message || (language === 'DE' ? 'Bestaetigungs-Email konnte nicht gesendet werden.' : 'Could not send confirmation email.'));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -59,31 +173,110 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
             {ui.LOGIN_TITLE}
           </h2>
 
+          {supabaseEnabled && (
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              <button
+                type="button"
+                onClick={() => setFormMode('signIn')}
+                className={`py-2 rounded-lg text-sm font-semibold transition-all ${formMode === 'signIn' ? 'bg-purple-600 text-white' : 'bg-violet-950/50 text-purple-300 border border-purple-500/20'}`}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormMode('signUp')}
+                className={`py-2 rounded-lg text-sm font-semibold transition-all ${formMode === 'signUp' ? 'bg-purple-600 text-white' : 'bg-violet-950/50 text-purple-300 border border-purple-500/20'}`}
+              >
+                Create account
+              </button>
+            </div>
+          )}
+
           {error && (
             <div className="mb-4 p-3 bg-red-900/30 border border-red-500/30 rounded-lg text-red-300 text-sm">
               {error}
             </div>
           )}
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-purple-300 mb-2">
-                {ui.LOGIN_USERNAME}
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
-                placeholder={ui.LOGIN_USERNAME}
-                required
-                disabled={loading}
-              />
+          {message && (
+            <div className="mb-4 p-3 bg-emerald-900/20 border border-emerald-400/30 rounded-lg text-emerald-200 text-sm">
+              {message}
             </div>
+          )}
+
+          {supabaseEnabled && pendingConfirmationEmail && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resending || loading}
+              className="mb-4 w-full rounded-lg border border-purple-400/25 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-100 transition-all hover:border-purple-300/45 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resending
+                ? (language === 'DE' ? 'Sende...' : 'Sending...')
+                : (language === 'DE' ? 'Bestaetigung erneut senden' : 'Resend confirmation')}
+            </button>
+          )}
+
+          {supabaseMisconfigured && (
+            <div className="mb-4 p-3 bg-amber-900/20 border border-amber-400/30 rounded-lg text-amber-200 text-sm">
+              Supabase Auth is selected for this environment, but the frontend Supabase URL or publishable key is missing.
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {formMode === 'local' ? (
+              <div>
+                <label className="block text-sm font-medium text-purple-300 mb-2">
+                  {ui.LOGIN_USERNAME}
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+                  placeholder={ui.LOGIN_USERNAME}
+                  required
+                  disabled={loading}
+                />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-purple-300 mb-2">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+                    placeholder="you@example.com"
+                    required
+                    disabled={loading}
+                  />
+                </div>
+
+                {formMode === 'signUp' && (
+                  <div>
+                    <label className="block text-sm font-medium text-purple-300 mb-2">
+                      Name
+                    </label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+                      placeholder="Display name"
+                      disabled={loading}
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-purple-300 mb-2">
-                {ui.LOGIN_SECRET}
+                {formMode === 'local' ? ui.LOGIN_SECRET : 'Password'}
               </label>
               <input
                 type="password"
@@ -98,7 +291,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
 
             <button
               type="submit"
-              disabled={loading || !username || !secret}
+              disabled={supabaseMisconfigured || loading || !secret || (formMode === 'local' ? !username : !email)}
               className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold uppercase tracking-widest rounded-lg shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               {loading ? (
@@ -108,17 +301,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
                 </>
               ) : (
                 <>
-                  <LogIn size={20} />
-                  <span>{ui.LOGIN_BUTTON}</span>
+                  {formMode === 'signUp' ? <UserPlus size={20} /> : <LogIn size={20} />}
+                  <span>{formMode === 'signUp' ? 'Create account' : ui.LOGIN_BUTTON}</span>
                 </>
               )}
             </button>
           </div>
         </form>
 
-        <p className="text-center text-xs text-purple-500/40 mt-6">
-          Test users: friend1-friend5 (secrets: secret1-secret5)
-        </p>
+        {formMode === 'local' && !supabaseMisconfigured && (
+          <p className="text-center text-xs text-purple-500/40 mt-6">
+            Test users: friend1-friend5 (secrets: secret1-secret5)
+          </p>
+        )}
       </div>
     </div>
   );

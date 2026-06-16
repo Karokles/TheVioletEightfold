@@ -5,8 +5,31 @@ services:
     buildCommand: cd server && npm install && npm run build
     startCommand: cd server && npm start
     envVars:
+      - key: APP_ENV
+        sync: false
+        # Stage service: staging
+        # Production service later: production
       - key: NODE_ENV
         value: production
+      - key: AI_PROVIDER_ENABLED
+        sync: false
+        # Stage with live AI: true
+      - key: DATABASE_ENABLED
+        sync: false
+        # Stage/production with Supabase: true
+      - key: PAYMENT_ENABLED
+        sync: false
+        # Stage with Stripe test mode: true. Production live payments: true after checklist.
+      - key: SUPABASE_AUTH_ENABLED
+        sync: false
+        # Stage/production real users: true
+      - key: AUTH_STRICT_MODE
+        value: true
+      - key: USAGE_LIMITS_ENABLED
+        sync: false
+        # Stage/production first-user testing: true
+      - key: LOCAL_AUTH_ENABLED
+        value: false
       - key: PORT
         fromService:
           type: web
@@ -14,25 +37,45 @@ services:
           property: port
       - key: JWT_SECRET
         sync: false
-        # Set this in Render Dashboard → Environment → JWT_SECRET
         # Generate with: openssl rand -base64 32
       - key: OPENAI_API_KEY
         sync: false
-        # Set this in Render Dashboard → Environment → OPENAI_API_KEY
+      - key: STRIPE_SECRET_KEY
+        sync: false
+        # Backend-only. Use sk_test_... on staging and sk_live_... on production.
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+        # From the Stripe webhook endpoint after creating it.
+      - key: STRIPE_BETA_PRICE_ID
+        sync: false
+        # Preferred for automatic Checkout Session activation.
+      - key: STRIPE_BETA_PAYMENT_LINK_URL
+        sync: false
+        # Optional fallback while the Price/Webhook flow is being configured.
+      - key: FRONTEND_APP_URL
+        sync: false
+        # Used for Stripe success/cancel redirects.
       - key: ALLOWED_ORIGINS
         sync: false
-        # Set this in Render Dashboard → Environment → ALLOWED_ORIGINS
-        # Example: https://your-app.vercel.app,http://localhost:3000
+        # Stage: https://the-violet-eightfold-git-staging-the-violet-eightfolds-projects.vercel.app
+        # Production: https://the-violet-eightfold-git-main-the-violet-eightfolds-projects.vercel.app
       - key: SUPABASE_URL
         sync: false
-        optional: true
-        # Optional: Set if using Supabase
+        # Required for staging/production Supabase Auth and persistence.
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-        optional: true
-        # Optional: Set if using Supabase
+        # Required on backend only. Never expose this in Vercel.
+      - key: FREE_COUNCIL_SESSIONS
+        value: 1
+      - key: FREE_COUNCIL_REPLIES_PER_SESSION
+        value: 3
+      - key: FREE_SINGLE_VOICE_REPLIES
+        value: 3
+      - key: FREE_BLUEPRINT_SAVES
+        value: 1
+      - key: FREE_CYCLE_DAYS
+        value: 5
+      - key: BETA_ACCESS_DAYS
+        value: 14
     healthCheckPath: /api/health
     plan: starter
-
-
-
