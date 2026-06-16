@@ -601,15 +601,17 @@ h3 {
   --sigil-rgb: 220, 185, 128;
   --sigil-rgb-soft: 214, 198, 255;
   position: absolute;
-  width: 82px;
-  height: 82px;
+  width: 92px;
+  height: 92px;
   border-radius: 50%;
-  border: 1px solid rgba(var(--sigil-rgb), 0.22);
-  background: radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.08), transparent 68%);
-  opacity: 0.16;
+  border: 1px solid rgba(var(--sigil-rgb), 0.26);
+  background:
+    radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.12), transparent 66%),
+    radial-gradient(circle at center, rgba(var(--sigil-rgb-soft), 0.04), transparent 78%);
+  opacity: 0.2;
   pointer-events: none;
   z-index: 1;
-  mix-blend-mode: screen;
+  mix-blend-mode: normal;
   filter:
     drop-shadow(0 0 12px rgba(var(--sigil-rgb), 0.16))
     drop-shadow(0 0 22px rgba(var(--sigil-rgb-soft), 0.08));
@@ -617,16 +619,21 @@ h3 {
     opacity 240ms ease,
     transform 240ms ease,
     filter 240ms ease,
-    border-color 240ms ease;
+    border-color 240ms ease,
+    background 240ms ease;
 }
 
 .interactive-surface:hover .council-mark {
-  opacity: 0.4;
-  transform: scale(1.07);
-  border-color: rgba(var(--sigil-rgb-soft), 0.42);
+  opacity: 0.96;
+  transform: scale(1.1);
+  border-color: rgba(var(--sigil-rgb-soft), 0.92);
+  background:
+    radial-gradient(circle at center, rgba(var(--sigil-rgb), 0.28), transparent 58%),
+    radial-gradient(circle at center, rgba(var(--sigil-rgb-soft), 0.16), transparent 76%);
   filter:
-    drop-shadow(0 0 18px rgba(var(--sigil-rgb), 0.34))
-    drop-shadow(0 0 32px rgba(var(--sigil-rgb-soft), 0.18));
+    drop-shadow(0 0 12px rgba(255, 255, 255, 0.16))
+    drop-shadow(0 0 24px rgba(var(--sigil-rgb), 0.52))
+    drop-shadow(0 0 46px rgba(var(--sigil-rgb-soft), 0.34));
 }
 
 .council-mark::before,
@@ -635,6 +642,42 @@ h3 {
   position: absolute;
   inset: 0;
   border-radius: inherit;
+}
+
+.council-mark-text {
+  position: absolute;
+  left: 50%;
+  bottom: -18px;
+  transform: translateX(-50%) translateY(6px);
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--sigil-rgb-soft), 0.22);
+  background: rgba(9, 7, 20, 0.74);
+  color: rgba(var(--sigil-rgb-soft), 0.84);
+  font-family: var(--font-system);
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease,
+    border-color 220ms ease,
+    color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.interactive-surface:hover .council-mark-text {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  border-color: rgba(var(--sigil-rgb-soft), 0.5);
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(var(--sigil-rgb-soft), 0.14) inset,
+    0 0 18px rgba(var(--sigil-rgb), 0.16),
+    0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .council-mark-1 {
@@ -814,6 +857,16 @@ h3 {
     linear-gradient(90deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
     linear-gradient(0deg, transparent 49%, rgba(var(--sigil-rgb-soft), 0.22) 50%, transparent 51%),
     radial-gradient(circle at center, rgba(var(--sigil-rgb-soft), 0.24) 0 4px, transparent 5px);
+}
+
+.metric .council-mark {
+  top: 18px;
+  right: 18px;
+}
+
+.pathway .council-mark {
+  top: 18px;
+  right: 18px;
 }
 
 .metric-mark {

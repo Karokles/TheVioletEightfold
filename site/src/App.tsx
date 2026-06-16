@@ -1,23 +1,35 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 const thresholdLines = [
-  'Council Sessions for moments that refuse simple answers.',
-  'Soul Blueprint, Eternal Mirror, and cycle memory held in one reflective system.',
-  'A protected threshold between public invitation and private inner work.',
+  {
+    member: 'Sovereign',
+    text: 'Council Sessions for moments that refuse simple answers.',
+  },
+  {
+    member: 'Warrior',
+    text: 'Soul Blueprint, Eternal Mirror, and cycle memory held in one reflective system.',
+  },
+  {
+    member: 'Sage',
+    text: 'A protected threshold between public invitation and private inner work.',
+  },
 ];
 
 const chambers = [
   {
+    member: 'Lover',
     title: 'Council Sessions',
     motif: 'Circular chamber',
     text: 'Eight symbolic voices gather around one inner table. Not to overpower you with answers, but to surface the shape of what is already speaking inside you.',
   },
   {
+    member: 'Creator',
     title: 'Soul Blueprint',
     motif: 'Living map',
     text: 'A cartography of tendencies, fragments, breakthroughs, and unfinished patterns. Less a profile than an evolving inner architecture.',
   },
   {
+    member: 'Caregiver',
     title: 'Eternal Mirror',
     motif: 'Fractured reflection',
     text: 'The mirror does not invent a self. It reveals where the self is split, hidden, defended, remembered, and ready to be integrated.',
@@ -26,10 +38,12 @@ const chambers = [
 
 const pathways = [
   {
+    member: 'Explorer',
     title: 'Psychogeography',
     text: 'Memory as terrain. Desire as weather. Attention as navigation. Lazarus treats inner life less like a checklist and more like a strange continent that must be walked.',
   },
   {
+    member: 'Alchemist',
     title: 'The Cycle',
     text: 'Recursive days, returning symbols, orbital diagrams, and phases of integration. The path does not move in a straight line because people do not.',
   },
@@ -131,13 +145,15 @@ export default function App() {
           {thresholdLines.map((item, index) => (
             <div
               className={`metric interactive-surface float-subtle float-delay-${index + 1}`}
-              key={item}
+              key={item.text}
               onPointerMove={handleSurfacePointerMove}
               onPointerLeave={handleSurfacePointerLeave}
             >
-              <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true" />
+              <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true">
+                <span className="council-mark-text">{item.member}</span>
+              </span>
               <span className="metric-mark" />
-              <p>{item}</p>
+              <p>{item.text}</p>
             </div>
           ))}
         </div>
@@ -157,7 +173,9 @@ export default function App() {
               onPointerMove={handleSurfacePointerMove}
               onPointerLeave={handleSurfacePointerLeave}
             >
-              <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true" />
+              <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true">
+                <span className="council-mark-text">{chamber.member}</span>
+              </span>
               <p className="card-motif">{chamber.motif}</p>
               <h3>{chamber.title}</h3>
               <p>{chamber.text}</p>
@@ -182,7 +200,9 @@ export default function App() {
                 onPointerMove={handleSurfacePointerMove}
                 onPointerLeave={handleSurfacePointerLeave}
               >
-                <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true" />
+                <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true">
+                  <span className="council-mark-text">{pathway.member}</span>
+                </span>
                 <h3>{pathway.title}</h3>
                 <p>{pathway.text}</p>
               </article>
