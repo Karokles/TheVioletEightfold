@@ -1,4 +1,4 @@
-import { useEffect, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 const thresholdLines = [
   {
@@ -65,6 +65,9 @@ const closingLines = [
 ];
 
 export default function App() {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+
   useEffect(() => {
     let frame = 0;
 
@@ -93,6 +96,11 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.volume = 0.22;
+  }, []);
+
   const handleSurfacePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const element = event.currentTarget;
     const rect = element.getBoundingClientRect();
@@ -115,8 +123,27 @@ export default function App() {
     element.style.setProperty('--tilt-y', '0deg');
   };
 
+  const toggleAmbientAudio = async () => {
+    if (!audioRef.current) return;
+
+    if (audioEnabled) {
+      audioRef.current.pause();
+      setAudioEnabled(false);
+      return;
+    }
+
+    try {
+      audioRef.current.volume = 0.22;
+      await audioRef.current.play();
+      setAudioEnabled(true);
+    } catch {
+      setAudioEnabled(false);
+    }
+  };
+
   return (
     <main className="shell living-observatory">
+      <audio ref={audioRef} src="/audio/god-on-the-code-web.mp3" loop preload="metadata" />
       <section className="hero">
         <div
           className="hero-copy interactive-surface float-large"
@@ -141,6 +168,17 @@ export default function App() {
             <a className="button button-secondary" href="#chambers">
               Read the Map
             </a>
+          </div>
+          <div className="ambient-audio">
+            <button
+              type="button"
+              className={`button button-secondary button-audio${audioEnabled ? ' is-active' : ''}`}
+              onClick={toggleAmbientAudio}
+              aria-pressed={audioEnabled}
+            >
+              {audioEnabled ? 'Pause Ambient Audio' : 'Awaken Ambient Audio'}
+            </button>
+            <span className="ambient-audio-note">GOD ON THE CODE background loop</span>
           </div>
           <div className="hero-whisper">
             <span>Threshold between worlds</span>

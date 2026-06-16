@@ -296,6 +296,40 @@ h3 {
   margin-top: 8px;
 }
 
+.ambient-audio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 8px;
+}
+
+.button-audio {
+  min-height: 44px;
+  padding: 0 18px;
+  border-color: rgba(220, 185, 128, 0.18);
+  background:
+    linear-gradient(180deg, rgba(14, 12, 27, 0.68), rgba(12, 10, 25, 0.82)),
+    radial-gradient(circle at top right, rgba(220, 185, 128, 0.1), transparent 34%);
+  color: var(--lavender);
+}
+
+.button-audio.is-active {
+  border-color: rgba(255, 227, 170, 0.32);
+  box-shadow:
+    0 0 0 1px rgba(255, 235, 194, 0.08) inset,
+    0 0 24px rgba(220, 185, 128, 0.12);
+  color: #fff8eb;
+}
+
+.ambient-audio-note {
+  color: rgba(199, 208, 229, 0.64);
+  font-family: var(--font-system);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .hero-whisper {
   display: flex;
   flex-wrap: wrap;
