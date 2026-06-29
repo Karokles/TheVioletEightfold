@@ -1257,6 +1257,28 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+app.get('/api/auth/readiness', (req: Request, res: Response) => {
+  const supabaseUrl = process.env.SUPABASE_URL || '';
+  const supabaseProjectRef = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || null;
+
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    appEnvironment: runtimeConfig.appEnvironment,
+    nodeEnv: process.env.NODE_ENV || null,
+    databaseEnabled: runtimeConfig.databaseEnabled,
+    supabaseAuthEnabled: runtimeConfig.supabaseAuthEnabled,
+    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+    hasSupabaseServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    serviceReadiness: {
+      database: serviceReadiness.database,
+      supabaseAuth: serviceReadiness.supabaseAuth,
+      auth: serviceReadiness.auth,
+    },
+    supabaseProjectRef,
+  });
+});
+
 // Detailed health check endpoint (public) - for diagnostics
 app.get('/api/health/detailed', requireDebugEndpoint, (req: Request, res: Response) => {
   const uptime = process.uptime();

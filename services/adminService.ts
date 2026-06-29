@@ -1,4 +1,4 @@
-import { getCurrentUser } from './userService';
+import { getCurrentUser, handleAuthError } from './userService';
 
 const getApiBaseUrl = (): string => {
   const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
@@ -24,6 +24,27 @@ const getAuthHeaders = () => {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
   };
+};
+
+const readAdminErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  if (response.status === 401) {
+    handleAuthError();
+    return 'Your admin session is no longer valid. Please sign in again.';
+  }
+
+  try {
+    const body = await response.json();
+    if (typeof body?.message === 'string') {
+      return body.message;
+    }
+    if (typeof body?.error === 'string') {
+      return body.error;
+    }
+  } catch {
+    // Keep fallback.
+  }
+
+  return fallback;
 };
 
 export type AdminEntitlement = 'free' | 'paid_beta' | 'founder' | 'blocked';
@@ -87,18 +108,8 @@ export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
   });
 
   if (!response.ok) {
-    let message = response.status === 403 ? 'Admin access required.' : `Admin request failed: ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.message === 'string') {
-        message = body.message;
-      } else if (typeof body?.error === 'string') {
-        message = body.error;
-      }
-    } catch {
-      // Keep HTTP status fallback.
-    }
-    throw new Error(message);
+    const message = response.status === 403 ? 'Admin access required.' : `Admin request failed: ${response.status}`;
+    throw new Error(await readAdminErrorMessage(response, message));
   }
 
   return response.json();
@@ -115,18 +126,7 @@ export const createAdminAccount = async (
   });
 
   if (!response.ok) {
-    let message = `Admin create failed: ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.message === 'string') {
-        message = body.message;
-      } else if (typeof body?.error === 'string') {
-        message = body.error;
-      }
-    } catch {
-      // Keep HTTP status fallback.
-    }
-    throw new Error(message);
+    throw new Error(await readAdminErrorMessage(response, `Admin create failed: ${response.status}`));
   }
 
   return response.json();
@@ -154,18 +154,7 @@ export const updateAdminAccount = async (
   });
 
   if (!response.ok) {
-    let message = `Admin update failed: ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.message === 'string') {
-        message = body.message;
-      } else if (typeof body?.error === 'string') {
-        message = body.error;
-      }
-    } catch {
-      // Keep HTTP status fallback.
-    }
-    throw new Error(message);
+    throw new Error(await readAdminErrorMessage(response, `Admin update failed: ${response.status}`));
   }
 
   return response.json();
@@ -179,17 +168,6 @@ export const deleteAdminAccount = async (userId: string): Promise<void> => {
   });
 
   if (!response.ok) {
-    let message = `Admin delete failed: ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.message === 'string') {
-        message = body.message;
-      } else if (typeof body?.error === 'string') {
-        message = body.error;
-      }
-    } catch {
-      // Keep HTTP status fallback.
-    }
-    throw new Error(message);
+    throw new Error(await readAdminErrorMessage(response, `Admin delete failed: ${response.status}`));
   }
 };
