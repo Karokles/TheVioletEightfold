@@ -1,4 +1,5 @@
-import { getCurrentUser, handleAuthError } from './userService';
+import { getSupabaseSession } from './supabaseAuth';
+import { getCurrentUser, handleAuthError, setCurrentUser } from './userService';
 
 const getApiBaseUrl = (): string => {
   const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
@@ -9,8 +10,24 @@ const getApiBaseUrl = (): string => {
   return url || 'http://localhost:3001';
 };
 
-const getAuthHeaders = () => {
-  const user = getCurrentUser();
+const getAuthHeaders = async () => {
+  const supabaseSession = await getSupabaseSession().catch(() => null);
+  if (supabaseSession?.token) {
+    setCurrentUser(
+      supabaseSession.userId,
+      supabaseSession.token,
+      supabaseSession.displayName || supabaseSession.email,
+    );
+  }
+
+  const user = supabaseSession?.token
+    ? {
+        id: supabaseSession.userId,
+        token: supabaseSession.token,
+        displayName: supabaseSession.displayName || supabaseSession.email,
+      }
+    : getCurrentUser();
+
   if (!user) {
     throw new Error('User not authenticated');
   }
@@ -103,7 +120,7 @@ export interface CreateAdminAccountResponse {
 export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts?ts=${Date.now()}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     cache: 'no-store',
   });
 
@@ -120,7 +137,7 @@ export const createAdminAccount = async (
 ): Promise<CreateAdminAccountResponse> => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     cache: 'no-store',
     body: JSON.stringify(input),
   });
@@ -148,7 +165,7 @@ export const updateAdminAccount = async (
 ) => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts/${encodeURIComponent(userId)}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     cache: 'no-store',
     body: JSON.stringify({ admin }),
   });
@@ -163,7 +180,7 @@ export const updateAdminAccount = async (
 export const deleteAdminAccount = async (userId: string): Promise<void> => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     cache: 'no-store',
   });
 
