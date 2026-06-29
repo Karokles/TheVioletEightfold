@@ -1,7 +1,8 @@
-import { MeaningAnalysisResult } from '../types';
+import { Language, MeaningAnalysisResult } from '../types';
 import { getUserScopedKey } from './userService';
 
 const MEANING_STATE_KEY = 'meaning_state';
+const MEANING_STATE_BACKUP_KEY = 'meaning_state_backup';
 const LION_SOUL_TIMELINE_SEED_KEY = 'lion_soul_timeline_seed_v1';
 
 const emptyMeaningState = (): MeaningAnalysisResult => ({
@@ -190,16 +191,28 @@ lionSoulTimelineSeed.breakthroughs = lionSoulTimelineSeed.soulTimelineEvents.map
 
 export const loadLocalMeaningState = (userId: string): MeaningAnalysisResult => {
   ensureLionSoulTimelineSeed(userId);
-  const saved = localStorage.getItem(getUserScopedKey(MEANING_STATE_KEY, userId));
-  if (!saved) return emptyMeaningState();
+  const keys = [
+    getUserScopedKey(MEANING_STATE_KEY, userId),
+    getUserScopedKey(MEANING_STATE_BACKUP_KEY, userId),
+  ];
 
-  try {
-    const parsed = JSON.parse(saved) as Partial<MeaningAnalysisResult>;
-    return normalizeMeaningState(parsed);
-  } catch (error) {
-    console.warn('Failed to parse local meaning state', error);
-    return emptyMeaningState();
+  for (const key of keys) {
+    const saved = localStorage.getItem(key);
+    if (!saved) continue;
+
+    try {
+      const parsed = JSON.parse(saved) as Partial<MeaningAnalysisResult>;
+      const normalized = normalizeMeaningState(parsed);
+      if (key.endsWith(MEANING_STATE_BACKUP_KEY)) {
+        localStorage.setItem(getUserScopedKey(MEANING_STATE_KEY, userId), JSON.stringify(normalized));
+      }
+      return normalized;
+    } catch (error) {
+      console.warn(`Failed to parse local meaning state from ${key}`, error);
+    }
   }
+
+  return emptyMeaningState();
 };
 
 export const saveLocalMeaningState = (
@@ -207,8 +220,9 @@ export const saveLocalMeaningState = (
   state: MeaningAnalysisResult,
 ): MeaningAnalysisResult => {
   const normalized = normalizeMeaningState(state);
-
-  localStorage.setItem(getUserScopedKey(MEANING_STATE_KEY, userId), JSON.stringify(normalized));
+  const serialized = JSON.stringify(normalized);
+  localStorage.setItem(getUserScopedKey(MEANING_STATE_BACKUP_KEY, userId), serialized);
+  localStorage.setItem(getUserScopedKey(MEANING_STATE_KEY, userId), serialized);
   return normalized;
 };
 
@@ -228,8 +242,64 @@ export const mergeLocalMeaningState = (
     nextQuestState: patch.nextQuestState || existing.nextQuestState,
   });
 
-  localStorage.setItem(getUserScopedKey(MEANING_STATE_KEY, userId), JSON.stringify(merged));
-  return merged;
+  return saveLocalMeaningState(userId, merged);
+};
+
+export interface OfflineCouncilTurn {
+  content: string;
+  isUser?: boolean;
+  speaker?: string;
+}
+
+const compactOfflineText = (value: string, maxLength = 900): string => {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+};
+
+export const buildOfflineCouncilMeaningPatch = (
+  turns: OfflineCouncilTurn[],
+  language: Language,
+  topic?: string,
+): Partial<MeaningAnalysisResult> => {
+  const createdAt = new Date().toISOString();
+  const id = `offline-council-${Date.now()}`;
+  const latestUserText = [...turns].reverse().find(turn => turn.isUser)?.content || topic || '';
+  const latestCouncilText = [...turns].reverse().find(turn => !turn.isUser && turn.speaker !== 'SYSTEM')?.content || '';
+  const focus = compactOfflineText(topic || latestUserText || (language === 'DE' ? 'Offene Council-Sitzung' : 'Open council session'), 180);
+  const summary = compactOfflineText(
+    language === 'DE'
+      ? [
+          `Lokal gesicherte Council-Sitzung zu „${focus}“.`,
+          latestUserText ? `Letzter eigener Fokus: ${latestUserText}` : '',
+          latestCouncilText ? `Letzte Spiegelung des Rates: ${latestCouncilText}` : '',
+        ].filter(Boolean).join(' ')
+      : [
+          `Locally saved council session about “${focus}.”`,
+          latestUserText ? `Latest personal focus: ${latestUserText}` : '',
+          latestCouncilText ? `Latest council reflection: ${latestCouncilText}` : '',
+        ].filter(Boolean).join(' '),
+  );
+  const title = language === 'DE' ? `Council: ${focus}` : `Council: ${focus}`;
+
+  return {
+    questLogEntries: [{
+      id: `${id}-quest`,
+      createdAt,
+      title,
+      content: summary,
+      tags: ['council', 'offline-saved'],
+      sourceSessionId: id,
+    }],
+    soulTimelineEvents: [{
+      id: `${id}-timeline`,
+      createdAt,
+      label: language === 'DE' ? 'Council lokal gesichert' : 'Council saved locally',
+      summary,
+      type: 'COUNCIL_INTEGRATION_LOCAL',
+      tags: ['council', 'offline-saved'],
+      sourceSessionId: id,
+    }],
+  };
 };
 
 const ensureLionSoulTimelineSeed = (userId: string): void => {
@@ -257,6 +327,6 @@ const ensureLionSoulTimelineSeed = (userId: string): void => {
     breakthroughs: dedupeById([...existing.breakthroughs, ...lionSoulTimelineSeed.breakthroughs]),
   });
 
-  localStorage.setItem(stateKey, JSON.stringify(merged));
+  saveLocalMeaningState(userId, merged);
   localStorage.setItem(seedKey, 'applied');
 };

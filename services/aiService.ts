@@ -1,7 +1,7 @@
 import { ArchetypeId } from '../constants';
-import { Language, MeaningContext, Message } from '../types';
-import { getCurrentUser } from './userService';
-import { loadLocalMeaningState, normalizeMeaningState, saveLocalMeaningState } from './meaningStateService';
+import { Language, MeaningAnalysisResult, MeaningContext, Message } from '../types';
+import { getCurrentUser, handleAuthError } from './userService';
+import { loadLocalMeaningState, mergeLocalMeaningState, normalizeMeaningState, saveLocalMeaningState } from './meaningStateService';
 
 // Production safety check: ensure API base URL is set in production builds
 const getApiBaseUrl = (): string => {
@@ -62,7 +62,6 @@ const readErrorBody = async (response: Response) => {
 const handleUnauthorizedResponse = async (response: Response): Promise<never> => {
   const errorData = await readErrorBody(response);
   const reason = errorData.reason || '';
-  const { handleAuthError } = await import('./userService');
   handleAuthError();
   const message = errorData.message || errorData.hint || 'Session expired. Please sign in again.';
 
@@ -442,6 +441,39 @@ export async function getMeaningState(): Promise<import('../types').MeaningAnaly
 
   // Fallback to localStorage
   return loadLocalState();
+}
+
+// Persist client-created Soul Blueprint entries (for example cycle milestones).
+// The local merge happens synchronously before the network request so a reload
+// cannot erase a freshly created entry.
+export async function persistMeaningStatePatch(
+  patch: Partial<MeaningAnalysisResult>,
+): Promise<MeaningAnalysisResult> {
+  const user = getCurrentUser();
+  if (!user?.id) {
+    throw new Error('User not authenticated');
+  }
+
+  const localState = mergeLocalMeaningState(user.id, patch);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/meaning/state`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+      body: JSON.stringify({ patch }),
+    });
+
+    if (!response.ok) {
+      await throwApiResponseError(response, 'Meaning state persistence');
+    }
+
+    const backendState = await response.json() as MeaningAnalysisResult;
+    return mergeLocalMeaningState(user.id, backendState);
+  } catch (error) {
+    console.warn('[BLUEPRINT] Failed to persist meaning state to backend; local backup kept.', error);
+    return localState;
+  }
 }
 
 // Integration endpoint (for questlog integration) - DEPRECATED: Use analyzeMeaning instead

@@ -1,4 +1,4 @@
-import { CommunicationMode, CommunicationPreferences, ConsentState, EmotionalStateScan, IntegrationCycle, MeaningContext } from '../types';
+import { CommunicationMode, CommunicationPreferences, ConsentState, EmotionalStateScan, IntegrationCycle, MeaningContext, StateAwarenessContext } from '../types';
 import { getCycleDayNumber } from './cycleService';
 import { getUserScopedKey } from './userService';
 
@@ -62,6 +62,7 @@ export const buildMeaningContext = (
   preferences: CommunicationPreferences,
   cycle: IntegrationCycle | null,
   emotionalState?: EmotionalStateScan,
+  stateAwareness?: StateAwarenessContext,
 ): MeaningContext => {
   return {
     communicationMode: preferences.mode,
@@ -71,8 +72,12 @@ export const buildMeaningContext = (
     activeCycleTheme: cycle?.theme,
     overloadSignal: Boolean(emotionalState?.overloadRisk),
     emotionalState,
+    stateAwareness,
     notes: [
+      'State awareness comes before insight: notice state, narrative, impulse, then action.',
       'Stories are allowed to breathe; do not force interpretation.',
+      'Do not break the spell by explaining the spell.',
+      'Freedom means conscious participation in chosen responsibility, not escape from all bonds.',
       'Ask before deepening when the user may be overloaded.',
       'Exit rooms are available only when needed or requested.',
     ],

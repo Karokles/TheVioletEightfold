@@ -26,6 +26,46 @@ export interface EmotionalStateScan {
   updatedAt: string;
 }
 
+export type StateNarrativeCharge = 'LOW' | 'MEDIUM' | 'HIGH';
+export type StateImpulseKind = 'CONNECT' | 'REPAIR' | 'CONTROL' | 'WITHDRAW' | 'ACT' | 'WAIT' | 'UNKNOWN';
+export type StateResponsibilityOrientation =
+  | 'CONSCIOUS_CONNECTION'
+  | 'SHARED_RESPONSIBILITY'
+  | 'UNCONSCIOUS_ENTANGLEMENT'
+  | 'CONTROL'
+  | 'ISOLATION'
+  | 'UNCLEAR';
+
+export interface StatePhronesisCheck {
+  wiseNow: boolean | null;
+  servesCommonGood: boolean | null;
+  needsPause: boolean;
+  reason: string;
+}
+
+export interface StateConnectionResponsibility {
+  orientation: StateResponsibilityOrientation;
+  notes: string[];
+}
+
+export interface StateAwarenessContext {
+  schemaVersion: number;
+  stateSignals: string[];
+  narrativeCharge: StateNarrativeCharge;
+  narrativeFragments: string[];
+  powerfulLanguage: string[];
+  attentionDirection: string[];
+  impulseKind: StateImpulseKind;
+  impulseSummary?: string;
+  phronesisCheck: StatePhronesisCheck;
+  connectionResponsibility: StateConnectionResponsibility;
+  recommendedStance: CommunicationMode;
+  doNotDebunk: boolean;
+  breakthroughCandidate: boolean;
+  confidence: number;
+  updatedAt: string;
+}
+
 export interface CommunicationPreferences {
   schemaVersion: number;
   mode: CommunicationMode;
@@ -41,6 +81,7 @@ export interface MeaningContext {
   activeCycleTheme?: string;
   overloadSignal?: boolean;
   emotionalState?: EmotionalStateScan;
+  stateAwareness?: StateAwarenessContext;
   notes?: string[];
 }
 

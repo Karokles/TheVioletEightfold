@@ -6,6 +6,20 @@ const CURRENT_CYCLE_KEY = 'integration_cycle_current';
 const CURRENT_CYCLE_BACKUP_KEY = 'integration_cycle_current_backup';
 const ARCHIVED_CYCLES_KEY = 'integration_cycle_archive';
 const CYCLE_SCHEMA_VERSION = 1;
+const cyclePersistenceQueues = new Map<string, Promise<void>>();
+
+const enqueueCyclePersistence = <T>(userId: string, task: () => Promise<T>): Promise<T> => {
+  const previous = cyclePersistenceQueues.get(userId) || Promise.resolve();
+  const result = previous.catch(() => undefined).then(task);
+  const settled = result.then(() => undefined, () => undefined);
+  cyclePersistenceQueues.set(userId, settled);
+  settled.finally(() => {
+    if (cyclePersistenceQueues.get(userId) === settled) {
+      cyclePersistenceQueues.delete(userId);
+    }
+  });
+  return result;
+};
 
 const getApiBaseUrl = (): string => {
   const url = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
@@ -131,7 +145,7 @@ const getCycleUpdatedTime = (cycle: IntegrationCycle | null): number => {
   return new Date(cycle.updatedAt || cycle.completedAt || cycle.createdAt).getTime() || 0;
 };
 
-const chooseNewestCycle = (
+export const chooseNewestCycle = (
   localCycle: IntegrationCycle | null,
   remoteCycle: IntegrationCycle | null,
 ): IntegrationCycle | null => {
@@ -194,34 +208,41 @@ export const persistCurrentCycle = async (
 ): Promise<IntegrationCycle | null> => {
   const normalized = saveCurrentCycle(userId, cycle);
   if (!normalized) return null;
+  const headers = getAuthHeaders();
 
-  try {
-    const response = await fetch(`${getApiBaseUrl()}/api/cycle/current`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      cache: 'no-store',
-      body: JSON.stringify({ cycle: normalized }),
-    });
+  return enqueueCyclePersistence(userId, async () => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/cycle/current`, {
+        method: 'PUT',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify({ cycle: normalized }),
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const persisted = parseCycleValue(data.currentCycle);
+      if (persisted) {
+        const latestLocal = loadCurrentCycle(userId);
+        const selected = chooseNewestCycle(latestLocal, persisted);
+        if (selected && selected !== latestLocal) {
+          saveCurrentCycle(userId, selected);
+        }
+        return selected;
+      }
+    } catch (error) {
+      console.warn('[CYCLE] Failed to persist cycle to backend; local backup kept.', error);
     }
 
-    const data = await response.json();
-    const persisted = parseCycleValue(data.currentCycle);
-    if (persisted) {
-      saveCurrentCycle(userId, persisted);
-      return persisted;
-    }
-  } catch (error) {
-    console.warn('[CYCLE] Failed to persist cycle to backend; local backup kept.', error);
-  }
-
-  return normalized;
+    return loadCurrentCycle(userId) || normalized;
+  });
 };
 
 export const hydrateCurrentCycle = async (userId: string): Promise<IntegrationCycle | null> => {
-  const localCycle = loadCurrentCycle(userId);
+  const localCycleAtRequest = loadCurrentCycle(userId);
 
   try {
     const response = await fetch(`${getApiBaseUrl()}/api/cycle/current?ts=${Date.now()}`, {
@@ -236,38 +257,53 @@ export const hydrateCurrentCycle = async (userId: string): Promise<IntegrationCy
 
     const data = await response.json();
     const remoteCycle = parseCycleValue(data.currentCycle);
-    const selectedCycle = chooseNewestCycle(localCycle, remoteCycle);
+    // Re-read local state after the request. A user may have started or edited a
+    // cycle while this hydration request was in flight.
+    const latestLocalCycle = loadCurrentCycle(userId);
+    const selectedCycle = chooseNewestCycle(latestLocalCycle, remoteCycle);
 
     if (selectedCycle) {
-      saveCurrentCycle(userId, selectedCycle);
+      if (selectedCycle !== latestLocalCycle) {
+        saveCurrentCycle(userId, selectedCycle);
+      }
 
-      if (localCycle && selectedCycle.id === localCycle.id && getCycleUpdatedTime(localCycle) > getCycleUpdatedTime(remoteCycle)) {
-        await persistCurrentCycle(userId, localCycle);
+      if (
+        latestLocalCycle
+        && selectedCycle.id === latestLocalCycle.id
+        && getCycleUpdatedTime(latestLocalCycle) > getCycleUpdatedTime(remoteCycle)
+      ) {
+        persistCurrentCycle(userId, latestLocalCycle).catch(error => {
+          console.warn('[CYCLE] Failed to backfill newer local cycle after hydration.', error);
+        });
       }
     }
 
     return selectedCycle;
   } catch (error) {
     console.warn('[CYCLE] Failed to hydrate cycle from backend; using local backup.', error);
-    return localCycle;
+    return loadCurrentCycle(userId) || localCycleAtRequest;
   }
 };
 
-export const persistArchivedCycle = async (cycle: IntegrationCycle): Promise<void> => {
-  try {
-    const response = await fetch(`${getApiBaseUrl()}/api/cycle/archive`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      cache: 'no-store',
-      body: JSON.stringify({ cycle }),
-    });
+export const persistArchivedCycle = async (userId: string, cycle: IntegrationCycle): Promise<void> => {
+  const headers = getAuthHeaders();
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+  await enqueueCyclePersistence(userId, async () => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/cycle/archive`, {
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify({ cycle }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.warn('[CYCLE] Failed to archive cycle in backend; local archive kept.', error);
     }
-  } catch (error) {
-    console.warn('[CYCLE] Failed to archive cycle in backend; local archive kept.', error);
-  }
+  });
 };
 
 export const startIntegrationCycle = (

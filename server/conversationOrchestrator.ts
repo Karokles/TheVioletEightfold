@@ -44,7 +44,12 @@ export type ConversationSignal =
   | 'dysregulation'
   | 'shadow_recognition'
   | 'meaning_emerging'
-  | 'shame_loop';
+  | 'shame_loop'
+  | 'state_awareness'
+  | 'state_narrative_charge'
+  | 'impulse_pressure'
+  | 'control_or_withdrawal_impulse'
+  | 'connection_responsibility';
 
 export type OrganicArchetypeId =
   | 'SAGE'
@@ -55,6 +60,28 @@ export type OrganicArchetypeId =
   | 'SOVEREIGN'
   | 'CAREGIVER'
   | 'EXPLORER';
+
+export interface StateAwarenessPlanInput {
+  narrativeCharge?: string;
+  narrativeFragments?: string[];
+  powerfulLanguage?: string[];
+  attentionDirection?: string[];
+  impulseKind?: string;
+  impulseSummary?: string;
+  phronesisCheck?: {
+    wiseNow?: boolean | null;
+    servesCommonGood?: boolean | null;
+    needsPause?: boolean;
+    reason?: string;
+  };
+  connectionResponsibility?: {
+    orientation?: string;
+    notes?: string[];
+  };
+  recommendedStance?: string;
+  doNotDebunk?: boolean;
+  breakthroughCandidate?: boolean;
+}
 
 export interface ResponsePlan {
   intent: UserIntent;
@@ -110,11 +137,17 @@ export const createResponsePlan = (
     conversationLength?: number;
     communicationMode?: string;
     overloadRisk?: boolean;
+    stateAwareness?: StateAwarenessPlanInput;
   },
 ): ResponsePlan => {
   const raw = latestUserMessage || '';
   const text = raw.toLowerCase();
   const signals: ConversationSignal[] = [];
+  const stateAwareness = options.stateAwareness;
+  const stateNarrativeCharge = String(stateAwareness?.narrativeCharge || '').toUpperCase();
+  const stateImpulseKind = String(stateAwareness?.impulseKind || '').toUpperCase();
+  const stateNeedsPause = Boolean(stateAwareness?.phronesisCheck?.needsPause);
+  const stateBreakthroughCandidate = stateAwareness?.breakthroughCandidate;
   const isMetaSystemQuestion = includesAny(text, [
     /\b(mode|state|zustand|modus|vorschlag|suggested|suggestion|planner|system|kommunikationshaltung|communication mode|response plan)\b.*\b(ändert|aendert|wechselt|switch|change|funktioniert|works|warum|why|noch|still)\b/i,
     /\b(ändert|aendert|wechselt|switch|change)\b.*\b(mode|state|zustand|modus|vorschlag|suggested|suggestion|kommunikationshaltung)\b/i,
@@ -154,6 +187,15 @@ export const createResponsePlan = (
   if (isBehaviorTest) signals.push('user_tests_behavior');
   if (isListeningWithoutPressure) signals.push('listening_without_pressure');
   if (isActionOptionsRequest) signals.push('user_requests_action_options');
+  if (stateAwareness) signals.push('state_awareness');
+  if (stateNarrativeCharge === 'HIGH') signals.push('state_narrative_charge');
+  if (stateNeedsPause) signals.push('impulse_pressure');
+  if (stateImpulseKind === 'CONTROL' || stateImpulseKind === 'WITHDRAW') {
+    signals.push('control_or_withdrawal_impulse');
+  }
+  if (['CONSCIOUS_CONNECTION', 'SHARED_RESPONSIBILITY'].includes(String(stateAwareness?.connectionResponsibility?.orientation || '').toUpperCase())) {
+    signals.push('connection_responsibility');
+  }
 
   if (includesAny(text, [
     /\b(plan|steps|struktur|structure|prompt|codex|umsetzen|bauen|build|what now|was jetzt|was soll ich|nächster schritt|naechster schritt)\b/i,
@@ -282,6 +324,20 @@ export const createResponsePlan = (
   else if (selectedArchetypes.length > 0) mode = 'one_voice';
 
   if (
+    stateAwareness
+    && intent !== 'ASK_META'
+    && intent !== 'TEST_SYSTEM'
+    && !signals.includes('user_requests_structure')
+    && !signals.includes('dysregulation')
+  ) {
+    if (stateNeedsPause && (stateImpulseKind === 'CONTROL' || stateImpulseKind === 'WITHDRAW')) {
+      mode = options.overloadRisk ? 'grounding' : 'hold';
+    } else if (stateNarrativeCharge === 'HIGH' && mode === 'mirror') {
+      mode = 'hold';
+    }
+  }
+
+  if (
     options.communicationMode === 'ACT'
     && intent !== 'ASK_META'
     && intent !== 'TEST_SYSTEM'
@@ -290,6 +346,7 @@ export const createResponsePlan = (
     && mode !== 'council'
     && !signals.includes('dysregulation')
     && !signals.includes('overprocessing')
+    && !stateNeedsPause
   ) {
     mode = 'integration';
   }
@@ -314,7 +371,7 @@ export const createResponsePlan = (
       : 'short';
 
   const language = options.language === 'DE' ? 'DE' : 'EN';
-  const promptInstructions = buildOrganicInstructions({ mode, intent, signals: unique(signals), tone, maxResponseLength, language, selectedArchetypes, permissions });
+  const promptInstructions = buildOrganicInstructions({ mode, intent, signals: unique(signals), tone, maxResponseLength, language, selectedArchetypes, permissions, stateAwareness });
 
   return {
     intent,
@@ -322,7 +379,8 @@ export const createResponsePlan = (
     signals: unique(signals),
     selectedArchetypes: unique(selectedArchetypes).slice(0, shouldUseCouncil ? 4 : 1),
     shouldUseCouncil,
-    shouldUpdateLore: signals.includes('breakthrough') || signals.includes('meaning_emerging'),
+    shouldUpdateLore: (signals.includes('breakthrough') || signals.includes('meaning_emerging'))
+      && stateBreakthroughCandidate !== false,
     shouldGroundFirst,
     permissions,
     tone,
@@ -388,6 +446,7 @@ const buildOrganicInstructions = (plan: {
   language: 'EN' | 'DE';
   selectedArchetypes: OrganicArchetypeId[];
   permissions: ResponsePlan['permissions'];
+  stateAwareness?: StateAwarenessPlanInput;
 }): string[] => {
   const isGerman = plan.language === 'DE';
   const base = isGerman
@@ -456,6 +515,30 @@ const buildOrganicInstructions = (plan: {
     situationalInstructions.push(isGerman
       ? 'FALSE-WISDOM CHECK: Behandle allgemeine Weisheitssaetze als Perspektiven, nicht als Wahrheiten. Wenn du einen Grundsatz formulierst, nenne mindestens eine Gegenbedingung oder Alternative.'
       : 'FALSE-WISDOM CHECK: Treat general wisdom statements as perspectives, not truths. If you state a principle, include at least one counter-condition or alternative.');
+  }
+  if (plan.signals.includes('state_awareness')) {
+    const charge = plan.stateAwareness?.narrativeCharge || 'UNKNOWN';
+    const impulse = plan.stateAwareness?.impulseKind || 'UNKNOWN';
+    const orientation = plan.stateAwareness?.connectionResponsibility?.orientation || 'UNCLEAR';
+
+    situationalInstructions.push(isGerman
+      ? `STATE-AWARENESS BEFORE INSIGHT: Nutze intern state -> narrative -> impulse -> action. Narrative charge=${charge}, impulse=${impulse}, orientation=${orientation}. Sage nicht "das ist nur eine Story/Projektion". Frage eher, welcher Satz Macht hat, wohin die Geschichte Aufmerksamkeit zieht, welcher Impuls entsteht, und ob er Verbindung, Verantwortung, Kontrolle oder Rueckzug dient.`
+      : `STATE AWARENESS BEFORE INSIGHT: Internally track state -> narrative -> impulse -> action. Narrative charge=${charge}, impulse=${impulse}, orientation=${orientation}. Do not say "this is just a story/projection." Instead ask which sentence has power, where the story pulls attention, what impulse arises, and whether it serves connection, responsibility, control, or withdrawal.`);
+  }
+  if (plan.signals.includes('state_narrative_charge')) {
+    situationalInstructions.push(isGerman
+      ? 'DO NOT BREAK THE SPELL: Wenn die Geschichte stark geladen ist, entzaubere sie nicht frontal. Arbeite ueber Aufmerksamkeit, Sprache, Koerpertempo, Verantwortung, Verbundenheit und eine kleine ehrliche Handlung.'
+      : 'DO NOT BREAK THE SPELL: When a story is strongly charged, do not debunk it head-on. Work through attention, language, pacing, responsibility, connection, and one small honest action.');
+  }
+  if (plan.signals.includes('impulse_pressure')) {
+    situationalInstructions.push(isGerman
+      ? 'PHRONESIS + HORME: Behandle Handlungsdruck als Signal, nicht als Befehl. Pruefe, ob der Impuls jetzt weise ist und dem Gemeinsamen dient, bevor du Handlung empfiehlst.'
+      : 'PHRONESIS + HORME: Treat action pressure as a signal, not a command. Check whether the impulse is wise now and serves the shared field before recommending action.');
+  }
+  if (plan.signals.includes('control_or_withdrawal_impulse')) {
+    situationalInstructions.push(isGerman
+      ? 'CONNECTION CHECK: Schuetze Eigeninitiative, ohne Vereinzelung zu verherrlichen; schuette Zugehoerigkeit nicht mit Kontrolle zusammen. Frage nach bewusster Verbindung, gemeinsamer Verantwortung oder unbewusster Verstrickung.'
+      : 'CONNECTION CHECK: Protect agency without glorifying isolation; protect belonging without justifying control. Ask whether this is conscious connection, shared responsibility, or unconscious entanglement.');
   }
 
   return [
