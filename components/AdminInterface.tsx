@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Crown, Database, KeyRound, Mail, RefreshCw, Save, Shield, UserPlus, UserRound } from 'lucide-react';
-import { AdminAccount, AdminEntitlement, createAdminAccount, getAdminAccounts, updateAdminAccount } from '../services/adminService';
+import { CheckCircle2, Crown, Database, KeyRound, Mail, RefreshCw, Save, Search, Shield, Trash2, UserPlus, UserRound } from 'lucide-react';
+import { AdminAccount, AdminEntitlement, createAdminAccount, deleteAdminAccount, getAdminAccounts, updateAdminAccount } from '../services/adminService';
 import { Language } from '../types';
 
 interface AdminInterfaceProps {
@@ -26,10 +26,16 @@ const copy = {
     blueprint: 'Blueprint',
     offline: 'Offline',
     updated: 'Updated',
+    lastSignIn: 'Last sign-in',
+    auth: 'Auth',
+    delete: 'Delete',
+    deleteConfirm: 'Delete this account everywhere? This removes Supabase Auth and app data.',
+    deleted: 'Account deleted.',
+    search: 'Search accounts',
     noAccess: 'Admin access is not active for this account.',
     dbDisabled: 'Database is not configured on this backend.',
     loading: 'Loading admin accounts...',
-    empty: 'No staging accounts found yet.',
+    empty: 'No accounts found.',
     created: 'Account created.',
     updatedExisting: 'Existing account updated.',
   },
@@ -51,10 +57,16 @@ const copy = {
     blueprint: 'Blueprint',
     offline: 'Offline',
     updated: 'Aktualisiert',
+    lastSignIn: 'Letzter Login',
+    auth: 'Auth',
+    delete: 'Loeschen',
+    deleteConfirm: 'Dieses Konto ueberall loeschen? Supabase Auth und App-Daten werden entfernt.',
+    deleted: 'Konto wurde geloescht.',
+    search: 'Konten suchen',
     noAccess: 'Admin-Zugang ist fuer dieses Konto nicht aktiv.',
     dbDisabled: 'Die Datenbank ist auf diesem Backend nicht konfiguriert.',
     loading: 'Admin-Konten werden geladen...',
-    empty: 'Noch keine Staging-Konten gefunden.',
+    empty: 'Keine Konten gefunden.',
     created: 'Konto wurde angelegt.',
     updatedExisting: 'Bestehendes Konto wurde aktualisiert.',
   },
@@ -82,6 +94,8 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [newAccount, setNewAccount] = useState({
     email: '',
@@ -142,6 +156,25 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
     }
   };
 
+  const removeAccount = async (account: AdminAccount) => {
+    if (!window.confirm(t.deleteConfirm)) {
+      return;
+    }
+
+    setDeletingUserId(account.userId);
+    setError('');
+    setNotice('');
+    try {
+      await deleteAdminAccount(account.userId);
+      setAccounts(prev => prev.filter(item => item.userId !== account.userId));
+      setNotice(t.deleted);
+    } catch (deleteError: any) {
+      setError(deleteError?.message || 'Delete failed');
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   const submitNewAccount = async (event: React.FormEvent) => {
     event.preventDefault();
     setCreatingAccount(true);
@@ -177,6 +210,16 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
     }
   };
 
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const visibleAccounts = normalizedSearch
+    ? accounts.filter(account => [
+        account.displayName,
+        account.username,
+        account.userId,
+        account.entitlement,
+      ].some(value => String(value || '').toLowerCase().includes(normalizedSearch)))
+    : accounts;
+
   return (
     <div className="relative flex-1 overflow-y-auto bg-[#05020a] px-4 py-6 md:px-8">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(168,85,247,0.13),transparent_34%),radial-gradient(circle_at_85%_4%,rgba(14,165,233,0.08),transparent_28%)]" />
@@ -198,6 +241,22 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
             {t.refresh}
           </button>
         </header>
+
+        <div className="flex flex-col gap-3 rounded-lg border border-purple-500/15 bg-[#0d0615]/86 p-3 md:flex-row md:items-center md:justify-between">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-3 py-2.5 text-sm text-white focus-within:border-purple-300/35">
+            <Search size={15} className="text-purple-300/60" />
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={event => setSearchTerm(event.target.value)}
+              placeholder={t.search}
+              className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-purple-300/35"
+            />
+          </label>
+          <div className="text-xs font-bold uppercase tracking-[0.14em] text-purple-300/55">
+            {visibleAccounts.length} / {accounts.length}
+          </div>
+        </div>
 
         {databaseStatus === 'disabled' && (
           <div className="rounded-lg border border-amber-300/20 bg-amber-300/8 p-4 text-sm text-amber-100/80">
@@ -307,16 +366,18 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
         </form>
 
         <section className="overflow-x-auto rounded-lg border border-purple-500/15 bg-[#0d0615]/86">
-          <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1360px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-purple-500/15 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-300">
                 <th className="px-4 py-3">{t.account}</th>
+                <th className="px-4 py-3">{t.auth}</th>
                 <th className="px-4 py-3">{t.status}</th>
                 <th className="px-4 py-3">Beta</th>
                 <th className="px-4 py-3">{t.communication}</th>
                 <th className="px-4 py-3">{t.council}</th>
                 <th className="px-4 py-3">{t.blueprint}</th>
                 <th className="px-4 py-3">{t.offline}</th>
+                <th className="px-4 py-3">{t.lastSignIn}</th>
                 <th className="px-4 py-3">{t.updated}</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -324,26 +385,36 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
             <tbody>
               {loading && accounts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-purple-200/70">
+                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-purple-200/70">
                     <RefreshCw size={18} className="mx-auto mb-3 animate-spin text-purple-300" />
                     {t.loading}
                   </td>
                 </tr>
               )}
 
-              {!loading && accounts.length === 0 && !error && (
+              {!loading && visibleAccounts.length === 0 && !error && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-purple-200/60">
+                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-purple-200/60">
                     {t.empty}
                   </td>
                 </tr>
               )}
 
-              {accounts.map(account => (
+              {visibleAccounts.map(account => (
                 <tr key={account.userId} className="border-b border-purple-500/10 text-purple-100/80 last:border-b-0">
                   <td className="px-4 py-3">
                     <div className="font-bold text-white">{account.displayName}</div>
                     <div className="mt-1 text-xs text-purple-300/45">{account.username || account.userId}</div>
+                    <div className="mt-1 font-mono text-[10px] text-purple-300/30">{account.userId}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                      account.emailConfirmedAt
+                        ? 'border-emerald-200/25 bg-emerald-300/10 text-emerald-100'
+                        : 'border-amber-200/25 bg-amber-300/10 text-amber-100'
+                    }`}>
+                      {account.emailConfirmedAt ? 'Confirmed' : 'Pending'}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <select
@@ -412,16 +483,27 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                       {account.offlineOnly ? 'Local' : 'DB'}
                     </button>
                   </td>
+                  <td className="px-4 py-3 text-xs text-purple-300/50">{formatDate(account.lastSignInAt)}</td>
                   <td className="px-4 py-3 text-xs text-purple-300/50">{formatDate(account.updatedAt || account.createdAt)}</td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => saveAccount(account)}
-                      disabled={savingUserId === account.userId}
-                      className="flex items-center gap-2 rounded-lg border border-emerald-200/20 bg-emerald-400/12 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-100 transition-all hover:bg-emerald-400/20 disabled:opacity-50"
-                    >
-                      <Save size={13} />
-                      {t.save}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => saveAccount(account)}
+                        disabled={savingUserId === account.userId || deletingUserId === account.userId}
+                        className="flex items-center gap-2 rounded-lg border border-emerald-200/20 bg-emerald-400/12 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-100 transition-all hover:bg-emerald-400/20 disabled:opacity-50"
+                      >
+                        <Save size={13} />
+                        {savingUserId === account.userId ? <RefreshCw size={13} className="animate-spin" /> : t.save}
+                      </button>
+                      <button
+                        onClick={() => removeAccount(account)}
+                        disabled={savingUserId === account.userId || deletingUserId === account.userId}
+                        className="flex items-center gap-2 rounded-lg border border-red-200/20 bg-red-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-red-100 transition-all hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        <Trash2 size={13} />
+                        {deletingUserId === account.userId ? <RefreshCw size={13} className="animate-spin" /> : t.delete}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

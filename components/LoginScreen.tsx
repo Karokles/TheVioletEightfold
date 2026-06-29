@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { login as localLogin } from '../services/aiService';
-import { consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail, signUpWithEmail } from '../services/supabaseAuth';
+import { consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail } from '../services/supabaseAuth';
 import { setCurrentUser } from '../services/userService';
 import { getUIText } from '../config/loader';
 import { Language } from '../types';
-import { LogIn, Sparkles, UserPlus } from 'lucide-react';
+import { LogIn, Sparkles } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -15,11 +15,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
   const authMode = import.meta.env.VITE_AUTH_MODE || 'local';
   const supabaseEnabled = authMode === 'supabase' && isSupabaseAuthAvailable;
   const supabaseMisconfigured = authMode === 'supabase' && !isSupabaseAuthAvailable;
-  const [formMode, setFormMode] = useState<'signIn' | 'signUp' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
+  const [formMode, setFormMode] = useState<'signIn' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
   const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
   const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,15 +31,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
   const confirmedMessage = language === 'DE'
     ? 'Email bestaetigt. Du wirst angemeldet...'
     : 'Email confirmed. Signing you in...';
-  const confirmEmailMessage = language === 'DE'
-    ? 'Account erstellt. Bitte bestaetige deine Email-Adresse und melde dich danach an.'
-    : 'Account created. Please confirm your email address, then sign in.';
   const resendMessage = language === 'DE'
     ? 'Bestaetigungs-Email erneut gesendet.'
     : 'Confirmation email sent again.';
   const notConfirmedMessage = language === 'DE'
     ? 'Diese Email ist noch nicht bestaetigt. Pruefe dein Postfach oder sende die Bestaetigung erneut.'
     : 'This email is not confirmed yet. Check your inbox or resend the confirmation.';
+  const invalidApiKeyMessage = language === 'DE'
+    ? 'Der Live-Login ist gerade falsch konfiguriert. Der Supabase Publishable Key passt nicht zum aktiven Projekt.'
+    : 'Live login is misconfigured right now. The Supabase publishable key does not match the active project.';
+
+  const normalizeAuthErrorMessage = (rawMessage: string) => {
+    if (/invalid api key/i.test(rawMessage)) {
+      return invalidApiKeyMessage;
+    }
+    return rawMessage;
+  };
 
   useEffect(() => {
     if (!supabaseEnabled || !hasSupabaseAuthRedirectParams()) return;
@@ -85,28 +91,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
     setLoading(true);
 
     try {
-      if (formMode === 'signUp') {
-        const normalizedEmail = normalizeEmailInput(email);
-        const result = await signUpWithEmail(normalizedEmail, secret, displayName);
-        if (result.authResult) {
-          setCurrentUser(
-            result.authResult.userId,
-            result.authResult.token,
-            result.authResult.displayName || result.authResult.email || normalizedEmail
-          );
-          onLoginSuccess();
-          return;
-        }
-
-        if (result.requiresEmailConfirmation) {
-          setPendingConfirmationEmail(result.email || normalizedEmail);
-          setMessage(confirmEmailMessage);
-        } else {
-          setMessage(language === 'DE' ? 'Account erstellt. Du kannst dich jetzt anmelden.' : 'Account created. You can sign in now.');
-        }
-        return;
-      }
-
       if (formMode === 'signIn') {
         const normalizedEmail = normalizeEmailInput(email);
         const authResult = await signInWithEmail(normalizedEmail, secret);
@@ -117,7 +101,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
       }
       onLoginSuccess();
     } catch (err: any) {
-      const message = err.message || ui.LOGIN_ERROR;
+      const message = normalizeAuthErrorMessage(err.message || ui.LOGIN_ERROR);
       if (formMode === 'signIn' && message.toLowerCase().includes('email not confirmed')) {
         setPendingConfirmationEmail(normalizeEmailInput(email));
         setError(notConfirmedMessage);
@@ -142,7 +126,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
       setPendingConfirmationEmail(targetEmail);
       setMessage(resendMessage);
     } catch (err: any) {
-      setError(err.message || (language === 'DE' ? 'Bestaetigungs-Email konnte nicht gesendet werden.' : 'Could not send confirmation email.'));
+      setError(
+        normalizeAuthErrorMessage(
+          err.message || (language === 'DE' ? 'Bestaetigungs-Email konnte nicht gesendet werden.' : 'Could not send confirmation email.')
+        )
+      );
     } finally {
       setResending(false);
     }
@@ -174,21 +162,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
           </h2>
 
           {supabaseEnabled && (
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              <button
-                type="button"
-                onClick={() => setFormMode('signIn')}
-                className={`py-2 rounded-lg text-sm font-semibold transition-all ${formMode === 'signIn' ? 'bg-purple-600 text-white' : 'bg-violet-950/50 text-purple-300 border border-purple-500/20'}`}
-              >
-                Sign in
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormMode('signUp')}
-                className={`py-2 rounded-lg text-sm font-semibold transition-all ${formMode === 'signUp' ? 'bg-purple-600 text-white' : 'bg-violet-950/50 text-purple-300 border border-purple-500/20'}`}
-              >
-                Create account
-              </button>
+            <div className="mb-6 rounded-lg border border-purple-500/20 bg-violet-950/45 px-4 py-3 text-center text-sm text-purple-200/80">
+              {language === 'DE'
+                ? 'Konten werden vorerst nur ueber das Admin-Panel erstellt.'
+                : 'Accounts are currently created by an administrator only.'}
             </div>
           )}
 
@@ -256,21 +233,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
                   />
                 </div>
 
-                {formMode === 'signUp' && (
-                  <div>
-                    <label className="block text-sm font-medium text-purple-300 mb-2">
-                      Name
-                    </label>
-                    <input
-                      type="text"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
-                      placeholder="Display name"
-                      disabled={loading}
-                    />
-                  </div>
-                )}
               </>
             )}
 
@@ -301,8 +263,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
                 </>
               ) : (
                 <>
-                  {formMode === 'signUp' ? <UserPlus size={20} /> : <LogIn size={20} />}
-                  <span>{formMode === 'signUp' ? 'Create account' : ui.LOGIN_BUTTON}</span>
+                  <LogIn size={20} />
+                  <span>{ui.LOGIN_BUTTON}</span>
                 </>
               )}
             </button>

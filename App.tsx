@@ -10,15 +10,16 @@ import { LandingScreen } from './components/LandingScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { getUIText, getArchetypes } from './config/loader';
 import { ArchetypeId } from './constants';
-import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle, Language, UserStats, ScribeAnalysis } from './types';
+import { CommunicationMode, CycleDayRecord, EmotionalStateScan, IntegrationCycle, Language, UserStats, ScribeAnalysis, StateAwarenessContext } from './types';
 import { getCurrentUser, loadUserLanguage, loadUserLore, saveUserLanguage, saveUserLore, loadUserStats, saveUserStats, setAuthErrorHandler, clearCurrentUser, setCurrentUser } from './services/userService';
 import { getSupabaseSession, signOutSupabase } from './services/supabaseAuth';
 import { getProfile, updateProfile } from './services/profileService';
-import { archiveCycle, canCompleteCycleDay, getCycleDayNumber, hydrateCurrentCycle, loadCurrentCycle, persistArchivedCycle, persistCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
+import { archiveCycle, canCompleteCycleDay, chooseNewestCycle, getCycleDayNumber, hydrateCurrentCycle, loadCurrentCycle, persistArchivedCycle, persistCurrentCycle, saveCurrentCycle, startIntegrationCycle, upsertCycleDayRecord } from './services/cycleService';
 import { buildMeaningContext, loadCommunicationPreferences, saveCommunicationPreferences, suggestCommunicationMode } from './services/communicationService';
 import { applyCycleMilestoneToStats, buildCycleMilestoneMeaning, isBlueprintCycleMilestone } from './services/cycleMeaningService';
-import { mergeLocalMeaningState } from './services/meaningStateService';
+import { persistMeaningStatePatch } from './services/aiService';
 import { scanEmotionalState } from './services/emotionalStateService';
+import { scanStateAwareness } from './services/stateAwarenessService';
 import { tutorialEventBus } from './services/tutorialProgressService';
 import { checkCycleDayAccess, redirectToBetaCheckout } from './services/accessService';
 import { MessageSquare, ScrollText, Globe, LayoutDashboard, X, ChevronUp, LogOut, CalendarDays, Sparkles, Shield } from 'lucide-react';
@@ -71,6 +72,7 @@ export default function App() {
   });
   const [recentUserSignals, setRecentUserSignals] = useState<string[]>([]);
   const [emotionalState, setEmotionalState] = useState<EmotionalStateScan | undefined>(undefined);
+  const [stateAwareness, setStateAwareness] = useState<StateAwarenessContext | undefined>(undefined);
   
   // Mobile specific state
   const [showMobileArchetypes, setShowMobileArchetypes] = useState(false);
@@ -114,7 +116,6 @@ export default function App() {
 
   useEffect(() => {
     if (currentUserId && cycle) {
-      saveCurrentCycle(currentUserId, cycle);
       persistCurrentCycle(currentUserId, cycle).catch(error => {
         console.warn('[CYCLE] Remote persistence failed; local backup kept.', error);
       });
@@ -133,24 +134,39 @@ export default function App() {
   }, [currentUserId, language]);
 
   const meaningContext = useMemo(
-    () => buildMeaningContext(communicationPreferences, cycle, emotionalState),
-    [communicationPreferences, cycle, emotionalState],
+    () => buildMeaningContext(communicationPreferences, cycle, emotionalState, stateAwareness),
+    [communicationPreferences, cycle, emotionalState, stateAwareness],
   );
 
   const handleUserSignal = (content: string) => {
     const trimmed = content.trim();
-    if (!trimmed) return;
-    setRecentUserSignals(prev => {
-      const next = [...prev, trimmed].slice(-6);
-      setEmotionalState(scanEmotionalState(next));
-      return next;
+    if (!trimmed) return undefined;
+
+    const next = [...recentUserSignals, trimmed].slice(-6);
+    const nextEmotionalState = scanEmotionalState(next);
+    const nextStateAwareness = scanStateAwareness(next, {
+      emotionalState: nextEmotionalState,
+      cycle,
+      communicationMode: communicationPreferences.mode,
     });
+
+    setRecentUserSignals(next);
+    setEmotionalState(nextEmotionalState);
+    setStateAwareness(nextStateAwareness);
+
+    return buildMeaningContext(communicationPreferences, cycle, nextEmotionalState, nextStateAwareness);
   };
 
   // --- Data Manipulation Handlers ---
   const handleScribeUpdate = (updates: ScribeAnalysis) => {
     if (updates.newLoreEntry) {
-        setLore(prev => prev + `\n\n[SCRIBE ENTRY ${new Date().toLocaleDateString()}]: ${updates.newLoreEntry}`);
+        setLore(prev => {
+          const nextLore = prev + `\n\n[SCRIBE ENTRY ${new Date().toLocaleDateString()}]: ${updates.newLoreEntry}`;
+          if (currentUserId) {
+            saveUserLore(currentUserId, nextLore);
+          }
+          return nextLore;
+        });
     }
     setStats(prev => {
         let newStats = { ...prev };
@@ -162,6 +178,9 @@ export default function App() {
         if (updates.newAttribute) {
             newStats.attributes = [updates.newAttribute, ...prev.attributes];
         }
+        if (currentUserId) {
+          saveUserStats(currentUserId, newStats);
+        }
         return newStats;
     });
     // Trigger StatsInterface refresh to load new meaning data
@@ -169,32 +188,44 @@ export default function App() {
   };
 
   const loadSignedInUserState = async () => {
-    const profile = await getProfile({ retries: 2 });
     const user = getCurrentUser();
-    if (user) {
-      const preferredLanguage = profile?.language === 'DE' || profile?.language === 'EN'
-        ? profile.language
-        : loadUserLanguage(user.id);
-      setLanguage(preferredLanguage);
-      saveUserLanguage(user.id, preferredLanguage);
-      setLore(loadUserLore(user.id));
-      setStats(loadUserStats(user.id));
-      setCycle(loadCurrentCycle(user.id));
-      hydrateCurrentCycle(user.id)
-        .then(nextCycle => {
-          if (getCurrentUser()?.id === user.id) {
-            setCycle(nextCycle);
-          }
-        })
-        .catch(error => {
-          console.warn('[CYCLE] Deferred cycle hydration failed; local backup kept.', error);
-        });
-      setCommunicationPreferences(loadCommunicationPreferences(user.id));
-      setRecentUserSignals([]);
-      setEmotionalState(undefined);
-      if (profile) {
-        setIsAdmin(prev => prev || Boolean(profile.isAdmin));
-      }
+    if (!user) return;
+
+    const localLanguage = loadUserLanguage(user.id);
+    setLanguage(localLanguage);
+    setLore(loadUserLore(user.id));
+    setStats(loadUserStats(user.id));
+    setCycle(loadCurrentCycle(user.id));
+    setCommunicationPreferences(loadCommunicationPreferences(user.id));
+    setRecentUserSignals([]);
+    setEmotionalState(undefined);
+    setStateAwareness(undefined);
+
+    hydrateCurrentCycle(user.id)
+      .then(nextCycle => {
+        if (getCurrentUser()?.id === user.id) {
+          setCycle(currentCycle => chooseNewestCycle(currentCycle, nextCycle));
+        }
+      })
+      .catch(error => {
+        console.warn('[CYCLE] Deferred cycle hydration failed; local backup kept.', error);
+      });
+
+    let profile = null;
+    try {
+      profile = await getProfile({ retries: 2 });
+    } catch (error) {
+      console.warn('[PROFILE] Backend unavailable; local profile state kept.', error);
+    }
+
+    if (getCurrentUser()?.id !== user.id) return;
+
+    if (profile?.language === 'DE' || profile?.language === 'EN') {
+      setLanguage(profile.language);
+      saveUserLanguage(user.id, profile.language);
+    }
+    if (profile) {
+      setIsAdmin(Boolean(profile.isAdmin));
     }
   };
 
@@ -231,6 +262,7 @@ export default function App() {
     setCycle(null);
     setRecentUserSignals([]);
     setEmotionalState(undefined);
+    setStateAwareness(undefined);
   };
 
   const handleCommunicationModeChange = (mode: CommunicationMode) => {
@@ -264,13 +296,22 @@ export default function App() {
 
   const handleStartCycle = (title: string, answers: IntegrationCycle['onboardingAnswers']) => {
     const nextCycle = startIntegrationCycle(title, answers);
-    setCycle(nextCycle);
-    setStats(prev => ({
-      ...prev,
-      level: language === 'DE' ? 'Tag 1' : 'Day 1',
-      currentQuest: `Cycle: ${nextCycle.theme}`,
-      state: language === 'DE' ? 'Im Integrationszyklus' : 'In integration cycle',
-    }));
+    const locallySavedCycle = currentUserId
+      ? saveCurrentCycle(currentUserId, nextCycle) || nextCycle
+      : nextCycle;
+    setCycle(locallySavedCycle);
+    setStats(prev => {
+      const nextStats = {
+        ...prev,
+        level: language === 'DE' ? 'Tag 1' : 'Day 1',
+        currentQuest: `Cycle: ${nextCycle.theme}`,
+        state: language === 'DE' ? 'Im Integrationszyklus' : 'In integration cycle',
+      };
+      if (currentUserId) {
+        saveUserStats(currentUserId, nextStats);
+      }
+      return nextStats;
+    });
   };
 
   const handleUpdateCycle = async (record: Omit<CycleDayRecord, 'date'>) => {
@@ -286,7 +327,11 @@ export default function App() {
         return;
       }
 
-      setCycle(upsertCycleDayRecord(cycle, record));
+      const nextCycle = upsertCycleDayRecord(cycle, record);
+      const locallySavedCycle = currentUserId
+        ? saveCurrentCycle(currentUserId, nextCycle) || nextCycle
+        : nextCycle;
+      setCycle(locallySavedCycle);
       return;
     }
 
@@ -320,14 +365,23 @@ export default function App() {
     }
 
     const nextCycle = upsertCycleDayRecord(cycle, record);
-    setCycle(nextCycle);
-    setStats(prev => ({
-      ...prev,
-      level: language === 'DE' ? `Tag ${getCycleDayNumber(nextCycle)}` : `Day ${getCycleDayNumber(nextCycle)}`,
-      state: nextCycle.status === 'COMPLETED'
-        ? (language === 'DE' ? 'Zyklus abgeschlossen' : 'Cycle completed')
-        : prev.state,
-    }));
+    const locallySavedCycle = currentUserId
+      ? saveCurrentCycle(currentUserId, nextCycle) || nextCycle
+      : nextCycle;
+    setCycle(locallySavedCycle);
+    setStats(prev => {
+      const nextStats = {
+        ...prev,
+        level: language === 'DE' ? `Tag ${getCycleDayNumber(nextCycle)}` : `Day ${getCycleDayNumber(nextCycle)}`,
+        state: nextCycle.status === 'COMPLETED'
+          ? (language === 'DE' ? 'Zyklus abgeschlossen' : 'Cycle completed')
+          : prev.state,
+      };
+      if (currentUserId) {
+        saveUserStats(currentUserId, nextStats);
+      }
+      return nextStats;
+    });
 
     if (existingCompletedRecord || !currentUserId || !isBlueprintCycleMilestone(record.day)) {
       return;
@@ -340,8 +394,14 @@ export default function App() {
 
     const meaningPatch = buildCycleMilestoneMeaning(nextCycle, savedRecord, language);
     if (meaningPatch) {
-      mergeLocalMeaningState(currentUserId, meaningPatch);
-      setStats(prev => applyCycleMilestoneToStats(prev, nextCycle, savedRecord, language));
+      persistMeaningStatePatch(meaningPatch).catch(error => {
+        console.warn('[BLUEPRINT] Remote persistence failed; local backup kept.', error);
+      });
+      setStats(prev => {
+        const nextStats = applyCycleMilestoneToStats(prev, nextCycle, savedRecord, language);
+        saveUserStats(currentUserId, nextStats);
+        return nextStats;
+      });
       setStatsRefreshKey(prev => prev + 1);
     }
   };
@@ -352,13 +412,16 @@ export default function App() {
 
       const theme = answers.find(answer => answer.questionId === 'pattern')?.value.trim() || prev.theme;
 
-      return {
+      const nextCycle = {
         ...prev,
         theme,
         title: prev.title.trim() ? prev.title : theme,
         onboardingAnswers: answers,
         updatedAt: new Date().toISOString(),
       };
+      return currentUserId
+        ? saveCurrentCycle(currentUserId, nextCycle) || nextCycle
+        : nextCycle;
     });
   };
 
@@ -366,7 +429,7 @@ export default function App() {
     if (!currentUser || !cycle) return;
     const cycleToArchive = cycle;
     archiveCycle(currentUser.id, cycle);
-    persistArchivedCycle(cycleToArchive).catch(error => {
+    persistArchivedCycle(currentUser.id, cycleToArchive).catch(error => {
       console.warn('[CYCLE] Remote archive failed; local archive kept.', error);
     });
     setCycle(null);
@@ -394,9 +457,6 @@ export default function App() {
         }
 
         setCurrentUser(session.userId, session.token, session.displayName || session.email);
-        if (session.isStagingAdmin) {
-          setIsAdmin(true);
-        }
         setIsAuthenticated(true);
         await loadSignedInUserState();
       } catch (error) {
@@ -417,7 +477,7 @@ export default function App() {
     hydrateCurrentCycle(currentUserId)
       .then(nextCycle => {
         if (isMounted && getCurrentUser()?.id === currentUserId) {
-          setCycle(nextCycle);
+          setCycle(currentCycle => chooseNewestCycle(currentCycle, nextCycle));
         }
       })
       .catch(error => {
@@ -450,9 +510,6 @@ export default function App() {
             supabaseSession.token,
             supabaseSession.displayName || supabaseSession.email
           );
-          if (supabaseSession.isStagingAdmin) {
-            setIsAdmin(true);
-          }
         }
         const latestUser = getCurrentUser();
         if (!latestUser) {
@@ -478,7 +535,7 @@ export default function App() {
             try {
               const verified = await response.json();
               if (typeof verified?.isAdmin === 'boolean') {
-                setIsAdmin(prev => prev || verified.isAdmin);
+                setIsAdmin(verified.isAdmin);
               }
             } catch {
               // Token validity is enough here; profile hydration handles the rest.

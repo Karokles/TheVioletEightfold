@@ -17,7 +17,9 @@ import {
   CouncilMessageRecord,
   createLoreEntry, 
   createOrUpdateConfirmedAuthUser,
+  deleteAdminAccount,
   getSupabaseAuthUser,
+  getSupabaseAuthUserById,
   getUserProfile,
   isSupabaseConfigured,
   listAdminAccounts,
@@ -371,10 +373,27 @@ const users: User[] = [
     secretHash: createHash('sha256').update('amethyst').digest('hex'),
   },
   {
+    id: 'tuana',
+    username: 'tuana',
+    displayName: 'Tuana',
+    adminSettings: {
+      entitlement: 'founder',
+      offlineOnly: true,
+      notes: 'Local full access account.',
+    },
+    secretHash: createHash('sha256').update('himmelstropfen').digest('hex'),
+  },
+  {
     id: 'beta-test',
     username: 'betatest',
     displayName: 'Beta Test',
     secretHash: createHash('sha256').update('beta-test-242').digest('hex'),
+  },
+  {
+    id: 'launch-test',
+    username: 'launchtest',
+    displayName: 'Launch Test',
+    secretHash: createHash('sha256').update('violet-launch-242-test').digest('hex'),
   },
 ];
 
@@ -536,6 +555,39 @@ const requireAdmin = (req: AuthenticatedRequest, res: Response): boolean => {
     return false;
   }
   return true;
+};
+
+const toAdminAccountResponse = (account: any) => {
+  const settings = getProfileAdminSettings(account.preferences);
+  const access = getAccessFromRecord(account.access || null);
+  const effectiveTier = access?.tier || settings.entitlement || 'free';
+  const displayName = chooseDisplayName(
+    account.display_name,
+    account.username,
+    account.user_id,
+  );
+
+  return {
+    userId: account.user_id,
+    username: account.username || null,
+    displayName,
+    language: account.language || null,
+    createdAt: account.profile_created_at || account.created_at || account.auth_created_at || null,
+    updatedAt: account.profile_updated_at || account.updated_at || account.last_sign_in_at || null,
+    emailConfirmedAt: account.email_confirmed_at || null,
+    lastSignInAt: account.last_sign_in_at || null,
+    entitlement: effectiveTier,
+    offlineOnly: Boolean(settings.offlineOnly),
+    activeUntil: access?.activeUntil || settings.activeUntil || null,
+    betaActivations: access?.betaActivations ?? settings.betaActivations ?? 0,
+    betaBonusUsed: access?.betaBonusUsed ?? settings.betaBonusUsed ?? false,
+    notes: access?.notes || settings.notes || null,
+    limits: {
+      weeklyFreeInteractions: settings.weeklyFreeInteractions ?? null,
+      weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
+      weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
+    },
+  };
 };
 
 const asObject = (value: unknown): Record<string, any> => {
@@ -836,11 +888,25 @@ const featureUsageBuckets = new Map<string, number>();
 const localAccessRecords = new Map<string, UserAccessRecord>();
 const BETA_ACCESS_DAYS = Number(process.env.BETA_ACCESS_DAYS || 14);
 const BETA_PRICE_EUR = process.env.BETA_PRICE_EUR || '2.42';
-const FREE_SINGLE_VOICE_REPLIES = Number(process.env.FREE_SINGLE_VOICE_REPLIES || 12);
-const FREE_COUNCIL_SESSIONS = Number(process.env.FREE_COUNCIL_SESSIONS || 1);
+const FREE_SINGLE_VOICE_REPLIES_PER_ARCHETYPE = Number(
+  process.env.FREE_SINGLE_VOICE_REPLIES_PER_ARCHETYPE
+  || process.env.FREE_SINGLE_VOICE_REPLIES
+  || 6
+);
+const FREE_COUNCIL_SESSIONS = Number(process.env.FREE_COUNCIL_SESSIONS || 5);
 const FREE_COUNCIL_REPLIES_PER_SESSION = Number(process.env.FREE_COUNCIL_REPLIES_PER_SESSION || 3);
 const FREE_BLUEPRINT_SAVES = Number(process.env.FREE_BLUEPRINT_SAVES || 1);
 const FREE_CYCLE_DAYS = Number(process.env.FREE_CYCLE_DAYS || 5);
+const DIRECT_ARCHETYPE_IDS = [
+  'SOVEREIGN',
+  'WARRIOR',
+  'SAGE',
+  'LOVER',
+  'CREATOR',
+  'CAREGIVER',
+  'EXPLORER',
+  'ALCHEMIST',
+] as const;
 
 type AccessSnapshot = {
   tier: AdminEntitlement;
@@ -986,13 +1052,13 @@ async function activatePaidBetaAccess(
 }
 
 const getFreeLimitForFeature = (feature: UsageFeature): number => {
-  if (feature === 'single_voice_reply') return FREE_SINGLE_VOICE_REPLIES;
+  if (feature === 'single_voice_reply') return FREE_SINGLE_VOICE_REPLIES_PER_ARCHETYPE;
   if (feature === 'council_session') return FREE_COUNCIL_SESSIONS;
   if (feature === 'blueprint_save') return FREE_BLUEPRINT_SAVES;
   return 0;
 };
 
-const getFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+const getFeatureUsage = async (userId: string, periodKey: string, feature: string): Promise<number> => {
   if (isSupabaseConfigured()) {
     const record = await getUsageCounter(userId, periodKey, feature);
     if (record) return record.count || 0;
@@ -1001,7 +1067,7 @@ const getFeatureUsage = async (userId: string, periodKey: string, feature: Usage
   return featureUsageBuckets.get(`${userId}:${periodKey}:${feature}`) || 0;
 };
 
-const incrementFeatureUsage = async (userId: string, periodKey: string, feature: UsageFeature): Promise<number> => {
+const incrementFeatureUsage = async (userId: string, periodKey: string, feature: string): Promise<number> => {
   if (isSupabaseConfigured()) {
     const record = await incrementUsageCounter(userId, periodKey, feature);
     if (record) return record.count || 0;
@@ -1038,7 +1104,12 @@ const enforceFeatureAccess = async (
   req: AuthenticatedRequest,
   res: Response,
   feature: UsageFeature,
-  options: { increment?: boolean; sessionReplyCount?: number } = {},
+  options: {
+    increment?: boolean;
+    sessionReplyCount?: number;
+    counterFeature?: string;
+    paywallContext?: Record<string, unknown>;
+  } = {},
 ): Promise<boolean> => {
   if (!req.user) return false;
   const access = await getEffectiveAccess(req.user);
@@ -1069,7 +1140,8 @@ const enforceFeatureAccess = async (
   }
 
   const periodKey = getWeekKey();
-  const current = await getFeatureUsage(req.user.id, periodKey, feature);
+  const counterFeature = options.counterFeature || feature;
+  const current = await getFeatureUsage(req.user.id, periodKey, counterFeature);
   const limit = getFreeLimitForFeature(feature);
 
   if (current >= limit) {
@@ -1078,12 +1150,13 @@ const enforceFeatureAccess = async (
       usage: current,
       periodKey,
       resetAt: getWeeklyResetAt(),
+      ...options.paywallContext,
     });
     return false;
   }
 
   if (options.increment !== false) {
-    await incrementFeatureUsage(req.user.id, periodKey, feature);
+    await incrementFeatureUsage(req.user.id, periodKey, counterFeature);
   }
 
   return true;
@@ -1658,7 +1731,7 @@ app.post('/api/cycle/archive', authenticate, async (req: AuthenticatedRequest, r
       ]).sort((a, b) => getCycleTimestamp(b) - getCycleTimestamp(a));
 
       remoteSaved = await saveRemoteCycleState(req.user, {
-        currentCycle: null,
+        currentCycle: localState.currentCycle,
         archivedCycles,
       });
     } catch (error: any) {
@@ -1690,35 +1763,7 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
     const accounts = await listAdminAccounts();
     res.json({
       databaseStatus: 'configured',
-      accounts: accounts.map(account => {
-        const settings = getProfileAdminSettings(account.preferences);
-        const access = getAccessFromRecord(account.access || null);
-        const effectiveTier = access?.tier || settings.entitlement || 'free';
-        const displayName = chooseDisplayName(
-          account.display_name,
-          account.username,
-          account.user_id,
-        );
-        return {
-          userId: account.user_id,
-          username: account.username || null,
-          displayName,
-          language: account.language || null,
-          createdAt: account.profile_created_at || account.created_at || null,
-          updatedAt: account.profile_updated_at || account.updated_at || null,
-          entitlement: effectiveTier,
-          offlineOnly: Boolean(settings.offlineOnly),
-          activeUntil: access?.activeUntil || settings.activeUntil || null,
-          betaActivations: access?.betaActivations ?? settings.betaActivations ?? 0,
-          betaBonusUsed: access?.betaBonusUsed ?? settings.betaBonusUsed ?? false,
-          notes: access?.notes || settings.notes || null,
-          limits: {
-            weeklyFreeInteractions: settings.weeklyFreeInteractions ?? null,
-            weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
-            weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
-          },
-        };
-      }),
+      accounts: accounts.map(toAdminAccountResponse),
     });
   } catch (error: any) {
     console.error('GET /api/admin/accounts error:', error);
@@ -1830,6 +1875,11 @@ app.put('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRe
       return res.status(400).json({ error: 'user_id_required' });
     }
 
+    const authUser = await getSupabaseAuthUserById(targetUserId);
+    const authUsername = authUser?.email || authUser?.user_metadata?.display_name || targetUserId;
+    const secretHash = createHash('sha256').update(`supabase-auth:${targetUserId}`).digest('hex');
+    await ensureUserExists(targetUserId, authUsername, secretHash);
+
     const existingProfile = await getUserProfile(targetUserId);
     const existingPreferences = existingProfile?.preferences && typeof existingProfile.preferences === 'object'
       ? existingProfile.preferences
@@ -1874,6 +1924,36 @@ app.put('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRe
     console.error('PUT /api/admin/accounts/:userId error:', error);
     res.status(500).json({
       error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+});
+
+app.delete('/api/admin/accounts/:userId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    const targetUserId = String(req.params.userId || '').trim();
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'user_id_required', message: 'User id is required.' });
+    }
+    if (req.user?.id === targetUserId) {
+      return res.status(400).json({
+        error: 'cannot_delete_self',
+        message: 'You cannot delete the account you are currently using.',
+      });
+    }
+
+    await deleteAdminAccount(targetUserId);
+    localAccessRecords.delete(targetUserId);
+    res.json({ deleted: true, userId: targetUserId });
+  } catch (error: any) {
+    console.error('DELETE /api/admin/accounts/:userId error:', error?.message || error);
+    res.status(500).json({
+      error: 'account_delete_failed',
+      message: process.env.NODE_ENV === 'production' ? 'Account deletion failed.' : error.message,
     });
   }
 });
@@ -2021,10 +2101,23 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     }
     
     // Determine mode: direct chat (activeArchetype set) or council session
-    const mode = userProfile?.activeArchetype ? 'direct' : 'council';
+    const requestedArchetype = String(userProfile?.activeArchetype || '').trim().toUpperCase();
+    const activeArchetype = DIRECT_ARCHETYPE_IDS.includes(requestedArchetype as typeof DIRECT_ARCHETYPE_IDS[number])
+      ? requestedArchetype
+      : null;
+    if (userProfile?.activeArchetype && !activeArchetype) {
+      return res.status(400).json({
+        error: 'invalid_archetype',
+        message: 'Unknown direct-chat archetype.',
+      });
+    }
+    const mode = activeArchetype ? 'direct' : 'council';
     const userMessageCount = messages.filter((msg: any) => msg?.role === 'user').length;
     if (mode === 'direct') {
-      if (!(await enforceFeatureAccess(req, res, 'single_voice_reply'))) {
+      if (!(await enforceFeatureAccess(req, res, 'single_voice_reply', {
+        counterFeature: `single_voice_reply:${activeArchetype}`,
+        paywallContext: { archetypeId: activeArchetype },
+      }))) {
         return;
       }
     } else {
@@ -2042,18 +2135,19 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     }
     
     // Log request (no secrets) - CRITICAL for debugging mode detection
-    console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${userProfile?.activeArchetype || 'none'}`);
+    console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${activeArchetype || 'none'}`);
 
     const latestUserMessage = String(messages[messages.length - 1]?.content || '')
       .replace(/^\[(Antworte auf Deutsch\.|Respond in English\.)\]\s*/i, '')
       .trim();
     const responsePlan = createResponsePlan(latestUserMessage, {
       mode,
-      activeArchetype: userProfile?.activeArchetype,
+      activeArchetype: activeArchetype || undefined,
       language: userProfile?.language,
       conversationLength: messages.length,
       communicationMode: userProfile?.meaningContext?.communicationMode,
       overloadRisk: Boolean(userProfile?.meaningContext?.overloadSignal || userProfile?.meaningContext?.emotionalState?.overloadRisk),
+      stateAwareness: userProfile?.meaningContext?.stateAwareness,
     });
 
     // Build system prompt - COMPLETELY SEPARATE for direct vs council
@@ -2107,7 +2201,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
             session_id: sessionId,
             user_id: userId,
             role: 'assistant',
-            archetype_id: mode === 'direct' ? userProfile?.activeArchetype || null : null,
+          archetype_id: mode === 'direct' ? activeArchetype : null,
             content: reply,
             sequence_index: persistedMessages.length,
             provider: responseProvider
@@ -2122,7 +2216,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
           content: {
             messages: messages,
             reply: reply,
-            archetype: userProfile?.activeArchetype,
+        archetype: activeArchetype || undefined,
             language: userProfile?.language
           }
         });
@@ -2138,7 +2232,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     if (!openai) {
       const reply = createMockCouncilReply({
         mode,
-        activeArchetype: userProfile?.activeArchetype,
+        activeArchetype: activeArchetype || undefined,
         language: userProfile?.language,
         topic: latestUserMessage,
         responsePlan
@@ -2270,7 +2364,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       if (reply !== originalReply) {
         console.warn('[API] DIRECT mode: Stripped council structure from response', { 
           userId, 
-          activeArchetype: userProfile?.activeArchetype,
+          activeArchetype,
           originalLength: originalReply.length,
           cleanedLength: reply.length,
           hadSpeakerTags: originalReply.includes('[[SPEAKER:'),
@@ -2454,8 +2548,13 @@ app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, re
 
   const access = await getEffectiveAccess(req.user);
   const periodKey = getWeekKey();
-  const [singleVoiceReplies, councilSessions, blueprintSaves] = await Promise.all([
-    getFeatureUsage(req.user.id, periodKey, 'single_voice_reply'),
+  const directUsageEntries = await Promise.all(DIRECT_ARCHETYPE_IDS.map(async archetypeId => [
+    archetypeId,
+    await getFeatureUsage(req.user!.id, periodKey, `single_voice_reply:${archetypeId}`),
+  ] as const));
+  const singleVoiceRepliesByArchetype = Object.fromEntries(directUsageEntries);
+  const singleVoiceReplies = directUsageEntries.reduce((total, [, count]) => total + count, 0);
+  const [councilSessions, blueprintSaves] = await Promise.all([
     getFeatureUsage(req.user.id, periodKey, 'council_session'),
     getFeatureUsage(req.user.id, periodKey, 'blueprint_save'),
   ]);
@@ -2470,7 +2569,8 @@ app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, re
     source: access.source,
     weeklyResetAt: getWeeklyResetAt(),
     freeLimits: {
-      singleVoiceReplies: FREE_SINGLE_VOICE_REPLIES,
+      singleVoiceReplies: FREE_SINGLE_VOICE_REPLIES_PER_ARCHETYPE,
+      singleVoiceRepliesPerArchetype: FREE_SINGLE_VOICE_REPLIES_PER_ARCHETYPE,
       councilSessions: FREE_COUNCIL_SESSIONS,
       councilRepliesPerSession: FREE_COUNCIL_REPLIES_PER_SESSION,
       blueprintSaves: FREE_BLUEPRINT_SAVES,
@@ -2478,6 +2578,7 @@ app.get('/api/access/status', authenticate, async (req: AuthenticatedRequest, re
     },
     usage: {
       singleVoiceReplies,
+      singleVoiceRepliesByArchetype,
       councilSessions,
       blueprintSaves,
     },
@@ -2619,6 +2720,18 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
       : `OUTPUT LANGUAGE:
 - Write every user-facing string value in English.
 - Keep JSON property names and type constants exactly as specified.`;
+    const stateAwareness = meaningContext?.stateAwareness && typeof meaningContext.stateAwareness === 'object'
+      ? meaningContext.stateAwareness
+      : null;
+    const stateAwarenessPromptBlock = stateAwareness
+      ? `CURRENT STATE-AWARENESS SCAN:
+${JSON.stringify(stateAwareness, null, 2)}
+
+Use this as a pacing and discernment signal. It is not a diagnosis and not automatically a breakthrough.
+If breakthroughCandidate is false, do not create a breakthrough from state-awareness alone.
+Strong narrative charge, powerful language, symbolic language, or action pressure may be meaningful without needing storage as a breakthrough.
+`
+      : '';
 
     // Build analysis prompt
     const analysisPrompt = `You are the Meaning Agent. Analyze this conversation transcript and extract meaningful insights.
@@ -2633,6 +2746,7 @@ ${JSON.stringify(meaningContext.emotionalState, null, 2)}
 
 Use this as a soft communication signal only. It is not a diagnosis. Preserve user agency and avoid labeling the user.
 ` : ''}
+${stateAwarenessPromptBlock}
 
 ${outputLanguageInstruction}
 
@@ -2640,13 +2754,17 @@ Analyze this conversation and return JSON ONLY (no prose, no explanations). Extr
 
 1. **Questlog Entry**: One meaningful questlog entry summarizing the session's main topic/objective
 2. **Soul Timeline Event**: One significant event or moment from the conversation
-3. **Breakthrough**: One breakthrough or realization (if any occurred, otherwise empty array)
+3. **Breakthrough**: At most one breakthrough or realization, only if the user explicitly reached a durable insight or chose to integrate it
 4. **Emotional State**: A gentle communication scan for tone/pacing, not a diagnosis
 
 Rules:
 - Return STRICT JSON only (no markdown, no code blocks, no explanations)
 - Never include MODERATOR text or speaker tags
-- Produce minimal but meaningful records: typically 1 quest entry + 1 timeline event + 1 breakthrough per session
+- Produce minimal but meaningful records: typically 0-1 quest entry + 0-1 timeline event; breakthroughs are rare
+- Often the correct breakthroughs array is empty
+- Do not convert state awareness, emotional intensity, symbolic language, or a charged personal narrative into a breakthrough by default
+- Some meaningful moments are settling and should not become quest/breakthrough unless the user explicitly integrates them
+- Do not debunk the user's story in stored records. If a state-colored narrative is present, summarize the lived focus, impulse, or responsibility question without saying it was "just" a story/projection/model
 - If session is empty or trivial, return empty arrays
 - Use ISO date strings for createdAt fields
 - Generate unique IDs (use short UUIDs or timestamps)
@@ -2663,7 +2781,7 @@ Return this exact JSON structure:
   "nextQuestState": null
 }
 
-IMPORTANT: If you identify a breakthrough, you MUST:
+IMPORTANT: If and only if you identify a real breakthrough, you MUST:
 1. Include it in the "breakthroughs" array
 2. ALSO include a corresponding entry in "soulTimelineEvents" with type: "BREAKTHROUGH"
 3. The timeline event should have the same title/label as the breakthrough title
@@ -2746,6 +2864,12 @@ IMPORTANT: If you identify a breakthrough, you MUST:
     }
     if (!analysisResult.breakthroughs || !Array.isArray(analysisResult.breakthroughs)) {
       analysisResult.breakthroughs = [];
+    }
+    if (stateAwareness?.breakthroughCandidate === false) {
+      analysisResult.breakthroughs = [];
+      analysisResult.soulTimelineEvents = analysisResult.soulTimelineEvents.filter((event: any) => {
+        return String(event?.type || '').toUpperCase() !== 'BREAKTHROUGH';
+      });
     }
     if (analysisResult.emotionalState && typeof analysisResult.emotionalState === 'object') {
       analysisResult.emotionalState = {
@@ -3001,6 +3125,36 @@ app.get('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, re
   }
 });
 
+// Merge client-created Soul Blueprint records, such as integration-cycle
+// milestones. This endpoint does not run AI or consume an analysis allowance.
+app.post('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
+    const patch = asObject(req.body?.patch);
+    const nextState = await mergeLocalMeaningState(req.user.id, {
+      questLogEntries: Array.isArray(patch.questLogEntries) ? patch.questLogEntries : [],
+      soulTimelineEvents: Array.isArray(patch.soulTimelineEvents) ? patch.soulTimelineEvents : [],
+      breakthroughs: Array.isArray(patch.breakthroughs) ? patch.breakthroughs : [],
+      emotionalState: patch.emotionalState,
+      attributeUpdates: Array.isArray(patch.attributeUpdates) ? patch.attributeUpdates : undefined,
+      skillUpdates: Array.isArray(patch.skillUpdates) ? patch.skillUpdates : undefined,
+      nextQuestState: patch.nextQuestState,
+    });
+
+    return res.json(nextState);
+  } catch (error: any) {
+    console.error('[MEANING] Error persisting client meaning state:', error);
+    return res.status(500).json({
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
+    });
+  }
+});
+
 // Load archetypes config
 function loadArchetypesConfig() {
   try {
@@ -3106,6 +3260,10 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
   const emotionalLine = emotionalState
     ? `Emotional scan: valence=${emotionalState.valence || 'UNKNOWN'}, activation=${emotionalState.activation || 'UNKNOWN'}, clarity=${emotionalState.clarity || 'UNKNOWN'}, overloadRisk=${Boolean(emotionalState.overloadRisk)}, supportNeeds=${Array.isArray(emotionalState.supportNeeds) ? emotionalState.supportNeeds.join(', ') : 'none'}. Treat this as a soft pacing signal, never as a diagnosis.`
     : 'No emotional scan was provided.';
+  const stateAwareness = meaningContext?.stateAwareness;
+  const stateAwarenessLine = stateAwareness
+    ? `State awareness: narrativeCharge=${stateAwareness.narrativeCharge || 'UNKNOWN'}, impulse=${stateAwareness.impulseKind || 'UNKNOWN'}, orientation=${stateAwareness.connectionResponsibility?.orientation || 'UNCLEAR'}, needsPause=${Boolean(stateAwareness.phronesisCheck?.needsPause)}, doNotDebunk=${Boolean(stateAwareness.doNotDebunk)}, breakthroughCandidate=${Boolean(stateAwareness.breakthroughCandidate)}. Powerful language=${Array.isArray(stateAwareness.powerfulLanguage) ? stateAwareness.powerfulLanguage.slice(0, 2).join(' | ') : 'none'}. Attention=${Array.isArray(stateAwareness.attentionDirection) ? stateAwareness.attentionDirection.slice(0, 2).join(' | ') : 'none'}.`
+    : 'No state-awareness scan was provided.';
   const identityLine = mode === 'direct' && voiceName
     ? `Apply this as ${voiceName}'s own voice, not as a meta-system announcement.`
     : 'Apply this across the council without turning it into a generic moderator lecture.';
@@ -3138,11 +3296,17 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
   if (language === 'DE') {
     return `KOMMUNIKATIONSVERTRAG:
 - Aktueller Modus: ${communicationMode}. ${description}
+- State Awareness Before Insight: Pruefe zuerst Zustand, dann Narrative, dann Impuls, dann Handlung. Unterstelle nicht, dass fehlendes Wissen das Problem ist.
+- Do not break the spell by explaining the spell. Wenn eine persoenliche Geschichte stark ist, entzaubere sie nicht frontal als "nur Story", "nur Modell" oder "nur Projektion".
+- Sprache formt Wahrnehmung und Handlung. Frage eher: Welcher Satz hat gerade Macht? Wohin zieht die Geschichte Aufmerksamkeit? Welche Worte gehoeren wirklich dem Nutzer?
+- Freiheit ist bewusste Teilnahme an gewaehlter Verantwortung, nicht Flucht aus Bindung. Frage nach bewusster Verbindung, gemeinsamer Verantwortung oder unbewusster Verstrickung.
+- Phronesis + Horme: Behandle Handlungsimpulse als pruefbare Signale. Dient der Impuls echter Verbundenheit oder Kontrolle/Rueckzug? Muss er jetzt befolgt werden?
 - Consent-State: ${consentState}. Frage nach Erlaubnis, bevor du tief deutest, umlenkst oder einen Exit Room öffnest, wenn der Nutzer überlastet wirken könnte.
 - Geschichten dürfen leben. Nicht jede Intensität ist ein Problem; nicht jede Wiederholung braucht sofort eine Lösung.
 - Exit Rooms sind verfügbar, aber nicht reflexhaft. Nutze sie nur bei klarer Überlastung, Feststecken, Selbstverlust oder ausdrücklichem Wunsch.
 - Wenn nötig, frage knapp: "Soll ich das halten, spiegeln, sortieren, erden oder in eine kleine Handlung übersetzen?"
 - ${emotionalLine}
+- ${stateAwarenessLine}
 - Wenn Aktivierung hoch oder Overload-Risiko wahr ist: langsamer, klarer, weniger Optionen, zuerst Halt/Erden.
 - ${cycleLine}
 - ${identityLine}`;
@@ -3150,11 +3314,17 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
 
   return `COMMUNICATION CONTRACT:
 - Current mode: ${communicationMode}. ${description}
+- State Awareness Before Insight: Check state, then narrative, then impulse, then action. Do not assume missing knowledge is the problem.
+- Do not break the spell by explaining the spell. When a personal story is strong, do not debunk it head-on as "just a story", "just a model", or "just a projection".
+- Language shapes perception and action. Ask instead: Which sentence has power right now? Where does the story pull attention? Which words truly belong to the user?
+- Freedom is conscious participation in chosen responsibility, not escape from all bonds. Ask whether this is conscious connection, shared responsibility, or unconscious entanglement.
+- Phronesis + Horme: Treat action impulses as signals to examine. Does the impulse serve real connection, or control/withdrawal? Must it be followed now?
 - Consent state: ${consentState}. Ask for permission before deep interpretation, redirection, or opening an exit room when the user may be overloaded.
 - Stories are allowed to breathe. Not every intensity is a problem; not every repetition needs an immediate solution.
 - Exit rooms are available, but not reflexive. Use them only when there is clear overload, stuckness, self-loss, or explicit user desire.
 - When needed, ask briefly: "Do you want me to hold this, mirror it, sort it, ground it, or translate it into one small action?"
 - ${emotionalLine}
+- ${stateAwarenessLine}
 - If activation is high or overload risk is true: slow down, reduce options, and prioritize presence/grounding first.
 - ${cycleLine}
 - ${identityLine}`;

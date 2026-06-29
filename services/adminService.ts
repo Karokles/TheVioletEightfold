@@ -35,6 +35,8 @@ export interface AdminAccount {
   language?: 'EN' | 'DE' | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  emailConfirmedAt?: string | null;
+  lastSignInAt?: string | null;
   entitlement: AdminEntitlement;
   offlineOnly: boolean;
   activeUntil?: string | null;
@@ -152,8 +154,42 @@ export const updateAdminAccount = async (
   });
 
   if (!response.ok) {
-    throw new Error(`Admin update failed: ${response.status}`);
+    let message = `Admin update failed: ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.message === 'string') {
+        message = body.message;
+      } else if (typeof body?.error === 'string') {
+        message = body.error;
+      }
+    } catch {
+      // Keep HTTP status fallback.
+    }
+    throw new Error(message);
   }
 
   return response.json();
+};
+
+export const deleteAdminAccount = async (userId: string): Promise<void> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let message = `Admin delete failed: ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.message === 'string') {
+        message = body.message;
+      } else if (typeof body?.error === 'string') {
+        message = body.error;
+      }
+    } catch {
+      // Keep HTTP status fallback.
+    }
+    throw new Error(message);
+  }
 };

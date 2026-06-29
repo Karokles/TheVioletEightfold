@@ -250,6 +250,9 @@ export const upsertUserProfile = async (profile: UserProfileRecord): Promise<Use
 export interface AdminAccountRecord {
   user_id: string;
   username?: string | null;
+  email_confirmed_at?: string | null;
+  last_sign_in_at?: string | null;
+  auth_created_at?: string | null;
   display_name?: string | null;
   language?: string | null;
   preferences?: any;
@@ -456,6 +459,21 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
   }
 
   try {
+    const authUsers: SupabaseAuthUser[] = [];
+    const perPage = 1000;
+    for (let page = 1; page <= 20; page += 1) {
+      const { data, error } = await getSupabaseClient().auth.admin.listUsers({ page, perPage });
+      if (error) {
+        console.error('[SUPABASE] Error listing auth users:', error.message);
+        break;
+      }
+
+      authUsers.push(...data.users);
+      if (data.users.length < perPage) {
+        break;
+      }
+    }
+
     const [
       { data: users, error: usersError },
       { data: profiles, error: profilesError },
@@ -480,12 +498,28 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
     }
 
     const byId = new Map<string, AdminAccountRecord>();
+    authUsers.forEach(authUser => {
+      const metadata = authUser.user_metadata || {};
+      byId.set(authUser.id, {
+        user_id: authUser.id,
+        username: authUser.email || null,
+        display_name: metadata.display_name || metadata.full_name || metadata.name || null,
+        email_confirmed_at: authUser.email_confirmed_at || null,
+        last_sign_in_at: authUser.last_sign_in_at || null,
+        auth_created_at: authUser.created_at || null,
+        created_at: authUser.created_at || null,
+        updated_at: authUser.updated_at || authUser.created_at || null,
+      });
+    });
+
     ((users || []) as any[]).forEach(user => {
+      const existing = byId.get(user.id) || { user_id: user.id };
       byId.set(user.id, {
+        ...existing,
         user_id: user.id,
         username: user.username,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
+        created_at: user.created_at || existing.created_at || null,
+        updated_at: user.updated_at || existing.updated_at || null,
       });
     });
 
@@ -493,7 +527,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
       const existing = byId.get(profile.user_id) || { user_id: profile.user_id };
       byId.set(profile.user_id, {
         ...existing,
-        display_name: profile.display_name,
+        display_name: profile.display_name || existing.display_name || null,
         language: profile.language,
         preferences: profile.preferences || {},
         profile_created_at: profile.created_at,
@@ -510,13 +544,73 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
     });
 
     return Array.from(byId.values()).sort((a, b) => {
-      const left = a.profile_updated_at || a.updated_at || a.created_at || '';
-      const right = b.profile_updated_at || b.updated_at || b.created_at || '';
+      const left = a.profile_updated_at || a.updated_at || a.last_sign_in_at || a.created_at || a.auth_created_at || '';
+      const right = b.profile_updated_at || b.updated_at || b.last_sign_in_at || b.created_at || b.auth_created_at || '';
       return right.localeCompare(left);
     });
   } catch (error: any) {
     console.error('[SUPABASE] Error in listAdminAccounts:', error.message);
     return [];
+  }
+};
+
+export const getSupabaseAuthUserById = async (userId: string): Promise<SupabaseAuthUser | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient().auth.admin.getUserById(userId);
+    if (error) {
+      if (!/not found/i.test(error.message)) {
+        console.warn('[SUPABASE_AUTH] Could not load auth user by id:', error.message);
+      }
+      return null;
+    }
+
+    return data.user || null;
+  } catch (error: any) {
+    console.warn('[SUPABASE_AUTH] Error loading auth user by id:', error.message);
+    return null;
+  }
+};
+
+
+export const deleteAdminAccount = async (userId: string): Promise<void> => {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase client not initialized.');
+  }
+
+  const id = userId.trim();
+  if (!id) {
+    throw new Error('User id is required.');
+  }
+
+  const deleteFrom = async (table: string, column = 'user_id') => {
+    const { error } = await getSupabaseClient()
+      .from(table)
+      .delete()
+      .eq(column, id);
+
+    if (error) {
+      throw new Error(`${table}: ${error.message}`);
+    }
+  };
+
+  await deleteFrom('council_messages');
+  await deleteFrom('council_sessions');
+  await deleteFrom('lore_entries');
+  await deleteFrom('questlog_entries');
+  await deleteFrom('soul_timeline_events');
+  await deleteFrom('breakthroughs');
+  await deleteFrom('usage_counters');
+  await deleteFrom('user_access');
+  await deleteFrom('user_profiles');
+  await deleteFrom('users', 'id');
+
+  const { error } = await getSupabaseClient().auth.admin.deleteUser(id);
+  if (error && !/not found/i.test(error.message)) {
+    throw new Error(`auth.users: ${error.message}`);
   }
 };
 
