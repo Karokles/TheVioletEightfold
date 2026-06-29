@@ -513,7 +513,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
     });
 
     ((users || []) as any[]).forEach(user => {
-      const existing = byId.get(user.id) || { user_id: user.id };
+      const existing: AdminAccountRecord = byId.get(user.id) || { user_id: user.id };
       byId.set(user.id, {
         ...existing,
         user_id: user.id,
@@ -524,7 +524,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
     });
 
     ((profiles || []) as any[]).forEach(profile => {
-      const existing = byId.get(profile.user_id) || { user_id: profile.user_id };
+      const existing: AdminAccountRecord = byId.get(profile.user_id) || { user_id: profile.user_id };
       byId.set(profile.user_id, {
         ...existing,
         display_name: profile.display_name || existing.display_name || null,

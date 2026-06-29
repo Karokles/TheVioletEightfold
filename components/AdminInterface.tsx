@@ -10,7 +10,7 @@ interface AdminInterfaceProps {
 const copy = {
   EN: {
     title: 'Admin',
-    subtitle: 'Accounts, limits, and staging markers.',
+    subtitle: 'Accounts, access, and usage limits.',
     refresh: 'Refresh',
     save: 'Save',
     create: 'Create',
@@ -41,7 +41,7 @@ const copy = {
   },
   DE: {
     title: 'Admin',
-    subtitle: 'Konten, Limits und Staging-Marker.',
+    subtitle: 'Konten, Zugang und Nutzungslimits.',
     refresh: 'Aktualisieren',
     save: 'Speichern',
     create: 'Anlegen',

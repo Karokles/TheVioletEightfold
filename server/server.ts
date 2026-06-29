@@ -2147,7 +2147,6 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       conversationLength: messages.length,
       communicationMode: userProfile?.meaningContext?.communicationMode,
       overloadRisk: Boolean(userProfile?.meaningContext?.overloadSignal || userProfile?.meaningContext?.emotionalState?.overloadRisk),
-      stateAwareness: userProfile?.meaningContext?.stateAwareness,
     });
 
     // Build system prompt - COMPLETELY SEPARATE for direct vs council
