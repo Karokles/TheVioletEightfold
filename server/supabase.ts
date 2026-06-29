@@ -5,12 +5,22 @@ import { runtimeConfig, serviceReadiness } from './runtimeConfig.js';
 // Supabase configuration with feature flag
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_AUTH_ADMIN_KEY = process.env.SUPABASE_AUTH_ADMIN_KEY
+  || process.env.SUPABASE_SERVICE_ROLE_JWT
+  || SUPABASE_SERVICE_ROLE_KEY;
 
 let supabaseClient: ReturnType<typeof createClient> | null = null;
+let supabaseAuthAdminClient: ReturnType<typeof createClient> | null = null;
 
 // Initialize Supabase client if env vars are set
 if (serviceReadiness.database && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+  supabaseAuthAdminClient = createClient(SUPABASE_URL, SUPABASE_AUTH_ADMIN_KEY || SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
@@ -28,8 +38,45 @@ export const getSupabaseClient = () => {
   return supabaseClient;
 };
 
+export const getSupabaseAuthAdminClient = () => {
+  if (!supabaseAuthAdminClient) {
+    throw new Error('Supabase auth admin client not initialized. Check SUPABASE_URL and SUPABASE_AUTH_ADMIN_KEY/SUPABASE_SERVICE_ROLE_KEY.');
+  }
+  return supabaseAuthAdminClient;
+};
+
 export const isSupabaseConfigured = () => {
   return !!supabaseClient;
+};
+
+export const getSupabaseAdminKeyInfo = () => {
+  const key = SUPABASE_AUTH_ADMIN_KEY || '';
+  return {
+    hasAuthAdminKey: Boolean(key),
+    authAdminKeyKind: key.startsWith('eyJ')
+      ? 'jwt_service_role'
+      : key.startsWith('sb_secret_')
+        ? 'supabase_secret'
+        : key
+          ? 'other'
+          : 'missing',
+  };
+};
+
+export const checkSupabaseAuthAdmin = async (): Promise<{ ok: boolean; message?: string }> => {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, message: 'Supabase is not configured.' };
+  }
+
+  try {
+    const { error } = await getSupabaseAuthAdminClient().auth.admin.listUsers({ page: 1, perPage: 1 });
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, message: error?.message || 'Unknown Supabase Auth admin error.' };
+  }
 };
 
 export const getSupabaseAuthUser = async (accessToken: string): Promise<SupabaseAuthUser | null> => {
@@ -77,7 +124,7 @@ const findAuthUserByEmail = async (email: string): Promise<AdminAuthUserResult['
   const perPage = 1000;
 
   for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await getSupabaseClient().auth.admin.listUsers({ page, perPage });
+    const { data, error } = await getSupabaseAuthAdminClient().auth.admin.listUsers({ page, perPage });
     if (error) {
       throw new Error(error.message);
     }
@@ -110,7 +157,7 @@ export const createOrUpdateConfirmedAuthUser = async (
   };
   const emailConfirm = input.emailConfirm !== false;
 
-  const { data, error } = await getSupabaseClient().auth.admin.createUser({
+  const { data, error } = await getSupabaseAuthAdminClient().auth.admin.createUser({
     email,
     password: input.password,
     email_confirm: emailConfirm,
@@ -131,7 +178,7 @@ export const createOrUpdateConfirmedAuthUser = async (
     throw new Error('Auth user exists, but could not be found for update.');
   }
 
-  const update = await getSupabaseClient().auth.admin.updateUserById(existingUser.id, {
+  const update = await getSupabaseAuthAdminClient().auth.admin.updateUserById(existingUser.id, {
     password: input.password,
     email_confirm: emailConfirm,
     user_metadata: {
@@ -462,10 +509,9 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
     const authUsers: SupabaseAuthUser[] = [];
     const perPage = 1000;
     for (let page = 1; page <= 20; page += 1) {
-      const { data, error } = await getSupabaseClient().auth.admin.listUsers({ page, perPage });
+      const { data, error } = await getSupabaseAuthAdminClient().auth.admin.listUsers({ page, perPage });
       if (error) {
-        console.error('[SUPABASE] Error listing auth users:', error.message);
-        break;
+        throw new Error(`Supabase Auth admin unavailable: ${error.message}`);
       }
 
       authUsers.push(...data.users);
@@ -560,7 +606,7 @@ export const getSupabaseAuthUserById = async (userId: string): Promise<SupabaseA
   }
 
   try {
-    const { data, error } = await getSupabaseClient().auth.admin.getUserById(userId);
+    const { data, error } = await getSupabaseAuthAdminClient().auth.admin.getUserById(userId);
     if (error) {
       if (!/not found/i.test(error.message)) {
         console.warn('[SUPABASE_AUTH] Could not load auth user by id:', error.message);
@@ -608,7 +654,7 @@ export const deleteAdminAccount = async (userId: string): Promise<void> => {
   await deleteFrom('user_profiles');
   await deleteFrom('users', 'id');
 
-  const { error } = await getSupabaseClient().auth.admin.deleteUser(id);
+  const { error } = await getSupabaseAuthAdminClient().auth.admin.deleteUser(id);
   if (error && !/not found/i.test(error.message)) {
     throw new Error(`auth.users: ${error.message}`);
   }

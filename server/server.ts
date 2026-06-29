@@ -17,7 +17,9 @@ import {
   CouncilMessageRecord,
   createLoreEntry, 
   createOrUpdateConfirmedAuthUser,
+  checkSupabaseAuthAdmin,
   deleteAdminAccount,
+  getSupabaseAdminKeyInfo,
   getSupabaseAuthUser,
   getSupabaseAuthUserById,
   getUserProfile,
@@ -1257,9 +1259,11 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/auth/readiness', (req: Request, res: Response) => {
+app.get('/api/auth/readiness', async (req: Request, res: Response) => {
   const supabaseUrl = process.env.SUPABASE_URL || '';
   const supabaseProjectRef = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || null;
+  const authAdmin = await checkSupabaseAuthAdmin();
+  const adminKeyInfo = getSupabaseAdminKeyInfo();
 
   res.status(200).json({
     status: 'ok',
@@ -1274,6 +1278,12 @@ app.get('/api/auth/readiness', (req: Request, res: Response) => {
       database: serviceReadiness.database,
       supabaseAuth: serviceReadiness.supabaseAuth,
       auth: serviceReadiness.auth,
+    },
+    authAdmin: {
+      ok: authAdmin.ok,
+      keyKind: adminKeyInfo.authAdminKeyKind,
+      hasKey: adminKeyInfo.hasAuthAdminKey,
+      message: authAdmin.ok ? undefined : authAdmin.message,
     },
     supabaseProjectRef,
   });
@@ -1788,9 +1798,14 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
       accounts: accounts.map(toAdminAccountResponse),
     });
   } catch (error: any) {
-    console.error('GET /api/admin/accounts error:', error);
-    res.status(500).json({
-      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    const rawMessage = error?.message || 'Unable to load admin accounts.';
+    const authAdminKeyProblem = /valid bearer token|jwt|service[_ -]?role|auth admin/i.test(rawMessage);
+    console.error('GET /api/admin/accounts error:', rawMessage);
+    res.status(authAdminKeyProblem ? 503 : 500).json({
+      error: 'admin_accounts_unavailable',
+      message: authAdminKeyProblem
+        ? 'Supabase Auth Admin is not available. Set SUPABASE_AUTH_ADMIN_KEY to the legacy service_role JWT for this Supabase project.'
+        : process.env.NODE_ENV === 'production' ? 'Unable to load admin accounts.' : rawMessage,
     });
   }
 });
@@ -1877,10 +1892,14 @@ app.post('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, 
       },
     });
   } catch (error: any) {
-    console.error('POST /api/admin/accounts error:', error?.message || error);
-    res.status(400).json({
+    const rawMessage = error?.message || 'Account creation failed.';
+    const authAdminKeyProblem = /valid bearer token|jwt|service[_ -]?role|auth admin/i.test(rawMessage);
+    console.error('POST /api/admin/accounts error:', rawMessage);
+    res.status(authAdminKeyProblem ? 503 : 400).json({
       error: 'account_create_failed',
-      message: error?.message || 'Account creation failed.',
+      message: authAdminKeyProblem
+        ? 'Supabase Auth Admin is not available. Set SUPABASE_AUTH_ADMIN_KEY to the legacy service_role JWT for this Supabase project.'
+        : rawMessage,
     });
   }
 });
