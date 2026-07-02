@@ -10,6 +10,8 @@ export type ResponseMode =
   | 'integration'
   | 'structure';
 
+export type ResponseExpression = 'chamber' | 'single_voice' | 'multi_voice';
+
 export type UserIntent =
   | 'SHARE'
   | 'REFLECT'
@@ -86,6 +88,7 @@ export interface StateAwarenessPlanInput {
 export interface ResponsePlan {
   intent: UserIntent;
   mode: ResponseMode;
+  expression: ResponseExpression;
   signals: ConversationSignal[];
   selectedArchetypes: OrganicArchetypeId[];
   shouldUseCouncil: boolean;
@@ -351,9 +354,19 @@ export const createResponsePlan = (
     mode = 'integration';
   }
 
-  const shouldUseCouncil = mode === 'council';
+  const expression = resolveResponseExpression({
+    endpointMode: options.mode,
+    mode,
+    intent,
+    signals: unique(signals),
+    communicationMode: options.communicationMode,
+    hasActiveArchetype: Boolean(options.activeArchetype || selectedArchetypes.length > 0),
+    overloadRisk: Boolean(options.overloadRisk),
+    stateAwareness,
+  });
+  const shouldUseCouncil = expression === 'multi_voice';
   const shouldGroundFirst = mode === 'grounding' || signals.includes('dysregulation') || Boolean(options.overloadRisk);
-  const permissions = buildPermissions(mode, intent, shouldUseCouncil);
+  const permissions = buildPermissions(mode, intent, expression);
   const tone = mode === 'structure'
     ? 'structured'
     : mode === 'arrival' || mode === 'grounding' || mode === 'hold' || mode === 'exit_room'
@@ -364,20 +377,21 @@ export const createResponsePlan = (
           ? 'minimal'
           : 'direct';
 
-  const maxResponseLength = mode === 'council'
+  const maxResponseLength = expression === 'multi_voice'
     ? 'medium'
     : mode === 'structure'
       ? 'medium'
       : 'short';
 
   const language = options.language === 'DE' ? 'DE' : 'EN';
-  const promptInstructions = buildOrganicInstructions({ mode, intent, signals: unique(signals), tone, maxResponseLength, language, selectedArchetypes, permissions, stateAwareness });
+  const promptInstructions = buildOrganicInstructions({ mode, expression, intent, signals: unique(signals), tone, maxResponseLength, language, selectedArchetypes, permissions, stateAwareness });
 
   return {
     intent,
     mode,
+    expression,
     signals: unique(signals),
-    selectedArchetypes: unique(selectedArchetypes).slice(0, shouldUseCouncil ? 4 : 1),
+    selectedArchetypes: unique(selectedArchetypes).slice(0, expression === 'multi_voice' ? 4 : expression === 'single_voice' ? 1 : 0),
     shouldUseCouncil,
     shouldUpdateLore: (signals.includes('breakthrough') || signals.includes('meaning_emerging'))
       && stateBreakthroughCandidate !== false,
@@ -389,10 +403,59 @@ export const createResponsePlan = (
   };
 };
 
+const resolveResponseExpression = (input: {
+  endpointMode: 'direct' | 'council';
+  mode: ResponseMode;
+  intent: UserIntent;
+  signals: ConversationSignal[];
+  communicationMode?: string;
+  hasActiveArchetype: boolean;
+  overloadRisk: boolean;
+  stateAwareness?: StateAwarenessPlanInput;
+}): ResponseExpression => {
+  if (input.endpointMode === 'direct') {
+    return input.hasActiveArchetype ? 'single_voice' : 'chamber';
+  }
+
+  if (input.intent === 'ASK_META' || input.intent === 'TEST_SYSTEM') {
+    return 'chamber';
+  }
+
+  const communicationMode = String(input.communicationMode || '').toUpperCase();
+  const explicitCouncil = input.signals.includes('user_requests_council');
+  const trueTension = input.signals.includes('internal_conflict') || input.signals.includes('decision_tension');
+  const destabilized = input.overloadRisk
+    || input.signals.includes('dysregulation')
+    || Boolean(input.stateAwareness?.phronesisCheck?.needsPause);
+
+  if (communicationMode === 'HOLD' || communicationMode === 'GROUND') {
+    if (explicitCouncil && !destabilized) return 'multi_voice';
+    return 'chamber';
+  }
+
+  if (destabilized) {
+    return 'chamber';
+  }
+
+  if (explicitCouncil || (communicationMode === 'EXPLORE' && trueTension) || input.mode === 'council') {
+    return 'multi_voice';
+  }
+
+  if (communicationMode === 'ACT' || input.mode === 'one_voice' || input.mode === 'integration') {
+    return input.hasActiveArchetype || communicationMode === 'ACT' ? 'single_voice' : 'chamber';
+  }
+
+  if (communicationMode === 'MIRROR') {
+    return input.hasActiveArchetype ? 'single_voice' : 'chamber';
+  }
+
+  return 'chamber';
+};
+
 const buildPermissions = (
   mode: ResponseMode,
   intent: UserIntent,
-  shouldUseCouncil: boolean,
+  expression: ResponseExpression,
 ): ResponsePlan['permissions'] => {
   if (intent === 'ASK_META' || intent === 'TEST_SYSTEM') {
     return {
@@ -421,8 +484,8 @@ const buildPermissions = (
       allowQuestions: mode === 'structure',
       allowNextSteps: true,
       allowSuggestions: true,
-      allowCouncil: false,
-      maxVisibleVoices: 0,
+      allowCouncil: expression === 'multi_voice',
+      maxVisibleVoices: expression === 'multi_voice' ? 4 : expression === 'single_voice' ? 1 : 0,
       shouldExplainState: false,
     };
   }
@@ -431,14 +494,15 @@ const buildPermissions = (
     allowQuestions: mode !== 'grounding',
     allowNextSteps: mode === 'grounding',
     allowSuggestions: mode === 'grounding',
-    allowCouncil: shouldUseCouncil,
-    maxVisibleVoices: shouldUseCouncil ? 4 : mode === 'one_voice' ? 1 : 0,
+    allowCouncil: expression === 'multi_voice',
+    maxVisibleVoices: expression === 'multi_voice' ? 4 : expression === 'single_voice' ? 1 : 0,
     shouldExplainState: false,
   };
 };
 
 const buildOrganicInstructions = (plan: {
   mode: ResponseMode;
+  expression: ResponseExpression;
   intent: UserIntent;
   signals: ConversationSignal[];
   tone: ResponsePlan['tone'];
@@ -501,6 +565,20 @@ const buildOrganicInstructions = (plan: {
   };
 
   const situationalInstructions: string[] = [];
+  if (plan.expression === 'chamber') {
+    situationalInstructions.push(isGerman
+      ? 'EXPRESSION: Gemeinsame Kammer. Antworte als integrierter Raum ohne sichtbare Sprecher-Tags. Keine versteckte Panelstruktur, keine mehreren Stimmen.'
+      : 'EXPRESSION: Shared chamber. Respond as an integrated room without visible speaker tags. No hidden panel structure, no multiple voices.');
+  } else if (plan.expression === 'single_voice') {
+    situationalInstructions.push(isGerman
+      ? `EXPRESSION: Einzelstimme. Wenn Sprecher-Tags benutzt werden, genau eine [[SPEAKER: ${plan.selectedArchetypes[0] || 'SOVEREIGN'}]] Sektion. Keine zweite Stimme.`
+      : `EXPRESSION: Single voice. If speaker tags are used, use exactly one [[SPEAKER: ${plan.selectedArchetypes[0] || 'SOVEREIGN'}]] section. No second voice.`);
+  } else {
+    situationalInstructions.push(isGerman
+      ? 'EXPRESSION: Mehrstimmiger Rat. Nutze 2-4 sichtbare Sprecher nur, weil echte Spannung, Entscheidung oder ausdruecklicher Wunsch vorliegt. Jede Stimme muss eine andere Funktion haben.'
+      : 'EXPRESSION: Multi-voice council. Use 2-4 visible speakers only because there is real tension, a decision, or an explicit request. Each voice must serve a different function.');
+  }
+
   if (plan.intent === 'ASK_META' || plan.intent === 'TEST_SYSTEM') {
     situationalInstructions.push(isGerman
       ? 'META/TEST INTENT: Der Nutzer fragt ueber das Kommunikationssystem oder testet das Verhalten. Antworte nicht emotional spiegelnd. Erklaere knapp den erkannten Zustand, was sich bei Handlungswunsch aendern wuerde, und bestaetige ggf. den beobachteten Mismatch. Keine Rueckfrage nach Gefuehlen.'
@@ -546,8 +624,8 @@ const buildOrganicInstructions = (plan: {
     modeInstruction[plan.mode],
     ...situationalInstructions,
     isGerman
-      ? `Response plan: intent=${plan.intent}, mode=${plan.mode}, signals=${plan.signals.join(', ') || 'none'}, tone=${plan.tone}, length=${plan.maxResponseLength}, permissions=${JSON.stringify(plan.permissions)}.`
-      : `Response plan: intent=${plan.intent}, mode=${plan.mode}, signals=${plan.signals.join(', ') || 'none'}, tone=${plan.tone}, length=${plan.maxResponseLength}, permissions=${JSON.stringify(plan.permissions)}.`,
+      ? `Response plan: intent=${plan.intent}, mode=${plan.mode}, expression=${plan.expression}, signals=${plan.signals.join(', ') || 'none'}, tone=${plan.tone}, length=${plan.maxResponseLength}, permissions=${JSON.stringify(plan.permissions)}.`
+      : `Response plan: intent=${plan.intent}, mode=${plan.mode}, expression=${plan.expression}, signals=${plan.signals.join(', ') || 'none'}, tone=${plan.tone}, length=${plan.maxResponseLength}, permissions=${JSON.stringify(plan.permissions)}.`,
   ];
 };
 

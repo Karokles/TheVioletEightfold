@@ -2219,6 +2219,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       conversationLength: messages.length,
       communicationMode: userProfile?.meaningContext?.communicationMode,
       overloadRisk: Boolean(userProfile?.meaningContext?.overloadSignal || userProfile?.meaningContext?.emotionalState?.overloadRisk),
+      stateAwareness: userProfile?.meaningContext?.stateAwareness,
     });
 
     // Build system prompt - COMPLETELY SEPARATE for direct vs council
@@ -2379,7 +2380,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
       reply = 'I apologize, but I could not generate a response. Please try again.';
     }
 
-    if (mode === 'council' && responsePlan.shouldUseCouncil && openai && countCouncilSpeakers(reply) < 2) {
+    if (mode === 'council' && responsePlan.expression === 'multi_voice' && openai && countCouncilSpeakers(reply) < 2) {
       console.warn('[COUNCIL] Too few council speakers; retrying with strict multi-voice format', {
         userId,
         speakerCount: countCouncilSpeakers(reply),
@@ -3448,9 +3449,16 @@ function buildCouncilSystemPrompt(userProfile: any, responsePlan?: ResponsePlan)
   // Otherwise, this is a COUNCIL SESSION - multiple archetypes can debate
   const communicationContract = buildCommunicationContract(userProfile?.meaningContext, language, 'council');
   const organicPromptBlock = responsePlan ? buildOrganicPromptBlock(responsePlan) : '';
-  const councilFormatRule = responsePlan?.shouldUseCouncil
-    ? '7. This is a true council moment. Include 2-4 distinct [[SPEAKER: ...]] sections. Prefer fewer voices when the user needs intimacy or pacing.'
-    : '7. This is NOT automatically a full council moment. Use 0-1 [[SPEAKER: ...]] section unless the user explicitly asked for multiple perspectives. Mirror, hold, clarify, ground, or integrate according to the response plan.';
+  const councilFormatRule = (() => {
+    if (responsePlan?.expression === 'multi_voice') {
+      return `7. VISIBLE FORM: TRUE COUNCIL. Include 2-4 distinct [[SPEAKER: ...]] sections. Prefer fewer voices when the user needs intimacy or pacing.`;
+    }
+    if (responsePlan?.expression === 'single_voice') {
+      const speaker = responsePlan.selectedArchetypes[0] || 'SOVEREIGN';
+      return `7. VISIBLE FORM: SINGLE VOICE. Use at most one [[SPEAKER: ${speaker}]] section, or answer without a speaker tag if the integrated chamber reads more naturally. Do not add a second archetype.`;
+    }
+    return `7. VISIBLE FORM: SHARED CHAMBER. Do not use [[SPEAKER: ...]] sections. Answer as the integrated chamber: one coherent response that can hold, mirror, clarify, ground, or integrate according to the response plan.`;
+  })();
   const basePrompt = `${languageInstruction}
 
 ${communicationContract}
@@ -3471,12 +3479,12 @@ The eight archetypes are:
 8. ALCHEMIST - Transformer & Shadow Work. Deals with transformation and hard truths.
 
 Instructions:
-1. Simulate a vivid, structured dialogue between the relevant archetypes based on the user's input.
-2. Do not involve all 8 unless the issue is massive. Usually, 4-6 key archetypes should participate.
-3. Each archetype must speak with their distinct voice, perspective, and emotional tone.
-4. The Sovereign should usually speak last to synthesize, but this is not a hard rule.
-5. You may direct questions to the user.
-6. After a round of debate, STOP generating to allow the user to respond. Do not simulate the user.
+1. Follow the visible form rule below before choosing any archetype format.
+2. In a TRUE COUNCIL, simulate a vivid, structured dialogue between only the relevant archetypes. Do not involve all 8 unless the issue is massive; usually 2-4 key archetypes is enough.
+3. In a SINGLE VOICE, one archetypal lens may speak, but it must not become a panel.
+4. In a SHARED CHAMBER, no visible archetype speaks; the answer is one coherent chamber voice.
+5. You may direct one precise question to the user when useful.
+6. After a round or chamber response, STOP generating to allow the user to respond. Do not simulate the user.
 ${councilFormatRule}
 8. Do not force closure. The council may leave a question open, let tension remain alive, or invite the user back into the conversation.
 9. Only include SOVEREIGN DECISION and NEXT STEPS when the user explicitly asks for a conclusion/action plan, when the situation clearly requires closure, or when the user is ending/integrating the session.
@@ -3489,7 +3497,7 @@ CRITICAL OUTPUT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
 
 1. Do NOT use "MODERATOR:" or generic moderator-style introductions. The greeting is the first compression—the Reductive Protocol applies.
 
-2. Each archetype speaks in turn using this format (Use the ID in the header, not the translated name):
+2. Only when the visible form allows speaker tags, each visible archetype speaks using this format (Use the ID in the header, not the translated name):
    [[SPEAKER: ARCHETYPE_ID]]
    [Their vivid, character-appropriate response - be specific, not generic, sharp and decisive]
 

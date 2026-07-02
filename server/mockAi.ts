@@ -20,42 +20,44 @@ export const createMockCouncilReply = (options: {
   const topic = options.topic?.trim() || (isGerman ? 'dieses Thema' : 'this topic');
   const plan = options.responsePlan;
 
-  if (plan && !plan.shouldUseCouncil) {
+  if (plan && plan.expression !== 'multi_voice') {
     if (isGerman) {
+      const expressionLabel = plan.expression === 'single_voice' ? 'Einzelstimme' : 'Kammer';
       if (plan.mode === 'grounding') {
-        return `[Mock-Modus: ${plan.mode}] Bevor wir das deuten: lass es kleiner werden. Was braucht dein Koerper zuerst - Wasser, Essen, Schlaf, Bewegung oder einfach einen Moment Stille?`;
+        return `[Mock-Modus: ${plan.mode} / ${expressionLabel}] Bevor wir das deuten: lass es kleiner werden. Was braucht dein Koerper zuerst - Wasser, Essen, Schlaf, Bewegung oder einfach einen Moment Stille?`;
       }
       if (plan.mode === 'exit_room') {
-        return `[Mock-Modus: ${plan.mode}] Bevor wir das als Wahrheit behandeln: das klingt gerade eher wie eine Anklage als wie Klarheit. Welche kleine andere Tuer waere moeglich?`;
+        return `[Mock-Modus: ${plan.mode} / ${expressionLabel}] Bevor wir das als Wahrheit behandeln: das klingt gerade eher wie eine Anklage als wie Klarheit. Welche kleine andere Tuer waere moeglich?`;
       }
       if (plan.mode === 'structure') {
-        return `[Mock-Modus: ${plan.mode}]\n1. Benenne den Kern.\n2. Waehle eine kleine Handlung.\n3. Teste sie heute.\n4. Schau morgen, was wirklich passiert ist.`;
+        return `[Mock-Modus: ${plan.mode} / ${expressionLabel}]\n1. Benenne den Kern.\n2. Waehle eine kleine Handlung.\n3. Teste sie heute.\n4. Schau morgen, was wirklich passiert ist.`;
       }
       if (plan.mode === 'hold') {
-        return `[Mock-Modus: ${plan.mode}] Das klingt wie ein Schwellenmoment. Lass uns kurz dort bleiben: was macht es jetzt erkennbarer als vorher?`;
+        return `[Mock-Modus: ${plan.mode} / ${expressionLabel}] Das klingt wie ein Schwellenmoment. Lass uns kurz dort bleiben: was macht es jetzt erkennbarer als vorher?`;
       }
       if (plan.mode === 'clarify') {
-        return `[Mock-Modus: ${plan.mode}] Das Symbol wirkt wichtig. Was tut es emotional - macht es weiter, enger, trauriger, freier oder wahrer?`;
+        return `[Mock-Modus: ${plan.mode} / ${expressionLabel}] Das Symbol wirkt wichtig. Was tut es emotional - macht es weiter, enger, trauriger, freier oder wahrer?`;
       }
-      return `[Mock-Modus: ${plan.mode}] Das klingt nach einem wichtigen Unterschied. Ich wuerde es erstmal nicht erklaeren: Was wird daran emotional klarer?`;
+      return `[Mock-Modus: ${plan.mode} / ${expressionLabel}] Das klingt nach einem wichtigen Unterschied. Ich wuerde es erstmal nicht erklaeren: Was wird daran emotional klarer?`;
     }
 
+    const expressionLabel = plan.expression === 'single_voice' ? 'single voice' : 'chamber';
     if (plan.mode === 'grounding') {
-      return `[Mock mode: ${plan.mode}] Before interpreting this, let it get smaller. What does your body need first - water, food, sleep, movement, or one quiet minute?`;
+      return `[Mock mode: ${plan.mode} / ${expressionLabel}] Before interpreting this, let it get smaller. What does your body need first - water, food, sleep, movement, or one quiet minute?`;
     }
     if (plan.mode === 'exit_room') {
-      return `[Mock mode: ${plan.mode}] Before we treat that as truth: it sounds more like an accusation than clarity. What small other door might be available?`;
+      return `[Mock mode: ${plan.mode} / ${expressionLabel}] Before we treat that as truth: it sounds more like an accusation than clarity. What small other door might be available?`;
     }
     if (plan.mode === 'structure') {
-      return `[Mock mode: ${plan.mode}]\n1. Name the core.\n2. Choose one small action.\n3. Test it today.\n4. Tomorrow, look at what actually happened.`;
+      return `[Mock mode: ${plan.mode} / ${expressionLabel}]\n1. Name the core.\n2. Choose one small action.\n3. Test it today.\n4. Tomorrow, look at what actually happened.`;
     }
     if (plan.mode === 'hold') {
-      return `[Mock mode: ${plan.mode}] That sounds like a threshold moment. Stay there for a second: what makes it more visible now than before?`;
+      return `[Mock mode: ${plan.mode} / ${expressionLabel}] That sounds like a threshold moment. Stay there for a second: what makes it more visible now than before?`;
     }
     if (plan.mode === 'clarify') {
-      return `[Mock mode: ${plan.mode}] The symbol feels important. What does it do emotionally - widen, tighten, sadden, free, or clarify?`;
+      return `[Mock mode: ${plan.mode} / ${expressionLabel}] The symbol feels important. What does it do emotionally - widen, tighten, sadden, free, or clarify?`;
     }
-    return `[Mock mode: ${plan.mode}] That sounds like an important distinction. I would not explain it too quickly: what becomes emotionally clearer?`;
+    return `[Mock mode: ${plan.mode} / ${expressionLabel}] That sounds like an important distinction. I would not explain it too quickly: what becomes emotionally clearer?`;
   }
 
   if (options.mode === 'direct') {
