@@ -7,7 +7,7 @@ import OpenAI from 'openai';
 import Stripe from 'stripe';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import jwt from 'jsonwebtoken';
 import { 
@@ -309,70 +309,100 @@ interface User {
   id: string;
   username: string;
   secretHash: string;
+  secretHashes?: string[];
   token?: string;
   email?: string;
   displayName?: string;
   adminSettings?: AdminAccountSettings;
 }
 
+const hashSecret = (secret: string): string => {
+  return createHash('sha256').update(secret).digest('hex');
+};
+
+const localSecretHashes = (envName: string, fallback: string): string[] => {
+  const values = [process.env[envName], fallback]
+    .map(value => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  return Array.from(new Set(values.map(hashSecret)));
+};
+
+const localUserSecret = (envName: string, fallback: string): Pick<User, 'secretHash' | 'secretHashes'> => {
+  const secretHashes = localSecretHashes(envName, fallback);
+  return {
+    secretHash: secretHashes[0],
+    secretHashes,
+  };
+};
+
+const userMatchesLoginIdentifier = (user: User, identifier: string): boolean => {
+  const normalizedIdentifier = identifier.trim().toLowerCase();
+  return [user.username, user.id, user.email]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .some(candidate => candidate.toLowerCase() === normalizedIdentifier);
+};
+
+const userMatchesSecretHash = (user: User, secretHash: string): boolean => {
+  return user.secretHash === secretHash || Boolean(user.secretHashes?.includes(secretHash));
+};
+
 const users: User[] = [
-  // Pre-populated test users (lion + 5 friends)
-  // In production, these should be in a database
+  // Local fallback users only. Production should use Supabase Auth with LOCAL_AUTH_ENABLED=false.
   {
     id: 'lion',
     username: 'lion',
     displayName: 'karokles',
-    secretHash: createHash('sha256').update('TuerOhneWiederkehr2025').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_LION', 'dev-lion-secret'),
   },
   {
     id: 'friend1',
     username: 'selma',
-    secretHash: createHash('sha256').update('moonlight-whisper').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_SELMA', 'dev-selma-secret'),
   },
   {
     id: 'friend2',
     username: 'alicia',
-    secretHash: createHash('sha256').update('form-follows-function').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_ALICIA', 'dev-alicia-secret'),
   },
   {
     id: 'friend3',
     username: 'marie',
-    secretHash: createHash('sha256').update('haute-couture').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_MARIE', 'dev-marie-secret'),
   },
   {
     id: 'friend5',
     username: 'friend5',
-    secretHash: createHash('sha256').update('friend5-test-secret').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_FRIEND5', 'dev-friend5-secret'),
   },
   {
     id: 'sophia',
     username: 'sophia',
-    secretHash: createHash('sha256').update('know-thyself').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_SOPHIA', 'dev-sophia-secret'),
   },
   {
     id: 'isabell',
     username: 'isabell',
-    secretHash: createHash('sha256').update('ceylon').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_ISABELL', 'dev-isabell-secret'),
   },
   {
     id: 'dorothee',
     username: 'dorothee',
-    secretHash: createHash('sha256').update('schattengarten').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_DOROTHEE', 'dev-dorothee-secret'),
   },
   {
     id: 'serigne',
     username: 'serigne',
-    secretHash: createHash('sha256').update('cher-amadu').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_SERIGNE', 'dev-serigne-secret'),
   },
   {
     id: 'benjamin',
     username: 'benjamin',
-    secretHash: createHash('sha256').update('tragwerk').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_BENJAMIN', 'dev-benjamin-secret'),
   },
   {
     id: 'anna',
     username: 'anna',
-    secretHash: createHash('sha256').update('amethyst').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_ANNA', 'dev-anna-secret'),
   },
   {
     id: 'tuana',
@@ -383,19 +413,19 @@ const users: User[] = [
       offlineOnly: true,
       notes: 'Local full access account.',
     },
-    secretHash: createHash('sha256').update('himmelstropfen').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_TUANA', 'dev-tuana-secret'),
   },
   {
     id: 'beta-test',
     username: 'betatest',
     displayName: 'Beta Test',
-    secretHash: createHash('sha256').update('beta-test-242').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_BETA_TEST', 'dev-beta-test-secret'),
   },
   {
     id: 'launch-test',
     username: 'launchtest',
     displayName: 'Launch Test',
-    secretHash: createHash('sha256').update('violet-launch-242-test').digest('hex'),
+    ...localUserSecret('LOCAL_SECRET_LAUNCH_TEST', 'dev-launch-test-secret'),
   },
 ];
 
@@ -2066,8 +2096,9 @@ app.post('/api/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Username and secret are required' });
     }
 
-    const secretHash = createHash('sha256').update(secret).digest('hex');
-    const user = users.find(u => u.username === username && u.secretHash === secretHash);
+    const loginIdentifier = String(username);
+    const secretHash = hashSecret(String(secret));
+    const user = users.find(u => userMatchesLoginIdentifier(u, loginIdentifier) && userMatchesSecretHash(u, secretHash));
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -2905,6 +2936,23 @@ IMPORTANT: If and only if you identify a real breakthrough, you MUST:
     if (!analysisResult.breakthroughs || !Array.isArray(analysisResult.breakthroughs)) {
       analysisResult.breakthroughs = [];
     }
+    if (
+      persist === true &&
+      analysisResult.soulTimelineEvents.length === 0 &&
+      analysisResult.questLogEntries.length > 0
+    ) {
+      const sourceEntry = analysisResult.questLogEntries[0];
+      analysisResult.soulTimelineEvents.push({
+        id: `timeline_from_quest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        createdAt: sourceEntry.createdAt || new Date().toISOString(),
+        label: sourceEntry.title || (language === 'DE' ? 'Kristallisierte Council-Sitzung' : 'Crystallized council session'),
+        summary: sourceEntry.content || '',
+        intensity: 5,
+        type: 'EVENT',
+        tags: Array.isArray(sourceEntry.tags) ? sourceEntry.tags : ['council'],
+        sourceSessionId: sourceEntry.sourceSessionId || sessionId,
+      });
+    }
     if (stateAwareness?.breakthroughCandidate === false) {
       analysisResult.breakthroughs = [];
       analysisResult.soulTimelineEvents = analysisResult.soulTimelineEvents.filter((event: any) => {
@@ -3198,7 +3246,15 @@ app.post('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, r
 // Load archetypes config
 function loadArchetypesConfig() {
   try {
-    const configPath = join(__dirname, '../config/archetypes.json');
+    const configPath = [
+      join(__dirname, '../config/archetypes.json'),
+      join(__dirname, '../../config/archetypes.json'),
+    ].find(candidate => existsSync(candidate));
+
+    if (!configPath) {
+      throw new Error('Could not locate config/archetypes.json');
+    }
+
     const configData = readFileSync(configPath, 'utf-8');
     return JSON.parse(configData);
   } catch (error) {
@@ -3296,6 +3352,9 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
   const cycleLine = meaningContext?.activeCycleTheme
     ? `Active integration cycle: day ${meaningContext.activeCycleDay || '?'} around "${meaningContext.activeCycleTheme}".`
     : 'No active integration cycle context was provided.';
+  const cycleBriefLine = typeof meaningContext?.cycleBrief === 'string' && meaningContext.cycleBrief.trim()
+    ? `ACTIVE CYCLE CONTEXT BRIEF:\n${meaningContext.cycleBrief.trim()}`
+    : 'No detailed active cycle entries were provided.';
   const emotionalState = meaningContext?.emotionalState;
   const emotionalLine = emotionalState
     ? `Emotional scan: valence=${emotionalState.valence || 'UNKNOWN'}, activation=${emotionalState.activation || 'UNKNOWN'}, clarity=${emotionalState.clarity || 'UNKNOWN'}, overloadRisk=${Boolean(emotionalState.overloadRisk)}, supportNeeds=${Array.isArray(emotionalState.supportNeeds) ? emotionalState.supportNeeds.join(', ') : 'none'}. Treat this as a soft pacing signal, never as a diagnosis.`
@@ -3349,6 +3408,7 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
 - ${stateAwarenessLine}
 - Wenn Aktivierung hoch oder Overload-Risiko wahr ist: langsamer, klarer, weniger Optionen, zuerst Halt/Erden.
 - ${cycleLine}
+- ${cycleBriefLine}
 - ${identityLine}`;
   }
 
@@ -3367,6 +3427,7 @@ function buildCommunicationContract(meaningContext: any, language: string, mode:
 - ${stateAwarenessLine}
 - If activation is high or overload risk is true: slow down, reduce options, and prioritize presence/grounding first.
 - ${cycleLine}
+- ${cycleBriefLine}
 - ${identityLine}`;
 }
 

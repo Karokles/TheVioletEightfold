@@ -79,6 +79,7 @@ export interface MeaningContext {
   activeCycleId?: string;
   activeCycleDay?: number;
   activeCycleTheme?: string;
+  cycleBrief?: string;
   overloadSignal?: boolean;
   emotionalState?: EmotionalStateScan;
   stateAwareness?: StateAwarenessContext;

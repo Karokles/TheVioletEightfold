@@ -9,6 +9,17 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom'],
+              'vendor-supabase': ['@supabase/supabase-js'],
+              'vendor-icons': ['lucide-react'],
+            },
+          },
+        },
+      },
       plugins: [react()],
       define: {
         // API key is now handled by backend, not frontend

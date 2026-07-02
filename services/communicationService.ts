@@ -20,6 +20,47 @@ const isConsentState = (value: unknown): value is ConsentState => {
   return ['IMPLICIT_OK', 'ASK_BEFORE_DEEPENING', 'USER_REQUESTED_DIRECTION', 'LOW_INTERVENTION'].includes(String(value));
 };
 
+const compact = (value: string, maxLength = 320): string => {
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+};
+
+const buildCycleBrief = (cycle: IntegrationCycle | null): string | undefined => {
+  if (!cycle) return undefined;
+
+  const onboarding = cycle.onboardingAnswers
+    .filter(answer => answer.value.trim())
+    .slice(0, 5)
+    .map(answer => `- ${answer.label}: ${compact(answer.value, 220)}`);
+
+  const records = cycle.dayRecords
+    .filter(record => record.completedAt || record.sense || record.trace || record.externalize || record.reframe || record.embody || record.antiEgoCheck)
+    .sort((a, b) => b.day - a.day)
+    .slice(0, 3)
+    .map(record => {
+      const fields = [
+        record.sense ? `Signal: ${compact(record.sense, 180)}` : undefined,
+        record.trace ? `Trace: ${compact(record.trace, 180)}` : undefined,
+        record.externalize ? `Externalized: ${compact(record.externalize, 180)}` : undefined,
+        record.reframe ? `Reframe: ${compact(record.reframe, 180)}` : undefined,
+        record.embody ? `Embodied step: ${compact(record.embody, 180)}` : undefined,
+        record.antiEgoCheck ? `Anti-ego check: ${compact(record.antiEgoCheck, 180)}` : undefined,
+      ].filter(Boolean);
+
+      return fields.length > 0 ? `Day ${record.day}: ${fields.join(' | ')}` : undefined;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  const lines = [
+    `Cycle "${cycle.title}" around: ${compact(cycle.theme, 260)}`,
+    onboarding.length > 0 ? `Starter answers:\n${onboarding.join('\n')}` : undefined,
+    records.length > 0 ? `Recent cycle entries:\n${records.map(line => `- ${line}`).join('\n')}` : undefined,
+    'Continuity rule: Treat the cycle entries as already answered context. Do not ask the user to repeat these answers; build on them or ask only what changed since then.',
+  ].filter(Boolean);
+
+  return lines.join('\n');
+};
+
 const normalizePreferences = (value: Partial<CommunicationPreferences> | null): CommunicationPreferences => {
   return {
     schemaVersion: COMMUNICATION_SCHEMA_VERSION,
@@ -70,6 +111,7 @@ export const buildMeaningContext = (
     activeCycleId: cycle?.id,
     activeCycleDay: cycle ? getCycleDayNumber(cycle) : undefined,
     activeCycleTheme: cycle?.theme,
+    cycleBrief: buildCycleBrief(cycle),
     overloadSignal: Boolean(emotionalState?.overloadRisk),
     emotionalState,
     stateAwareness,

@@ -1,4 +1,187 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+
+const AMBIENT_AUDIO_SRC = '/audio/god-on-the-code-web.mp3';
+const AMBIENT_AUDIO_VOLUME = 0.22;
+const STAR_COUNT = 180;
+
+let ambientAudioElement: HTMLAudioElement | null = null;
+
+type Star = {
+  x: number;
+  y: number;
+  radius: number;
+  alpha: number;
+  speed: number;
+  depth: number;
+  phase: number;
+  tone: 'silver' | 'warm';
+};
+
+type CouncilIconStyle = CSSProperties & {
+  '--council-icon': string;
+};
+
+const seededNoise = (seed: number) => {
+  const value = Math.sin(seed * 127.1) * 43758.5453123;
+  return value - Math.floor(value);
+};
+
+const getCouncilIconStyle = (icon: string): CouncilIconStyle => ({
+  '--council-icon': `url(${icon})`,
+});
+
+const createStarMap = (): Star[] =>
+  Array.from({ length: STAR_COUNT }, (_, index) => {
+    const depth = 0.35 + seededNoise(index + 13) * 0.85;
+
+    return {
+      x: seededNoise(index + 1),
+      y: seededNoise(index + 7),
+      radius: 0.45 + seededNoise(index + 19) * 1.25,
+      alpha: 0.12 + seededNoise(index + 29) * 0.38,
+      speed: 2.8 + seededNoise(index + 37) * 11,
+      depth,
+      phase: seededNoise(index + 43) * Math.PI * 2,
+      tone: seededNoise(index + 53) > 0.72 ? 'warm' : 'silver',
+    };
+  });
+
+const stars = createStarMap();
+
+const getAmbientAudioElement = () => {
+  if (!ambientAudioElement) {
+    ambientAudioElement = new Audio(AMBIENT_AUDIO_SRC);
+    ambientAudioElement.loop = true;
+    ambientAudioElement.preload = 'auto';
+    ambientAudioElement.volume = AMBIENT_AUDIO_VOLUME;
+    ambientAudioElement.crossOrigin = 'anonymous';
+  }
+
+  return ambientAudioElement;
+};
+
+function StarfieldBackdrop() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const backdrop = backdropRef.current;
+    const context = canvas?.getContext('2d');
+
+    if (!canvas || !backdrop || !context) {
+      return;
+    }
+
+    const pointer = {
+      x: 0,
+      y: 0,
+      targetX: 0,
+      targetY: 0,
+    };
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    let animationFrame = 0;
+    let reducedMotion = motionQuery.matches;
+
+    const resizeCanvas = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.width = Math.floor(width * pixelRatio);
+      canvas.height = Math.floor(height * pixelRatio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      pointer.targetX = (event.clientX / Math.max(width, 1) - 0.5) * 2;
+      pointer.targetY = (event.clientY / Math.max(height, 1) - 0.5) * 2;
+    };
+
+    const resetPointer = () => {
+      pointer.targetX = 0;
+      pointer.targetY = 0;
+    };
+
+    const handleMotionPreference = () => {
+      reducedMotion = motionQuery.matches;
+    };
+
+    const draw = (timestamp: number) => {
+      const seconds = reducedMotion ? 0 : timestamp / 1000;
+      const easing = reducedMotion ? 1 : 0.045;
+
+      pointer.x += (pointer.targetX - pointer.x) * easing;
+      pointer.y += (pointer.targetY - pointer.y) * easing;
+
+      backdrop.style.setProperty('--starfield-shift-x', `${pointer.x * 14}px`);
+      backdrop.style.setProperty('--starfield-shift-y', `${pointer.y * 10}px`);
+
+      context.clearRect(0, 0, width, height);
+
+      for (const star of stars) {
+        const travelWidth = width + 80;
+        const drift = seconds * star.speed * star.depth;
+        const x = ((star.x * travelWidth + drift) % travelWidth) - 40 + pointer.x * star.depth * 22;
+        const y =
+          star.y * height +
+          Math.sin(seconds * 0.24 + star.phase) * star.depth * 6 +
+          pointer.y * star.depth * 14;
+        const twinkle = 0.72 + Math.sin(seconds * 0.85 + star.phase) * 0.28;
+        const alpha = star.alpha * twinkle;
+        const color = star.tone === 'warm' ? '255, 231, 188' : '238, 244, 255';
+
+        context.beginPath();
+        context.fillStyle = `rgba(${color}, ${alpha})`;
+        context.arc(x, y, star.radius * star.depth, 0, Math.PI * 2);
+        context.fill();
+
+        if (star.depth > 0.9 && star.radius > 1.08) {
+          context.beginPath();
+          context.fillStyle = `rgba(${color}, ${alpha * 0.16})`;
+          context.arc(x, y, star.radius * star.depth * 3.8, 0, Math.PI * 2);
+          context.fill();
+        }
+      }
+
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('blur', resetPointer);
+    document.addEventListener('pointerleave', resetPointer);
+    motionQuery.addEventListener('change', handleMotionPreference);
+    animationFrame = window.requestAnimationFrame(draw);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('blur', resetPointer);
+      document.removeEventListener('pointerleave', resetPointer);
+      motionQuery.removeEventListener('change', handleMotionPreference);
+    };
+  }, []);
+
+  return (
+    <div className="starfield-backdrop" ref={backdropRef} aria-hidden="true">
+      <canvas className="starfield-canvas" ref={canvasRef} />
+    </div>
+  );
+}
 
 const thresholdLines = [
   {
@@ -65,8 +248,8 @@ const closingLines = [
 ];
 
 export default function App() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [audioPlaying, setAudioPlaying] = useState(false);
 
   useEffect(() => {
     let frame = 0;
@@ -97,9 +280,89 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.volume = 0.22;
-  }, []);
+    const audio = getAmbientAudioElement();
+
+    const syncPlayingState = () => {
+      setAudioPlaying(!audio.paused);
+    };
+
+    const tryPlayAmbientAudio = async () => {
+      if (!audioEnabled) {
+        audio.pause();
+        syncPlayingState();
+        return false;
+      }
+
+      try {
+        audio.muted = false;
+        audio.loop = true;
+        audio.volume = AMBIENT_AUDIO_VOLUME;
+
+        if (audio.readyState === 0) {
+          audio.load();
+        }
+
+        await audio.play();
+        syncPlayingState();
+        return true;
+      } catch {
+        syncPlayingState();
+        return false;
+      }
+    };
+
+    const unlockPlayback = (event?: Event) => {
+      const target = event?.target;
+      if (target instanceof Element && target.closest('[data-audio-toggle="true"]')) {
+        return;
+      }
+
+      if (!audioEnabled || !audio.paused) {
+        return;
+      }
+
+      void tryPlayAmbientAudio();
+    };
+
+    audio.addEventListener('play', syncPlayingState);
+    audio.addEventListener('pause', syncPlayingState);
+    audio.addEventListener('canplay', unlockPlayback);
+    audio.addEventListener('canplaythrough', unlockPlayback);
+
+    document.addEventListener('pointerdown', unlockPlayback, true);
+    document.addEventListener('pointerup', unlockPlayback, true);
+    document.addEventListener('touchstart', unlockPlayback, true);
+    document.addEventListener('touchend', unlockPlayback, true);
+    document.addEventListener('mousedown', unlockPlayback, true);
+    document.addEventListener('mouseup', unlockPlayback, true);
+    document.addEventListener('click', unlockPlayback, true);
+    document.addEventListener('keydown', unlockPlayback, true);
+    document.addEventListener('focusin', unlockPlayback, true);
+    window.addEventListener('wheel', unlockPlayback, { passive: true, capture: true });
+    window.addEventListener('scroll', unlockPlayback, { passive: true });
+    document.addEventListener('visibilitychange', unlockPlayback);
+
+    void tryPlayAmbientAudio();
+
+    return () => {
+      audio.removeEventListener('play', syncPlayingState);
+      audio.removeEventListener('pause', syncPlayingState);
+      audio.removeEventListener('canplay', unlockPlayback);
+      audio.removeEventListener('canplaythrough', unlockPlayback);
+      document.removeEventListener('pointerdown', unlockPlayback, true);
+      document.removeEventListener('pointerup', unlockPlayback, true);
+      document.removeEventListener('touchstart', unlockPlayback, true);
+      document.removeEventListener('touchend', unlockPlayback, true);
+      document.removeEventListener('mousedown', unlockPlayback, true);
+      document.removeEventListener('mouseup', unlockPlayback, true);
+      document.removeEventListener('click', unlockPlayback, true);
+      document.removeEventListener('keydown', unlockPlayback, true);
+      document.removeEventListener('focusin', unlockPlayback, true);
+      window.removeEventListener('wheel', unlockPlayback, true);
+      window.removeEventListener('scroll', unlockPlayback);
+      document.removeEventListener('visibilitychange', unlockPlayback);
+    };
+  }, [audioEnabled]);
 
   const handleSurfacePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const element = event.currentTarget;
@@ -124,219 +387,225 @@ export default function App() {
   };
 
   const toggleAmbientAudio = async () => {
-    if (!audioRef.current) return;
+    const audio = getAmbientAudioElement();
 
-    if (audioEnabled) {
-      audioRef.current.pause();
+    if (audioEnabled && !audio.paused) {
+      audio.pause();
       setAudioEnabled(false);
+      setAudioPlaying(false);
       return;
     }
 
+    setAudioEnabled(true);
+
     try {
-      audioRef.current.volume = 0.22;
-      await audioRef.current.play();
-      setAudioEnabled(true);
+      audio.volume = AMBIENT_AUDIO_VOLUME;
+      await audio.play();
+      setAudioPlaying(true);
     } catch {
-      setAudioEnabled(false);
+      setAudioPlaying(false);
     }
   };
 
   return (
-    <main className="shell living-observatory">
-      <audio ref={audioRef} src="/audio/god-on-the-code-web.mp3" loop preload="metadata" />
-      <section className="hero">
-        <div
-          className="hero-copy interactive-surface float-large"
-          onPointerMove={handleSurfacePointerMove}
-          onPointerLeave={handleSurfacePointerLeave}
-        >
-          <p className="eyebrow">Lazarus Engine</p>
-          <h1>
-            A threshold for reflection,
-            <br />
-            integration, and inner architecture.
-          </h1>
-          <p className="lead">
-            Lazarus Engine is not built to hand out certainty. It is built as a symbolic
-            system for navigating the chambers of selfhood, where memory, desire, conflict,
-            and transformation can be seen in relation rather than in isolation.
-          </p>
-          <div className="hero-actions">
-            <a className="button button-primary" href="https://app.lazarus-engine.eu">
-              Enter the App
-            </a>
-            <a className="button button-secondary" href="#chambers">
-              Read the Map
-            </a>
-          </div>
-          <div className="ambient-audio">
-            <button
-              type="button"
-              className={`button button-secondary button-audio${audioEnabled ? ' is-active' : ''}`}
-              onClick={toggleAmbientAudio}
-              aria-pressed={audioEnabled}
-            >
-              {audioEnabled ? 'Pause Ambient Audio' : 'Awaken Ambient Audio'}
-            </button>
-            <span className="ambient-audio-note">GOD ON THE CODE background loop</span>
-          </div>
-          <div className="hero-whisper">
-            <span>Threshold between worlds</span>
-            <span>Digital thought palace</span>
-            <span>Library for inner navigation</span>
-          </div>
-        </div>
-
-        <div
-          className="hero-panel interactive-surface float-medium"
-          aria-hidden="true"
-          onPointerMove={handleSurfacePointerMove}
-          onPointerLeave={handleSurfacePointerLeave}
-        >
-          <div className="hero-fog fog-far" />
-          <div className="hero-fog fog-near" />
-          <div className="sunlight-rays" />
-          <div className="ambient-dust ambient-dust-a" />
-          <div className="ambient-dust ambient-dust-b" />
-          <div className="dreamcatcher" />
-          <div className="crystal crystal-left" />
-          <div className="crystal crystal-right" />
-          <div className="crystal crystal-lower" />
-          <div className="hero-smoke hero-smoke-left" />
-          <div className="hero-smoke hero-smoke-right" />
-          <div className="constellation constellation-a" />
-          <div className="constellation constellation-b" />
-          <div className="orbital orbital-large" />
-          <div className="orbital orbital-mid" />
-          <div className="orbital orbital-small" />
-          <div className="alchemical-grid" />
-          <div className="manuscript-layer" />
-          <div className="orientation-sigil" />
-          <div className="status-card">
-            <span className="status-label">Initiation Layer</span>
-            <strong>The system begins where self-explanation fails.</strong>
-            <p>
-              Council, mirror, map, and cycle are not modules in a dashboard. They are
-              chambers in one symbolic architecture.
+    <>
+      <StarfieldBackdrop />
+      <main className="shell living-observatory">
+        <section className="hero">
+          <div
+            className="hero-copy interactive-surface float-large"
+            onPointerMove={handleSurfacePointerMove}
+            onPointerLeave={handleSurfacePointerLeave}
+          >
+            <p className="eyebrow">Lazarus Engine</p>
+            <h1>
+              A threshold for reflection,
+              <br />
+              integration, and inner architecture.
+            </h1>
+            <p className="lead">
+              Lazarus Engine is not built to hand out certainty. It is built as a symbolic
+              system for navigating the chambers of selfhood, where memory, desire, conflict,
+              and transformation can be seen in relation rather than in isolation.
             </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="band band-threshold">
-        <div className="ambient-geometry geometry-threshold" aria-hidden="true" />
-        <div className="band-grid">
-          {thresholdLines.map((item, index) => (
-            <div
-              className={`metric interactive-surface float-subtle float-delay-${index + 1}`}
-              key={item.text}
-              onPointerMove={handleSurfacePointerMove}
-              onPointerLeave={handleSurfacePointerLeave}
-            >
-              <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true">
-                <span
-                  className="council-mark-icon"
-                  style={{ ['--council-icon' as '--council-icon']: `url(${item.icon})` }}
-                />
-              </span>
-              <span className="metric-mark" />
-              <p>{item.text}</p>
+            <div className="hero-actions">
+              <a className="button button-primary" href="https://app.lazarus-engine.eu">
+                Enter the App
+              </a>
+              <a className="button button-secondary" href="#chambers">
+                Read the Map
+              </a>
             </div>
-          ))}
-        </div>
-      </section>
+            <div className="ambient-audio">
+              <button
+                type="button"
+                data-audio-toggle="true"
+                className={`button button-secondary button-audio${audioPlaying ? ' is-active' : ''}`}
+                onClick={toggleAmbientAudio}
+                aria-pressed={audioPlaying}
+              >
+                {audioPlaying ? 'Pause Ambient Audio' : 'Awaken Ambient Audio'}
+              </button>
+              <span className="ambient-audio-note">GOD ON THE CODE background loop</span>
+            </div>
+            <div className="hero-whisper">
+              <span>Threshold between worlds</span>
+              <span>Digital thought palace</span>
+              <span>Library for inner navigation</span>
+            </div>
+          </div>
 
-      <section className="section section-chambers" id="chambers">
-        <div className="ambient-geometry geometry-chambers" aria-hidden="true" />
-        <div className="ambient-roots roots-chambers" aria-hidden="true" />
-        <div className="section-heading">
-          <p className="eyebrow">Primary Chambers</p>
-          <h2>A symbolic system for meeting what is already alive in you.</h2>
-        </div>
+          <div
+            className="hero-panel interactive-surface float-medium"
+            aria-hidden="true"
+            onPointerMove={handleSurfacePointerMove}
+            onPointerLeave={handleSurfacePointerLeave}
+          >
+            <div className="hero-fog fog-far" />
+            <div className="hero-fog fog-near" />
+            <div className="sunlight-rays" />
+            <div className="ambient-dust ambient-dust-a" />
+            <div className="ambient-dust ambient-dust-b" />
+            <div className="dreamcatcher" />
+            <div className="crystal crystal-left" />
+            <div className="crystal crystal-right" />
+            <div className="crystal crystal-lower" />
+            <div className="hero-smoke hero-smoke-left" />
+            <div className="hero-smoke hero-smoke-right" />
+            <div className="constellation constellation-a" />
+            <div className="constellation constellation-b" />
+            <div className="orbital orbital-large" />
+            <div className="orbital orbital-mid" />
+            <div className="orbital orbital-small" />
+            <div className="alchemical-grid" />
+            <div className="manuscript-layer" />
+            <div className="orientation-sigil" />
+            <div className="status-card">
+              <span className="status-label">Initiation Layer</span>
+              <strong>The system begins where self-explanation fails.</strong>
+              <p>
+                Council, mirror, map, and cycle are not modules in a dashboard. They are
+                chambers in one symbolic architecture.
+              </p>
+            </div>
+          </div>
+        </section>
 
-        <div className="card-grid">
-          {chambers.map((chamber, index) => (
-            <article
-              className={`card interactive-surface float-medium float-delay-${index + 1}`}
-              key={chamber.title}
-              onPointerMove={handleSurfacePointerMove}
-              onPointerLeave={handleSurfacePointerLeave}
-            >
-              <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true">
-                <span
-                  className="council-mark-icon"
-                  style={{ ['--council-icon' as '--council-icon']: `url(${chamber.icon})` }}
-                />
-              </span>
-              <p className="card-motif">{chamber.motif}</p>
-              <h3>{chamber.title}</h3>
-              <p>{chamber.text}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="section split section-paths">
-        <div className="ambient-geometry geometry-paths" aria-hidden="true" />
-        <div className="ambient-roots roots-paths" aria-hidden="true" />
-        <div
-          className="stack stack-map interactive-surface float-medium"
-          onPointerMove={handleSurfacePointerMove}
-          onPointerLeave={handleSurfacePointerLeave}
-        >
-          <p className="eyebrow">Exploration</p>
-          <h2>Psychogeography, Council, and the map of returning patterns.</h2>
-          <div className="pathway-list">
-            {pathways.map(pathway => (
-              <article
-                className="pathway interactive-surface float-subtle"
-                key={pathway.title}
+        <section className="band band-threshold">
+          <div className="ambient-geometry geometry-threshold" aria-hidden="true" />
+          <div className="band-grid">
+            {thresholdLines.map((item, index) => (
+              <div
+                className={`metric interactive-surface float-subtle float-delay-${index + 1}`}
+                key={item.text}
                 onPointerMove={handleSurfacePointerMove}
                 onPointerLeave={handleSurfacePointerLeave}
               >
-                <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true">
+                <span className={`council-mark council-mark-${index + 1}`} aria-hidden="true">
                   <span
                     className="council-mark-icon"
-                    style={{ ['--council-icon' as '--council-icon']: `url(${pathway.icon})` }}
+                    style={getCouncilIconStyle(item.icon)}
                   />
                 </span>
-                <h3>{pathway.title}</h3>
-                <p>{pathway.text}</p>
+                <span className="metric-mark" />
+                <p>{item.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section section-chambers" id="chambers">
+          <div className="ambient-geometry geometry-chambers" aria-hidden="true" />
+          <div className="ambient-roots roots-chambers" aria-hidden="true" />
+          <div className="section-heading">
+            <p className="eyebrow">Primary Chambers</p>
+            <h2>A symbolic system for meeting what is already alive in you.</h2>
+          </div>
+
+          <div className="card-grid">
+            {chambers.map((chamber, index) => (
+              <article
+                className={`card interactive-surface float-medium float-delay-${index + 1}`}
+                key={chamber.title}
+                onPointerMove={handleSurfacePointerMove}
+                onPointerLeave={handleSurfacePointerLeave}
+              >
+                <span className={`council-mark council-mark-${index + 4}`} aria-hidden="true">
+                  <span
+                    className="council-mark-icon"
+                    style={getCouncilIconStyle(chamber.icon)}
+                  />
+                </span>
+                <p className="card-motif">{chamber.motif}</p>
+                <h3>{chamber.title}</h3>
+                <p>{chamber.text}</p>
               </article>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div
-          className="stack stack-litany interactive-surface float-medium"
+        <section className="section split section-paths">
+          <div className="ambient-geometry geometry-paths" aria-hidden="true" />
+          <div className="ambient-roots roots-paths" aria-hidden="true" />
+          <div
+            className="stack stack-map interactive-surface float-medium"
+            onPointerMove={handleSurfacePointerMove}
+            onPointerLeave={handleSurfacePointerLeave}
+          >
+            <p className="eyebrow">Exploration</p>
+            <h2>Psychogeography, Council, and the map of returning patterns.</h2>
+            <div className="pathway-list">
+              {pathways.map(pathway => (
+                <article
+                  className="pathway interactive-surface float-subtle"
+                  key={pathway.title}
+                  onPointerMove={handleSurfacePointerMove}
+                  onPointerLeave={handleSurfacePointerLeave}
+                >
+                  <span className={`council-mark council-mark-${pathway.title === 'Psychogeography' ? 7 : 8}`} aria-hidden="true">
+                    <span
+                      className="council-mark-icon"
+                      style={getCouncilIconStyle(pathway.icon)}
+                    />
+                  </span>
+                  <h3>{pathway.title}</h3>
+                  <p>{pathway.text}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="stack stack-litany interactive-surface float-medium"
+            onPointerMove={handleSurfacePointerMove}
+            onPointerLeave={handleSurfacePointerLeave}
+          >
+            <p className="eyebrow">What Lazarus Is</p>
+            <h2>It asks for attention, not submission.</h2>
+            <ul className="litany">
+              {closingLines.map(line => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section
+          className="section cta section-threshold interactive-surface float-large"
           onPointerMove={handleSurfacePointerMove}
           onPointerLeave={handleSurfacePointerLeave}
         >
-          <p className="eyebrow">What Lazarus Is</p>
-          <h2>It asks for attention, not submission.</h2>
-          <ul className="litany">
-            {closingLines.map(line => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section
-        className="section cta section-threshold interactive-surface float-large"
-        onPointerMove={handleSurfacePointerMove}
-        onPointerLeave={handleSurfacePointerLeave}
-      >
-        <div className="ambient-geometry geometry-threshold-final" aria-hidden="true" />
-        <div className="ambient-roots roots-threshold" aria-hidden="true" />
-        <div>
-          <p className="eyebrow">Enter the Threshold</p>
-          <h2>For those who would rather navigate themselves than be simplified.</h2>
-        </div>
-        <a className="button button-primary" href="https://app.lazarus-engine.eu">
-          Enter Lazarus
-        </a>
-      </section>
-    </main>
+          <div className="ambient-geometry geometry-threshold-final" aria-hidden="true" />
+          <div className="ambient-roots roots-threshold" aria-hidden="true" />
+          <div>
+            <p className="eyebrow">Enter the Threshold</p>
+            <h2>For those who would rather navigate themselves than be simplified.</h2>
+          </div>
+          <a className="button button-primary" href="https://app.lazarus-engine.eu">
+            Enter Lazarus
+          </a>
+        </section>
+      </main>
+    </>
   );
 }

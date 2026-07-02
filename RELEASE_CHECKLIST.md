@@ -1,4 +1,4 @@
-# Release Checklist - Production Stabilization
+﻿# Release Checklist - Production Stabilization
 
 **Branch:** `stabilize-prod`  
 **Date:** 2025-01-27  
@@ -8,7 +8,7 @@
 
 ## Pre-Deployment Verification
 
-### ✅ Code Changes Completed
+### âœ… Code Changes Completed
 - [x] Fixed userId validation (uses `req.user.id` server-side)
 - [x] Updated health endpoint to return `{status: "ok"}`
 - [x] Restricted CORS to allowed origins (configurable via env var)
@@ -17,7 +17,7 @@
 - [x] Removed userId from request bodies (backend derives from token)
 - [x] Sanitized error messages in production
 
-### ✅ Files Changed
+### âœ… Files Changed
 1. `server/server.ts` - Auth validation, CORS, health endpoint, error handling
 2. `services/aiService.ts` - Production env check, removed userId from body
 3. `AUDIT_FINDINGS.md` - Audit documentation (new)
@@ -49,7 +49,7 @@ PORT=10000                                # Optional - Render sets this automati
    Expected: `{"status":"ok"}`
 
 2. **Check Logs:**
-   - Render Dashboard → Logs
+   - Render Dashboard â†’ Logs
    - Verify: "Server running on port XXXX"
    - Verify: No errors about missing `OPENAI_API_KEY`
 
@@ -57,7 +57,7 @@ PORT=10000                                # Optional - Render sets this automati
    ```bash
    curl -X POST https://thevioleteightfold-4224.onrender.com/api/login \
      -H "Content-Type: application/json" \
-     -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+     -d '{"username":"lion","secret":"<local-test-secret>"}'
    ```
    Expected: `{"userId":"lion","token":"..."}`
 
@@ -78,7 +78,7 @@ VITE_API_BASE_URL=https://thevioleteightfold-4224.onrender.com  # REQUIRED - Bac
 
 ### Verification Steps
 1. **Build Check:**
-   - Vercel Dashboard → Deployments
+   - Vercel Dashboard â†’ Deployments
    - Verify build succeeds
    - Verify no errors about missing `VITE_API_BASE_URL`
 
@@ -90,7 +90,7 @@ VITE_API_BASE_URL=https://thevioleteightfold-4224.onrender.com  # REQUIRED - Bac
 
 3. **Functional Test:**
    - Login with test credentials
-   - Test Single Chat (Einzelgespräch)
+   - Test Single Chat (EinzelgesprÃ¤ch)
    - Test Council Session
    - Verify: All API calls succeed
 
@@ -169,7 +169,7 @@ If deployment fails:
    - Function logs (if using serverless)
 
 3. **Application Logs:**
-   - Backend: Render → Logs
+   - Backend: Render â†’ Logs
    - Frontend: Browser console (for client-side errors)
 
 ### Common Issues & Solutions
@@ -228,20 +228,20 @@ curl https://thevioleteightfold-4224.onrender.com/api/health
 
 ## Success Criteria
 
-✅ **Backend:**
+âœ… **Backend:**
 - Health endpoint returns `{status: "ok"}`
 - Login endpoint works
 - Council endpoint works with authentication
 - CORS allows frontend origin only
 
-✅ **Frontend:**
+âœ… **Frontend:**
 - Builds successfully
 - Connects to Render backend (not localhost)
 - Single chat works
 - Council session works
 - No console errors
 
-✅ **Security:**
+âœ… **Security:**
 - userId validated server-side
 - CORS restricted
 - Error messages sanitized in production
@@ -273,7 +273,7 @@ curl https://thevioleteightfold-4224.onrender.com/api/health
 **Deployed By:** _______________  
 **Backend URL:** https://thevioleteightfold-4224.onrender.com  
 **Frontend URL:** _______________  
-**Status:** ⬜ Pending | ⬜ In Progress | ⬜ Complete | ⬜ Failed
+**Status:** â¬œ Pending | â¬œ In Progress | â¬œ Complete | â¬œ Failed
 
 
 

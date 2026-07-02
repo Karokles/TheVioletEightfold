@@ -1,13 +1,26 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PaywallRequiredError, startCouncilSession, sendMessageToCouncil } from '../services/aiService';
+import {
+  PaywallRequiredError,
+  analyzeMeaning,
+  persistMeaningStatePatch,
+  sendMessageToCouncil,
+  startCouncilSession,
+} from '../services/aiService';
 // Note: analyzeSessionForUpdates removed - Scribe functionality can be added back later if needed
 import { ArchetypeId, ICON_MAP } from '../constants';
 import { getArchetypes, getUIText } from '../config/loader';
-import { Play, Sparkles, Send, Save, User, ListChecks, X } from 'lucide-react';
+import { Play, Sparkles, Send, Save, User, ListChecks, X, History, CornerDownRight } from 'lucide-react';
 import { Language, UserStats, ScribeAnalysis, Message, MeaningContext } from '../types';
 import { getCurrentUser } from '../services/userService';
 import { CouncilActionSummary, loadLastCouncilActionSummary, saveLastCouncilActionSummary } from '../services/councilActionSummaryService';
+import {
+  CouncilThreadMemory,
+  CouncilThreadMemoryTurn,
+  councilThreadMemoryToMessages,
+  loadCouncilThreadMemory,
+  saveCouncilThreadMemory,
+} from '../services/councilThreadMemoryService';
 import { analyzePlayfulDiscovery, DiscoveryNotice } from '../services/playfulDiscoveryService';
 import { DiscoveryCard } from './DiscoveryCard';
 import { TutorialOverlay } from './tutorial/TutorialOverlay';
@@ -15,6 +28,7 @@ import { TutorialTrigger } from './tutorial/TutorialTrigger';
 import { tutorialEventBus, TutorialId } from '../services/tutorialProgressService';
 import { VoiceInputButton } from './VoiceInputButton';
 import { PaywallNotice } from './PaywallNotice';
+import { buildOfflineCouncilMeaningPatch } from '../services/meaningStateService';
 
 interface DialogueTurn {
   id: string;
@@ -28,7 +42,7 @@ interface CouncilSessionProps {
     currentStats: UserStats;
     currentLore: string;
     meaningContext: MeaningContext;
-    onUserSignal?: (content: string) => void;
+    onUserSignal?: (content: string) => MeaningContext | void;
     onIntegrate: (analysis: ScribeAnalysis) => void;
 }
 
@@ -42,6 +56,9 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const [isIntegrating, setIsIntegrating] = useState(false); // Scribe State
   const [lastActionSummary, setLastActionSummary] = useState<CouncilActionSummary | null>(null);
   const [showActionSummary, setShowActionSummary] = useState(false);
+  const [lastThreadMemory, setLastThreadMemory] = useState<CouncilThreadMemory | null>(null);
+  const [showThreadMemory, setShowThreadMemory] = useState(false);
+  const [continueFromLastThread, setContinueFromLastThread] = useState(false);
   const [discoveries, setDiscoveries] = useState<DiscoveryNotice[]>([]);
   const [activeTutorialId, setActiveTutorialId] = useState<TutorialId | null>(null);
   const [paywallMessage, setPaywallMessage] = useState('');
@@ -50,6 +67,8 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const historyRef = useRef<DialogueTurn[]>([]);
   const lastCouncilRawRef = useRef('');
+  const sessionIdRef = useRef(`council-session-${Date.now()}`);
+  const latestMeaningContextRef = useRef<MeaningContext>(meaningContext);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -57,9 +76,14 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
   }, [history]);
 
   useEffect(() => {
+    latestMeaningContextRef.current = meaningContext;
+  }, [meaningContext]);
+
+  useEffect(() => {
     const user = getCurrentUser();
     if (user?.id) {
       setLastActionSummary(loadLastCouncilActionSummary(user.id));
+      setLastThreadMemory(loadCouncilThreadMemory(user.id));
     }
   }, []);
 
@@ -103,6 +127,44 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       return next;
     });
     textareaRef.current?.focus();
+  };
+
+  const toThreadMemoryTurns = (turns: DialogueTurn[]): CouncilThreadMemoryTurn[] => {
+    return turns
+      .filter(turn => turn.speaker !== 'SYSTEM' && turn.content.trim())
+      .map(turn => ({
+        id: turn.id,
+        role: turn.isUser ? 'user' : 'assistant',
+        speaker: turn.isUser ? undefined : turn.speaker,
+        content: turn.content,
+        timestamp: Date.now(),
+      }));
+  };
+
+  const saveThreadSnapshot = (turns: DialogueTurn[], wasIntegrated = false) => {
+    const user = getCurrentUser();
+    if (!user?.id || turns.length === 0) return;
+
+    const saved = saveCouncilThreadMemory(user.id, {
+      sessionId: sessionIdRef.current,
+      topic: turns.find(turn => turn.isUser)?.content || topic,
+      turns: toThreadMemoryTurns(turns),
+      wasIntegrated,
+    });
+    setLastThreadMemory(saved);
+  };
+
+  const formatMemoryDate = (value: string) => {
+    try {
+      return new Intl.DateTimeFormat(language === 'DE' ? 'de-DE' : 'en-US', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(value));
+    } catch {
+      return '';
+    }
   };
 
   const parseBufferToTurns = (buffer: string, startIndex: number): DialogueTurn[] => {
@@ -202,7 +264,9 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         
         lastCouncilRawRef.current = buffer;
         const newTurns = parseBufferToTurns(buffer, historyRef.current.length);
-        setHistory(prev => [...prev, ...newTurns]);
+        const nextHistory = [...historyRef.current, ...newTurns];
+        setHistory(nextHistory);
+        saveThreadSnapshot(nextHistory);
         setStreamingContent('');
         tutorialEventBus.emit({
           type: streamKind === 'initial' ? 'council_initial_response_received' : 'council_reply_response_received',
@@ -238,6 +302,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     if (!topic.trim()) return;
     setPaywallMessage('');
     const startingTopic = topic;
+    sessionIdRef.current = `council-session-${Date.now()}`;
     tutorialEventBus.emit({
       type: 'council_started',
       payload: { topic: startingTopic },
@@ -249,7 +314,8 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         content: startingTopic,
         isUser: true
     }]);
-    onUserSignal?.(startingTopic);
+    const interactionMeaningContext = onUserSignal?.(startingTopic) || meaningContext;
+    latestMeaningContextRef.current = interactionMeaningContext;
     const user = getCurrentUser();
     if (user?.id) {
       const notices = analyzePlayfulDiscovery({
@@ -257,7 +323,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         text: startingTopic,
         source: 'council',
         language,
-        meaningContext,
+        meaningContext: interactionMeaningContext,
       });
       if (notices.length > 0) {
         setDiscoveries(prev => [...prev, ...notices]);
@@ -265,7 +331,18 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
     }
     setTopic(''); 
     
-    await handleStream(startCouncilSession(startingTopic, language, currentLore, meaningContext), 'initial');
+    const previousMessages = continueFromLastThread && lastThreadMemory
+      ? councilThreadMemoryToMessages(lastThreadMemory)
+      : [];
+    setContinueFromLastThread(false);
+    setShowThreadMemory(false);
+
+    await handleStream(
+      previousMessages.length > 0
+        ? sendMessageToCouncil(startingTopic, previousMessages, language, currentLore, interactionMeaningContext)
+        : startCouncilSession(startingTopic, language, currentLore, interactionMeaningContext),
+      'initial'
+    );
   };
 
   const handleReply = async () => {
@@ -296,12 +373,15 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       content: content,
       isUser: true
     };
-    setHistory(prev => [...prev, userTurn]);
+    const historyWithUserTurn = [...currentHistory, userTurn];
+    setHistory(historyWithUserTurn);
+    saveThreadSnapshot(historyWithUserTurn);
     tutorialEventBus.emit({
       type: 'council_reply_sent',
       payload: { length: content.length },
     });
-    onUserSignal?.(content);
+    const interactionMeaningContext = onUserSignal?.(content) || meaningContext;
+    latestMeaningContextRef.current = interactionMeaningContext;
     const user = getCurrentUser();
     if (user?.id) {
       const notices = analyzePlayfulDiscovery({
@@ -309,14 +389,14 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         text: content,
         source: 'council',
         language,
-        meaningContext,
+        meaningContext: interactionMeaningContext,
       });
       if (notices.length > 0) {
         setDiscoveries(prev => [...prev, ...notices]);
       }
     }
 
-    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore, meaningContext), 'reply');
+    await handleStream(sendMessageToCouncil(content, conversationHistory, language, currentLore, interactionMeaningContext), 'reply');
   };
 
   // --- Meaning Agent Integration Handler ---
@@ -341,6 +421,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
           setLastActionSummary(savedSummary);
         }
       }
+      saveThreadSnapshot(history, true);
 
       // Convert history to Message format for API
       const sessionHistory = history
@@ -353,7 +434,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
         }));
 
       // Call meaning agent endpoint
-      const { analyzeMeaning } = await import('../services/aiService');
+      const integrationMeaningContext = latestMeaningContextRef.current;
       const meaningResult = await analyzeMeaning(sessionHistory, {
         mode: 'council',
         language,
@@ -362,7 +443,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
           title: currentStats.currentQuest,
           state: currentStats.state
         },
-        meaningContext,
+        meaningContext: integrationMeaningContext,
         persist: true
       });
       
@@ -395,7 +476,31 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
       setTopic('');
     } catch (error: any) {
       console.error('Integration error:', error);
-      // Still close session even if integration fails
+
+      if (error instanceof PaywallRequiredError) {
+        setPaywallMessage(error.message);
+        setIsIntegrating(false);
+        return;
+      }
+
+      try {
+        const offlinePatch = buildOfflineCouncilMeaningPatch(history, language, topic);
+        const localQuest = offlinePatch.questLogEntries?.[0];
+
+        // Local persistence occurs synchronously before this promise reaches its
+        // network request, so the UI can close without waiting on a dead backend.
+        persistMeaningStatePatch(offlinePatch).catch(fallbackError => {
+          console.error('Deferred local integration sync failed:', fallbackError);
+        });
+
+        onIntegrate({
+          newLoreEntry: localQuest?.content,
+          updatedQuest: localQuest?.title,
+        });
+      } catch (fallbackError) {
+        console.error('Local integration fallback failed:', fallbackError);
+      }
+
       setIsIntegrating(false);
       setIsSessionActive(false);
       setHistory([]);
@@ -742,9 +847,118 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
             )}
             {!isSessionActive ? (
                 <div className="max-w-2xl mx-auto flex flex-col gap-3">
-                    <label className="text-[10px] font-bold text-purple-500/70 uppercase tracking-[0.2em] ml-2">
-                        {language === 'DE' ? 'Thema Initiieren' : 'Initiate Topic'}
-                    </label>
+                    <div className="relative flex items-center justify-between gap-3 px-2">
+                        <label className="text-[10px] font-bold text-purple-500/70 uppercase tracking-[0.2em]">
+                            {language === 'DE' ? 'Thema Initiieren' : 'Initiate Topic'}
+                        </label>
+
+                        {lastThreadMemory && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setShowThreadMemory(prev => !prev)}
+                              className={`group flex h-8 w-8 items-center justify-center rounded-full border transition-all ${
+                                continueFromLastThread
+                                  ? 'border-purple-300/60 bg-purple-500/20 text-purple-100 shadow-[0_0_18px_rgba(168,85,247,0.22)]'
+                                  : 'border-purple-400/20 bg-white/[0.03] text-purple-300/70 hover:border-purple-300/45 hover:bg-purple-500/10 hover:text-purple-100'
+                              }`}
+                              aria-label={language === 'DE' ? 'Letztes Council-Gespraech anzeigen' : 'Show last council thread'}
+                            >
+                              <History size={15} />
+                              <span className="pointer-events-none absolute bottom-full right-0 mb-2 w-52 rounded-lg border border-purple-300/15 bg-[#09040f]/95 px-3 py-2 text-left text-[11px] font-medium normal-case tracking-normal text-purple-100/80 opacity-0 shadow-2xl shadow-black/30 backdrop-blur-md transition-opacity group-hover:opacity-100">
+                                {language === 'DE'
+                                  ? 'Letzten Gespraechsfaden ansehen oder fuer den naechsten Start mitnehmen.'
+                                  : 'View the last thread or carry it into the next council start.'}
+                              </span>
+                            </button>
+
+                            {showThreadMemory && (
+                              <div className="absolute bottom-full right-0 z-50 mb-3 w-[min(390px,calc(100vw-2rem))] rounded-xl border border-white/12 bg-[#09040f]/95 p-4 text-left shadow-[0_20px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl animate-fade-in">
+                                <div className="mb-3 flex items-start justify-between gap-4">
+                                  <div>
+                                    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-purple-200/80">
+                                      <History size={13} />
+                                      <span>{language === 'DE' ? 'Letzter Faden' : 'Last Thread'}</span>
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-purple-300/50">
+                                      {formatMemoryDate(lastThreadMemory.updatedAt)}
+                                      {lastThreadMemory?.wasIntegrated
+                                        ? (language === 'DE' ? ' · integriert' : ' · integrated')
+                                        : (language === 'DE' ? ' · temporaer' : ' · temporary')}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowThreadMemory(false)}
+                                    className="rounded-full p-1 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                                    aria-label={language === 'DE' ? 'Schliessen' : 'Close'}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+
+                                {lastThreadMemory?.topic && (
+                                  <p className="mb-3 border-l border-purple-300/20 pl-3 text-xs leading-5 text-purple-100/75">
+                                    {lastThreadMemory.topic}
+                                  </p>
+                                )}
+
+                                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                  {lastThreadMemory.turns.slice(-6).map(turn => (
+                                    <div
+                                      key={turn.id}
+                                      className={`rounded-lg border px-3 py-2 ${
+                                        turn.role === 'user'
+                                          ? 'border-purple-400/15 bg-purple-500/8 text-purple-100'
+                                          : 'border-white/8 bg-white/[0.035] text-white/72'
+                                      }`}
+                                    >
+                                      <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.16em] text-purple-300/50">
+                                        {turn.role === 'user'
+                                          ? (language === 'DE' ? 'Du' : 'You')
+                                          : (turn.speaker || (language === 'DE' ? 'Rat' : 'Council'))}
+                                      </div>
+                                      <p className="max-h-[3.75rem] overflow-hidden text-xs leading-5">{turn.content}</p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/8 pt-3">
+                                  <p className="text-[10px] leading-4 text-purple-300/45">
+                                    {language === 'DE'
+                                      ? 'Nimmt nur die letzten Wechsel mit, nicht die ganze Sitzung.'
+                                      : 'Carries only the latest turns, not the whole session.'}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setContinueFromLastThread(true);
+                                      setShowThreadMemory(false);
+                                    }}
+                                    className="flex shrink-0 items-center gap-2 rounded-lg border border-purple-300/25 bg-purple-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-purple-100 transition-all hover:border-purple-300/50 hover:bg-purple-500/20"
+                                  >
+                                    <CornerDownRight size={13} />
+                                    <span>{language === 'DE' ? 'Fortsetzen' : 'Continue'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                    </div>
+                    {continueFromLastThread && (
+                      <div className="mx-2 flex items-center justify-between rounded-lg border border-purple-300/15 bg-purple-500/8 px-3 py-2 text-[11px] text-purple-100/75">
+                        <span>{language === 'DE' ? 'Fortsetzung aktiv: Der letzte Faden wird fuer den naechsten Start mitgegeben.' : 'Continuation active: the last thread will be included in the next start.'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setContinueFromLastThread(false)}
+                          className="rounded-full p-1 text-purple-200/55 transition-colors hover:bg-white/10 hover:text-white"
+                          aria-label={language === 'DE' ? 'Fortsetzung deaktivieren' : 'Disable continuation'}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    )}
                     <div className="flex gap-0 shadow-lg rounded-xl overflow-hidden ring-1 ring-purple-500/20 bg-[#150a26]">
                         <input
                             type="text"
@@ -768,6 +982,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                         <VoiceInputButton
                             language={language}
                             disabled={isStreaming}
+                            className="h-auto w-14 self-stretch rounded-none border-y-0 border-r-0 border-l border-purple-500/10"
                             onTranscript={appendTopicTranscript}
                         />
                     </div>
@@ -792,6 +1007,7 @@ export const CouncilSession: React.FC<CouncilSessionProps> = ({ language, curren
                     <VoiceInputButton
                         language={language}
                         disabled={isStreaming}
+                        className="h-12 w-12"
                         onTranscript={appendReplyTranscript}
                     />
                     

@@ -183,9 +183,8 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
 
     return timelineEvents.filter(event => {
       const eventKey = normalizeMeaningText(`${event.label} ${event.summary}`).slice(0, 120);
-      if (seen.has(event.id) || (eventKey && seen.has(eventKey))) return false;
+      if (seen.has(event.id)) return false;
       seen.add(event.id);
-      if (eventKey) seen.add(eventKey);
 
       if (event.type === 'BREAKTHROUGH') {
         return breakthroughKeys.has(eventKey) || !eventKey;
@@ -199,6 +198,9 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
     const timelineMeaningKeys = new Set(
       timelineEvents.map(event => normalizeMeaningText(`${event.label} ${event.summary}`).slice(0, 120))
     );
+    const timelineSummaryKeys = new Set(
+      timelineEvents.map(event => normalizeMeaningText(event.summary).slice(0, 120)).filter(Boolean)
+    );
     const breakthroughMeaningKeys = new Set(
       allBreakthroughs.map(bt => normalizeMeaningText(`${bt.title} ${bt.insight}`).slice(0, 120))
     );
@@ -206,9 +208,14 @@ export const StatsInterface: React.FC<StatsInterfaceProps> = ({ language, stats,
 
     return stats.milestones.filter(milestone => {
       const key = normalizeMeaningText(`${milestone.title} ${milestone.description}`).slice(0, 120);
+      const summaryKey = normalizeMeaningText(milestone.description).slice(0, 120);
       if (seen.has(milestone.id) || (key && seen.has(key))) return false;
       seen.add(milestone.id);
       if (key) seen.add(key);
+
+      if (summaryKey && timelineSummaryKeys.has(summaryKey)) {
+        return false;
+      }
 
       if (milestone.type === 'BREAKTHROUGH' && key) {
         return !timelineMeaningKeys.has(key) && !breakthroughMeaningKeys.has(key);

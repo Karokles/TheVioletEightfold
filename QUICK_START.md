@@ -19,7 +19,7 @@ npm install
 
 **Backend** - Create `server/.env`:
 ```env
-OPENAI_API_KEY=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
+OPENAI_API_KEY=
 PORT=3001
 NODE_ENV=development
 ```
@@ -47,8 +47,8 @@ npm run dev
 ### Step 4: Open in Browser
 
 Open http://localhost:3000 and login with:
-- Username: `friend1`
-- Secret: `secret1`
+- Username: `lion`
+- Secret: `dev-lion-secret` unless `LOCAL_SECRET_LION` is set
 
 ---
 
@@ -59,16 +59,7 @@ Edit `server/server.ts` and add more users to the `users` array:
 ```typescript
 const users: User[] = [
   // ... existing users ...
-  {
-    id: 'user6',
-    username: 'alice',
-    secretHash: createHash('sha256').update('alice-secret-123').digest('hex'),
-  },
-  {
-    id: 'user7',
-    username: 'bob',
-    secretHash: createHash('sha256').update('bob-secret-456').digest('hex'),
-  },
+  // Prefer Supabase Auth for real accounts. Local users are dev-only.
 ];
 ```
 
@@ -235,8 +226,8 @@ The app is mobile-responsive! Friends can:
 - Backend: http://localhost:3001
 
 **Test Login:**
-- Username: `friend1`
-- Secret: `secret1`
+- Username: `lion`
+- Secret: `dev-lion-secret` unless `LOCAL_SECRET_LION` is set
 
 **Add Users:**
 - Edit `server/server.ts` → `users` array

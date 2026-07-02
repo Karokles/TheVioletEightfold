@@ -5,8 +5,11 @@ const AUTH_TOKEN_KEY = 'vc_auth_token';
 const USER_ID_KEY = 'vc_user_id';
 const USER_DISPLAY_NAME_KEY = 'vc_user_display_name';
 const USER_LANGUAGE_KEY = 'language_preference';
+const USER_STATS_KEY = 'stats';
+const USER_STATS_BACKUP_KEY = 'stats_backup';
 const LOCAL_DISPLAY_NAMES: Record<string, string> = {
   lion: 'karokles',
+  tuana: 'Tuana',
 };
 
 export interface User {
@@ -90,25 +93,30 @@ export const saveUserLore = (userId: string, lore: string) => {
 };
 
 export const loadUserStats = (userId: string): UserStats => {
-  const key = getUserScopedKey('stats', userId);
-  const saved = localStorage.getItem(key);
-  if (!saved) {
-    return getStatsTemplate();
+  const keys = [
+    getUserScopedKey(USER_STATS_KEY, userId),
+    getUserScopedKey(USER_STATS_BACKUP_KEY, userId),
+  ];
+
+  for (const key of keys) {
+    const saved = localStorage.getItem(key);
+    if (!saved) continue;
+
+    try {
+      const parsed = JSON.parse(saved);
+      return { ...getStatsTemplate(), ...parsed };
+    } catch (error) {
+      console.error(`Failed to parse user stats from ${key}`, error);
+    }
   }
-  
-  try {
-    const parsed = JSON.parse(saved);
-    // Merge with template to ensure all fields exist
-    return { ...getStatsTemplate(), ...parsed };
-  } catch (e) {
-    console.error('Failed to parse user stats', e);
-    return getStatsTemplate();
-  }
+
+  return getStatsTemplate();
 };
 
 export const saveUserStats = (userId: string, stats: UserStats) => {
-  const key = getUserScopedKey('stats', userId);
-  localStorage.setItem(key, JSON.stringify(stats));
+  const serialized = JSON.stringify(stats);
+  localStorage.setItem(getUserScopedKey(USER_STATS_BACKUP_KEY, userId), serialized);
+  localStorage.setItem(getUserScopedKey(USER_STATS_KEY, userId), serialized);
 };
 
 export const loadUserLanguage = (userId: string): Language => {

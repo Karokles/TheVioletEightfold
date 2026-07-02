@@ -1,4 +1,4 @@
-# Diagnostic Pass - Production Auth Issues
+﻿# Diagnostic Pass - Production Auth Issues
 
 **Date:** 2025-01-27  
 **Branch:** `fix/prod-auth-supabase`  
@@ -18,10 +18,10 @@
 - **Location:** `services/aiService.ts:24-39` (getAuthHeaders function)
 - **Normalization:** Removes double "Bearer " prefix
 - **Used in:**
-  - `sendMessageToArchetype()` → POST /api/council
-  - `startCouncilSession()` → POST /api/council
-  - `sendMessageToCouncil()` → POST /api/council
-  - `login()` → POST /api/login (no auth header)
+  - `sendMessageToArchetype()` â†’ POST /api/council
+  - `startCouncilSession()` â†’ POST /api/council
+  - `sendMessageToCouncil()` â†’ POST /api/council
+  - `login()` â†’ POST /api/login (no auth header)
 
 ### Backend Token Verification
 - **Middleware:** `authenticate()` in `server/server.ts:118-195`
@@ -47,8 +47,8 @@
 5. **POST /api/council** - Protected (used for Single Chat, Council Session)
 
 ### Missing Endpoints (Referenced but don't exist)
-- ❌ `/api/thoughtchamber` - Not found (Council Session uses /api/council)
-- ❌ `/api/integrate` - Not found (Integration is stubbed in frontend)
+- âŒ `/api/thoughtchamber` - Not found (Council Session uses /api/council)
+- âŒ `/api/integrate` - Not found (Integration is stubbed in frontend)
 
 **Note:** All flows currently use `/api/council` with different `userProfile` configurations.
 
@@ -83,27 +83,27 @@
 ## Environment Variables Status
 
 ### Render (Backend) - Current
-- ✅ `JWT_SECRET` - Set (from user info)
-- ✅ `OPENAI_API_KEY` - Set
-- ✅ `SUPABASE_URL` - Set (NEW - for Supabase integration)
-- ✅ `SUPABASE_SERVICE_ROLE_KEY` - Set (NEW)
-- ⚠️ `ALLOWED_ORIGINS` - Need to verify includes Vercel domain
-- ✅ `NODE_ENV=production` - Set
+- âœ… `JWT_SECRET` - Set (from user info)
+- âœ… `OPENAI_API_KEY` - Set
+- âœ… `SUPABASE_URL` - Set (NEW - for Supabase integration)
+- âœ… `SUPABASE_SERVICE_ROLE_KEY` - Set (NEW)
+- âš ï¸ `ALLOWED_ORIGINS` - Need to verify includes Vercel domain
+- âœ… `NODE_ENV=production` - Set
 
 ### Vercel (Frontend) - Expected
-- ✅ `VITE_API_BASE_URL` - Should be `https://thevioleteightfold-4224.onrender.com`
+- âœ… `VITE_API_BASE_URL` - Should be `https://thevioleteightfold-4224.onrender.com`
 
 ---
 
 ## Next Steps
 
-1. ✅ Diagnostic complete
-2. ⏳ Fix auth logging (add detailed logs without secrets)
-3. ⏳ Enhance /api/health with Supabase connectivity check
-4. ⏳ Fix Tailwind CDN issue
-5. ⏳ Add Supabase integration (minimal, safe)
-6. ⏳ Verify CORS configuration
-7. ⏳ Test end-to-end
+1. âœ… Diagnostic complete
+2. â³ Fix auth logging (add detailed logs without secrets)
+3. â³ Enhance /api/health with Supabase connectivity check
+4. â³ Fix Tailwind CDN issue
+5. â³ Add Supabase integration (minimal, safe)
+6. â³ Verify CORS configuration
+7. â³ Test end-to-end
 
 ---
 
@@ -127,7 +127,7 @@
    ```bash
    curl -X POST https://thevioleteightfold-4224.onrender.com/api/login \
      -H "Content-Type: application/json" \
-     -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+     -d '{"username":"lion","secret":"<local-test-secret>"}'
    ```
    Verify token is JWT format (3 segments)
 

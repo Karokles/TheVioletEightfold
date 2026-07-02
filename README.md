@@ -112,15 +112,11 @@ npm run preview
 
 ## Test Users
 
-For the MVP, the following test users are pre-configured:
+Local fallback users are documented in `USER_CREDENTIALS.md`.
 
-- Username: `friend1`, Secret: `secret1`
-- Username: `friend2`, Secret: `secret2`
-- Username: `friend3`, Secret: `secret3`
-- Username: `friend4`, Secret: `secret4`
-- Username: `friend5`, Secret: `secret5`
+By default, use `lion` with `dev-lion-secret`. If `LOCAL_SECRET_*` values are set in `server/.env`, those environment secrets are accepted alongside the dev defaults. You can use either a local username such as `selma` or the internal local id such as `friend1`.
 
-To add more users, edit `server/server.ts` and add entries to the `users` array.
+To add more local-only users, edit `server/server.ts` and add entries to the `users` array. Production accounts should be created through the configured auth provider instead.
 
 ## Project Structure
 

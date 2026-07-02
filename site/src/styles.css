@@ -38,11 +38,11 @@ body {
   min-width: 320px;
   color: var(--text);
   font-family: var(--font-body);
+  background-color: var(--bg);
   background:
     radial-gradient(circle at 15% 15%, rgba(143, 99, 232, 0.14), transparent 25%),
     radial-gradient(circle at 82% 18%, rgba(143, 213, 229, 0.08), transparent 22%),
     linear-gradient(180deg, rgba(4, 5, 13, 0.18), rgba(4, 5, 13, 0.7)),
-    url("/hero-background.png") center center / cover fixed no-repeat,
     linear-gradient(180deg, #080a14 0%, #0a1021 52%, #050712 100%);
 }
 
@@ -56,7 +56,7 @@ body::before {
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.8), transparent 82%);
-  opacity: 0.2;
+  opacity: 0.12;
 }
 
 a {
@@ -70,12 +70,65 @@ a {
   padding: 34px 0 86px;
   perspective: 1400px;
   position: relative;
+  z-index: 1;
+  isolation: isolate;
+}
+
+.starfield-backdrop {
+  --starfield-shift-x: 0px;
+  --starfield-shift-y: 0px;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(143, 99, 232, 0.12), transparent 26%),
+    radial-gradient(circle at 82% 18%, rgba(143, 213, 229, 0.06), transparent 24%),
+    linear-gradient(180deg, #03040a 0%, #07101c 48%, #040610 100%);
+}
+
+.starfield-backdrop::before,
+.starfield-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.starfield-backdrop::before {
+  inset: -7vw;
+  background:
+    linear-gradient(180deg, rgba(3, 4, 10, 0.1), rgba(3, 4, 10, 0.48)),
+    url("/hero-background.png") center center / cover no-repeat;
+  opacity: 0.72;
+  filter: saturate(0.9) brightness(0.72) contrast(1.08);
+  transform-origin: center;
+  animation: starfield-plate-breathe 34s ease-in-out infinite alternate;
+}
+
+.starfield-backdrop::after {
+  background:
+    radial-gradient(circle at 50% 38%, transparent 0 28%, rgba(3, 4, 10, 0.38) 68%, rgba(3, 4, 10, 0.78) 100%),
+    linear-gradient(180deg, rgba(3, 4, 10, 0.22), rgba(3, 4, 10, 0.68));
+}
+
+.starfield-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  opacity: 0.76;
+  mix-blend-mode: screen;
 }
 
 .hero,
 .section,
 .band {
   margin-bottom: 34px;
+  position: relative;
+  z-index: 2;
 }
 
 .hero,
@@ -113,7 +166,7 @@ a {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: -1;
+  z-index: 1;
 }
 
 .living-observatory::before {
@@ -1373,6 +1426,27 @@ h3 {
   }
 }
 
+@keyframes starfield-plate-breathe {
+  from {
+    transform:
+      translate3d(
+        calc(var(--starfield-shift-x) - 10px),
+        calc(var(--starfield-shift-y) - 6px),
+        0
+      )
+      scale(1.055);
+  }
+  to {
+    transform:
+      translate3d(
+        calc(var(--starfield-shift-x) + 8px),
+        calc(var(--starfield-shift-y) + 5px),
+        0
+      )
+      scale(1.085);
+  }
+}
+
 @media (max-width: 1024px) {
   .hero,
   .card-grid,
@@ -1485,7 +1559,12 @@ h3 {
   .ambient-roots,
   .ambient-geometry,
   .interactive-surface,
-  .interactive-surface:hover {
+  .interactive-surface:hover,
+  .starfield-backdrop::before {
     transform: none !important;
+  }
+
+  .starfield-backdrop::before {
+    animation: none !important;
   }
 }

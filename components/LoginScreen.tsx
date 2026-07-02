@@ -273,7 +273,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
 
         {formMode === 'local' && !supabaseMisconfigured && (
           <p className="text-center text-xs text-purple-500/40 mt-6">
-            Test users: friend1-friend5 (secrets: secret1-secret5)
+            Local users are listed in USER_CREDENTIALS.md. Environment secrets in server/.env are accepted alongside dev defaults.
           </p>
         )}
       </div>

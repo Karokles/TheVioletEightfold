@@ -19,7 +19,7 @@ interface ChatInterfaceProps {
   language: Language;
   currentLore: string;
   meaningContext: MeaningContext;
-  onUserSignal?: (content: string) => void;
+  onUserSignal?: (content: string) => MeaningContext | void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, language, currentLore, meaningContext, onUserSignal }) => {
@@ -117,7 +117,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
       type: 'single_voice_message_sent',
       payload: { archetypeId: activeArchetype },
     });
-    onUserSignal?.(userMsg.content);
+    const interactionMeaningContext = onUserSignal?.(userMsg.content) || meaningContext;
     const user = getCurrentUser();
     if (user?.id) {
       const notices = analyzePlayfulDiscovery({
@@ -126,7 +126,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
         source: 'chat',
         language,
         archetype: activeArchetype,
-        meaningContext,
+        meaningContext: interactionMeaningContext,
       });
       if (notices.length > 0) {
         setDiscoveries(prev => [...prev, ...notices]);
@@ -155,7 +155,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeArchetype, l
         language,
         currentLore,
         conversationHistory,
-        meaningContext,
+        interactionMeaningContext,
         abortController.signal
       );
       

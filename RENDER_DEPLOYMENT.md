@@ -1,11 +1,11 @@
-# Render Backend Deployment - Step-by-Step Guide
+﻿# Render Backend Deployment - Step-by-Step Guide
 
 **Last Updated:** 2025-01-27  
 **Critical:** Server will crash on start if `JWT_SECRET` is not set in production.
 
 ---
 
-## ⚠️ CRITICAL: JWT_SECRET Required
+## âš ï¸ CRITICAL: JWT_SECRET Required
 
 **The server WILL crash on start if `JWT_SECRET` is missing in production.**
 
@@ -47,7 +47,7 @@ aB3xY9mK2pL8qR5tW7vN4jH6fG1dS0cE2bA9zX8yU6iO3pL5mN7k
 
 ## Step 3: Environment Variables (CRITICAL - DO THIS FIRST)
 
-**Go to:** Render Dashboard → Your Service → Environment
+**Go to:** Render Dashboard â†’ Your Service â†’ Environment
 
 **Add these variables (in this order):**
 
@@ -65,9 +65,9 @@ aB3xY9mK2pL8qR5tW7vN4jH6fG1dS0cE2bA9zX8yU6iO3pL5mN7k
 | Variable | Value | How to Get |
 |----------|-------|------------|
 | `SUPABASE_URL` | `https://xxx.supabase.co` | From Supabase Dashboard |
-| `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | From Supabase Dashboard → Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | From Supabase Dashboard â†’ Settings â†’ API |
 
-**⚠️ IMPORTANT:**
+**âš ï¸ IMPORTANT:**
 - Set `JWT_SECRET` FIRST before deploying
 - Do NOT set `PORT` - Render sets this automatically
 - `ALLOWED_ORIGINS` must include your exact Vercel domain (no trailing slash)
@@ -115,7 +115,7 @@ Environment: production
 ```
 ERROR: JWT_SECRET environment variable is required in production
 ```
-→ Go back to Step 3 and set `JWT_SECRET`
+â†’ Go back to Step 3 and set `JWT_SECRET`
 
 ---
 
@@ -140,7 +140,7 @@ curl https://your-backend.onrender.com/api/health
 }
 ```
 
-**✅ Success if:**
+**âœ… Success if:**
 - `status: "ok"`
 - `jwtSecretSet: true`
 - `environment: "production"`
@@ -161,7 +161,7 @@ curl https://your-backend.onrender.com/api/auth/health
 }
 ```
 
-**✅ Success if:**
+**âœ… Success if:**
 - `ok: true`
 - `hasJwtSecret: true`
 
@@ -170,7 +170,7 @@ curl https://your-backend.onrender.com/api/auth/health
 ```bash
 curl -X POST https://your-backend.onrender.com/api/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+  -d '{"username":"lion","secret":"<local-test-secret>"}'
 ```
 
 **Expected Response:**
@@ -181,7 +181,7 @@ curl -X POST https://your-backend.onrender.com/api/login \
 }
 ```
 
-**✅ Success if:**
+**âœ… Success if:**
 - Returns `userId` and `token`
 - Token is JWT format (3 segments, separated by dots)
 
@@ -207,7 +207,7 @@ curl -X POST https://your-backend.onrender.com/api/council \
 }
 ```
 
-**✅ Success if:**
+**âœ… Success if:**
 - Returns `reply` with AI-generated content
 - No 401 Unauthorized errors
 
@@ -220,7 +220,7 @@ curl -X POST https://your-backend.onrender.com/api/council \
 **Problem:** `JWT_SECRET` not set in Render Environment Variables.
 
 **Fix:**
-1. Go to Render Dashboard → Your Service → Environment
+1. Go to Render Dashboard â†’ Your Service â†’ Environment
 2. Add `JWT_SECRET` variable
 3. Generate value: `openssl rand -base64 32`
 4. Paste value
@@ -270,18 +270,18 @@ curl -X POST https://your-backend.onrender.com/api/council \
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `NODE_ENV` | ✅ | Must be `production` | `production` |
-| `JWT_SECRET` | ✅ | JWT signing secret (min 32 chars) | `openssl rand -base64 32` |
-| `OPENAI_API_KEY` | ✅ | OpenAI API key | `sk-...` |
-| `ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs | `https://app.vercel.app,http://localhost:3000` |
+| `NODE_ENV` | âœ… | Must be `production` | `production` |
+| `JWT_SECRET` | âœ… | JWT signing secret (min 32 chars) | `openssl rand -base64 32` |
+| `OPENAI_API_KEY` | âœ… | OpenAI API key | `sk-...` |
+| `ALLOWED_ORIGINS` | âœ… | Comma-separated frontend URLs | `https://app.vercel.app,http://localhost:3000` |
 
 ### Optional (Server works without these):
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `PORT` | ❌ | Auto-set by Render | - |
-| `SUPABASE_URL` | ⚠️ | Supabase project URL | `https://xxx.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | ⚠️ | Supabase service role key | `eyJ...` |
+| `PORT` | âŒ | Auto-set by Render | - |
+| `SUPABASE_URL` | âš ï¸ | Supabase project URL | `https://xxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | âš ï¸ | Supabase service role key | `eyJ...` |
 
 ---
 

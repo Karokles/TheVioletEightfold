@@ -1,4 +1,4 @@
-# Deployment Plan - JWT Auth Migration
+﻿# Deployment Plan - JWT Auth Migration
 
 **Branch:** `fix/auth-restart-proof`  
 **Date:** 2025-01-27  
@@ -37,11 +37,11 @@
 
 | Variable | Required | Value | Notes |
 |----------|----------|-------|-------|
-| `JWT_SECRET` | ✅ **YES** | Random secure string (min 32 chars) | **NEW - Must be set** |
-| `OPENAI_API_KEY` | ✅ Yes | Your OpenAI API key | Existing |
-| `ALLOWED_ORIGINS` | ✅ Yes | Comma-separated frontend URLs | Existing |
-| `NODE_ENV` | ⚠️ Recommended | `production` | Existing |
-| `PORT` | ❌ No | Auto-set by Render | Existing |
+| `JWT_SECRET` | âœ… **YES** | Random secure string (min 32 chars) | **NEW - Must be set** |
+| `OPENAI_API_KEY` | âœ… Yes | Your OpenAI API key | Existing |
+| `ALLOWED_ORIGINS` | âœ… Yes | Comma-separated frontend URLs | Existing |
+| `NODE_ENV` | âš ï¸ Recommended | `production` | Existing |
+| `PORT` | âŒ No | Auto-set by Render | Existing |
 
 **Generate JWT_SECRET:**
 ```bash
@@ -59,7 +59,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 | Variable | Required | Value | Notes |
 |----------|----------|-------|-------|
-| `VITE_API_BASE_URL` | ✅ Yes | `https://thevioleteightfold-4224.onrender.com` | Existing |
+| `VITE_API_BASE_URL` | âœ… Yes | `https://thevioleteightfold-4224.onrender.com` | Existing |
 
 **No new variables needed for frontend.**
 
@@ -76,17 +76,17 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
    Save this value securely.
 
 2. **Set Environment Variable:**
-   - Go to Render Dashboard → Your Service → Environment
+   - Go to Render Dashboard â†’ Your Service â†’ Environment
    - Add new variable:
      - Key: `JWT_SECRET`
      - Value: (paste the generated secret)
    - Click "Save Changes"
 
 3. **Verify Environment Variables:**
-   - ✅ `JWT_SECRET` is set
-   - ✅ `OPENAI_API_KEY` is set
-   - ✅ `ALLOWED_ORIGINS` is set (your Vercel frontend URL)
-   - ✅ `NODE_ENV` is set to `production` (recommended)
+   - âœ… `JWT_SECRET` is set
+   - âœ… `OPENAI_API_KEY` is set
+   - âœ… `ALLOWED_ORIGINS` is set (your Vercel frontend URL)
+   - âœ… `NODE_ENV` is set to `production` (recommended)
 
 4. **Redeploy:**
    - Push `fix/auth-restart-proof` branch to GitHub
@@ -114,7 +114,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
    ```bash
    curl -X POST https://thevioleteightfold-4224.onrender.com/api/login \
      -H "Content-Type: application/json" \
-     -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+     -d '{"username":"lion","secret":"<local-test-secret>"}'
    
    # Should return JWT token:
    # {"userId":"lion","token":"eyJhbGc..."}
@@ -129,7 +129,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ### Vercel (Frontend) - Step 2
 
 1. **Verify Environment Variable:**
-   - Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+   - Go to Vercel Dashboard â†’ Your Project â†’ Settings â†’ Environment Variables
    - Verify `VITE_API_BASE_URL` is set to `https://thevioleteightfold-4224.onrender.com`
 
 2. **Redeploy:**
@@ -139,10 +139,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 3. **Verify Deployment:**
    - Open frontend URL
-   - Test login → should get JWT token
-   - Test Single Chat → should work
-   - Test Council Session → should work
-   - Test auto-logout: Wait for server restart → make API call → should auto-logout
+   - Test login â†’ should get JWT token
+   - Test Single Chat â†’ should work
+   - Test Council Session â†’ should work
+   - Test auto-logout: Wait for server restart â†’ make API call â†’ should auto-logout
 
 ---
 
@@ -153,7 +153,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 **What happens:**
 - Users with old tokens will get 401 with reason `legacy_token_invalid`
 - Frontend will auto-clear token and show: "Legacy token format no longer supported. Please sign in again to get a new token."
-- User re-logs in → gets new JWT token → works normally
+- User re-logs in â†’ gets new JWT token â†’ works normally
 
 **Timeline:**
 - Immediate: All new logins get JWT tokens
@@ -176,7 +176,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```bash
 curl https://thevioleteightfold-4224.onrender.com/api/health
 ```
-- **If fails:** Server is down → Check Render logs
+- **If fails:** Server is down â†’ Check Render logs
 - **If succeeds:** Continue
 
 ### Step 2: Check Auth Diagnose (30 seconds)
@@ -194,7 +194,7 @@ curl https://thevioleteightfold-4224.onrender.com/api/auth/diagnose
 ```bash
 curl -X POST https://thevioleteightfold-4224.onrender.com/api/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+  -d '{"username":"lion","secret":"<local-test-secret>"}'
 ```
 - **If fails:** Check credentials
 - **If succeeds:** Check token format (should be JWT with 3 segments)
@@ -211,20 +211,20 @@ curl -X POST https://thevioleteightfold-4224.onrender.com/api/council \
 - **If 200:** Auth works, issue is with frontend token
 
 ### Step 5: Check Render Logs (1 minute)
-- Render Dashboard → Your Service → Logs
+- Render Dashboard â†’ Your Service â†’ Logs
 - Look for:
-  - `[AUTH] JWT_SECRET required in production` → JWT_SECRET not set
-  - `[AUTH] JWT verification error` → Token verification failed
-  - `TokenExpiredError` → Token expired (normal after 7 days)
+  - `[AUTH] JWT_SECRET required in production` â†’ JWT_SECRET not set
+  - `[AUTH] JWT verification error` â†’ Token verification failed
+  - `TokenExpiredError` â†’ Token expired (normal after 7 days)
 
 ### Step 6: Check Frontend (1 minute)
 - Open browser console (F12)
 - Check Network tab for API calls
 - Look for 401 responses
 - Check error response `reason` field:
-  - `legacy_token_invalid` → User has old token, needs to re-login
-  - `expired` → Token expired, user needs to re-login
-  - `invalid_signature` → Token invalid
+  - `legacy_token_invalid` â†’ User has old token, needs to re-login
+  - `expired` â†’ Token expired, user needs to re-login
+  - `invalid_signature` â†’ Token invalid
 
 ### Most Likely Causes
 
@@ -249,25 +249,25 @@ curl -X POST https://thevioleteightfold-4224.onrender.com/api/council \
 ## Verification Steps
 
 ### Backend Verification
-1. ✅ Health endpoint returns status
-2. ✅ Auth diagnose detects JWT format
-3. ✅ Login returns JWT token
-4. ✅ Council endpoint accepts JWT token
-5. ✅ Legacy tokens rejected with clear message
+1. âœ… Health endpoint returns status
+2. âœ… Auth diagnose detects JWT format
+3. âœ… Login returns JWT token
+4. âœ… Council endpoint accepts JWT token
+5. âœ… Legacy tokens rejected with clear message
 
 ### Frontend Verification
-1. ✅ Login works and stores JWT token
-2. ✅ Single Chat works with JWT token
-3. ✅ Council Session works with JWT token
-4. ✅ Auto-logout on 401 (legacy_token_invalid, expired, etc.)
-5. ✅ User-friendly error messages
+1. âœ… Login works and stores JWT token
+2. âœ… Single Chat works with JWT token
+3. âœ… Council Session works with JWT token
+4. âœ… Auto-logout on 401 (legacy_token_invalid, expired, etc.)
+5. âœ… User-friendly error messages
 
 ### End-to-End Verification
-1. ✅ Login → Get JWT token
-2. ✅ Use Single Chat → Works
-3. ✅ Use Council Session → Works
-4. ✅ Wait for server restart → Token still works (restart-proof!)
-5. ✅ Test legacy token → Rejected with helpful message
+1. âœ… Login â†’ Get JWT token
+2. âœ… Use Single Chat â†’ Works
+3. âœ… Use Council Session â†’ Works
+4. âœ… Wait for server restart â†’ Token still works (restart-proof!)
+5. âœ… Test legacy token â†’ Rejected with helpful message
 
 ---
 
@@ -295,26 +295,26 @@ If issues occur:
 
 ## Success Criteria
 
-✅ **Backend:**
+âœ… **Backend:**
 - JWT_SECRET set and validated
 - JWT tokens generated on login
 - JWT tokens verified in middleware
 - Legacy tokens rejected with helpful message
 - Tokens survive server restarts
 
-✅ **Frontend:**
+âœ… **Frontend:**
 - JWT tokens stored and used correctly
 - Auto-logout on 401 (all reasons)
 - User-friendly error messages
 - Core flows work (Single Chat, Council Session)
 
-✅ **Testing:**
+âœ… **Testing:**
 - Smoke test passes
 - Manual testing confirms restart-proof behavior
 
 ---
 
-**Status:** ✅ Ready for deployment
+**Status:** âœ… Ready for deployment
 
 
 

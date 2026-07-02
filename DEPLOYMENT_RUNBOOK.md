@@ -1,4 +1,4 @@
-# Deployment Runbook - The Violet Eightfold
+﻿# Deployment Runbook - The Violet Eightfold
 
 **Last Updated:** 2025-01-27  
 **Repository:** `the-violet-eightfoldCoreUsabilityCheck`  
@@ -7,7 +7,7 @@
 
 ---
 
-## 📋 Pre-Deployment Checklist
+## ðŸ“‹ Pre-Deployment Checklist
 
 ### Backend (Render)
 - [ ] `JWT_SECRET` generiert (min. 32 Zeichen)
@@ -21,13 +21,13 @@
 
 ---
 
-## 🚀 Deployment Steps
+## ðŸš€ Deployment Steps
 
 ### Phase 1: Backend Deployment (Render)
 
 #### 1.1 Environment Variables setzen
 
-Gehe zu **Render Dashboard → Your Service → Environment** und setze:
+Gehe zu **Render Dashboard â†’ Your Service â†’ Environment** und setze:
 
 ```bash
 # REQUIRED
@@ -63,13 +63,13 @@ cd server && npm start
 /api/health
 ```
 
-#### 1.3 Deployment auslösen
+#### 1.3 Deployment auslÃ¶sen
 
 - **Option A:** Auto-Deploy (wenn GitHub-Webhook konfiguriert)
-  - Push zu `main` Branch → Render deployt automatisch
+  - Push zu `main` Branch â†’ Render deployt automatisch
 
 - **Option B:** Manual Deploy
-  - Render Dashboard → Manual Deploy → Select Branch/Commit
+  - Render Dashboard â†’ Manual Deploy â†’ Select Branch/Commit
 
 #### 1.4 Verification
 
@@ -100,7 +100,7 @@ curl https://your-backend.onrender.com/api/auth/health
 }
 ```
 
-**✅ Backend ist bereit wenn:**
+**âœ… Backend ist bereit wenn:**
 - Health endpoint returns `status: "ok"`
 - Auth health returns `hasJwtSecret: true`
 - Keine Fehler in Render Logs
@@ -111,16 +111,16 @@ curl https://your-backend.onrender.com/api/auth/health
 
 #### 2.1 Environment Variables setzen
 
-Gehe zu **Vercel Dashboard → Your Project → Settings → Environment Variables**:
+Gehe zu **Vercel Dashboard â†’ Your Project â†’ Settings â†’ Environment Variables**:
 
 ```bash
 VITE_API_BASE_URL=https://your-backend.onrender.com
 ```
 
 **Wichtig:**
-- Variable muss `VITE_API_BASE_URL` heißen (nicht `VITE_API_URL`)
+- Variable muss `VITE_API_BASE_URL` heiÃŸen (nicht `VITE_API_URL`)
 - URL muss exakt der Render Backend URL entsprechen
-- Für alle Environments setzen (Production, Preview, Development)
+- FÃ¼r alle Environments setzen (Production, Preview, Development)
 
 #### 2.2 Build Configuration
 
@@ -138,24 +138,24 @@ Vercel erkennt automatisch Vite-Projekte. Die `vercel.json` ist bereits konfigur
 **Output Directory:** `dist`  
 **Install Command:** `npm install` (automatisch)
 
-#### 2.3 Deployment auslösen
+#### 2.3 Deployment auslÃ¶sen
 
 - **Option A:** Auto-Deploy (wenn GitHub-Webhook konfiguriert)
-  - Push zu `main` Branch → Vercel deployt automatisch
+  - Push zu `main` Branch â†’ Vercel deployt automatisch
 
 - **Option B:** Manual Deploy
-  - Vercel Dashboard → Deployments → Deploy
+  - Vercel Dashboard â†’ Deployments â†’ Deploy
 
 #### 2.4 Verification
 
-1. **Frontend öffnen:** `https://your-app.vercel.app`
+1. **Frontend Ã¶ffnen:** `https://your-app.vercel.app`
 2. **Login testen:**
-   - Username: `lion` / Secret: `TuerOhneWiederkehr2025`
+   - Username: `lion` / Secret: `<local-test-secret>`
    - Oder andere Test-User aus `server/server.ts`
-3. **Single Chat testen:** Archetype auswählen → Nachricht senden
-4. **Council Session testen:** Topic eingeben → Session starten
+3. **Single Chat testen:** Archetype auswÃ¤hlen â†’ Nachricht senden
+4. **Council Session testen:** Topic eingeben â†’ Session starten
 
-**✅ Frontend ist bereit wenn:**
+**âœ… Frontend ist bereit wenn:**
 - Login funktioniert (JWT Token wird gespeichert)
 - Single Chat funktioniert
 - Council Session funktioniert
@@ -164,7 +164,7 @@ Vercel erkennt automatisch Vite-Projekte. Die `vercel.json` ist bereits konfigur
 
 ---
 
-## 🔍 Troubleshooting
+## ðŸ” Troubleshooting
 
 ### Problem: 401 "Unauthorized" auf /api/council
 
@@ -189,7 +189,7 @@ Vercel erkennt automatisch Vite-Projekte. Die `vercel.json` ist bereits konfigur
    - Frontend sendet: `Authorization: Bearer <token>`
 
 4. **User nicht in Backend vorhanden**
-   - Check: `server/server.ts` → `users[]` Array
+   - Check: `server/server.ts` â†’ `users[]` Array
    - User muss existieren mit korrektem `secretHash`
 
 ---
@@ -216,7 +216,7 @@ Access to fetch at 'https://backend.onrender.com/api/council' from origin 'https
 
 3. **Test:**
    ```bash
-   # Temporär für Debugging (NICHT in Production):
+   # TemporÃ¤r fÃ¼r Debugging (NICHT in Production):
    ALLOWED_ORIGINS=*
    ```
 
@@ -225,16 +225,16 @@ Access to fetch at 'https://backend.onrender.com/api/council' from origin 'https
 ### Problem: "VITE_API_BASE_URL is not set"
 
 **Symptom:**
-- Frontend Build schlägt fehl mit Error
-- Oder Frontend lädt, aber API-Calls gehen an localhost:3001
+- Frontend Build schlÃ¤gt fehl mit Error
+- Oder Frontend lÃ¤dt, aber API-Calls gehen an localhost:3001
 
 **Fix:**
 1. **Check Vercel Environment Variables:**
-   - Variable heißt `VITE_API_BASE_URL` (nicht `VITE_API_URL`)
-   - Muss für alle Environments gesetzt sein (Production, Preview, Development)
+   - Variable heiÃŸt `VITE_API_BASE_URL` (nicht `VITE_API_URL`)
+   - Muss fÃ¼r alle Environments gesetzt sein (Production, Preview, Development)
 
 2. **Redeploy nach Variable setzen:**
-   - Vercel → Deployments → Redeploy
+   - Vercel â†’ Deployments â†’ Redeploy
 
 3. **Verify:**
    ```bash
@@ -262,9 +262,9 @@ Access to fetch at 'https://backend.onrender.com/api/council' from origin 'https
    - Log zeigt Status Code und Error Details
 
 3. **Common Errors:**
-   - **401:** API Key invalid → Neuen Key generieren
-   - **429:** Rate Limit → Warten oder Plan upgraden
-   - **500/502/503:** OpenAI Service down → Warten
+   - **401:** API Key invalid â†’ Neuen Key generieren
+   - **429:** Rate Limit â†’ Warten oder Plan upgraden
+   - **500/502/503:** OpenAI Service down â†’ Warten
 
 ---
 
@@ -307,7 +307,7 @@ npm run build
 
 ---
 
-## 📊 Health Check Endpoints
+## ðŸ“Š Health Check Endpoints
 
 ### Backend Health Checks
 
@@ -329,12 +329,12 @@ Headers: Authorization: Bearer <token>
 
 ---
 
-## 🔄 Rollback Plan
+## ðŸ”„ Rollback Plan
 
 ### Backend (Render)
 
 1. **Revert to Previous Version:**
-   - Render Dashboard → Deployments → Select Previous Deployment → Deploy
+   - Render Dashboard â†’ Deployments â†’ Select Previous Deployment â†’ Deploy
 
 2. **Or Revert Git:**
    ```bash
@@ -345,7 +345,7 @@ Headers: Authorization: Bearer <token>
 ### Frontend (Vercel)
 
 1. **Revert to Previous Version:**
-   - Vercel Dashboard → Deployments → Select Previous Deployment → Promote to Production
+   - Vercel Dashboard â†’ Deployments â†’ Select Previous Deployment â†’ Promote to Production
 
 2. **Or Revert Git:**
    ```bash
@@ -353,33 +353,33 @@ Headers: Authorization: Bearer <token>
    git push
    ```
 
-**⚠️ Wichtig:** Nach Rollback müssen User sich neu einloggen (JWT Tokens werden ungültig).
+**âš ï¸ Wichtig:** Nach Rollback mÃ¼ssen User sich neu einloggen (JWT Tokens werden ungÃ¼ltig).
 
 ---
 
-## 📝 Environment Variables Reference
+## ðŸ“ Environment Variables Reference
 
 ### Backend (Render)
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `NODE_ENV` | ✅ | Environment | `production` |
-| `JWT_SECRET` | ✅ | JWT signing secret (min 32 chars) | `openssl rand -base64 32` |
-| `OPENAI_API_KEY` | ✅ | OpenAI API key | `sk-...` |
-| `ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs | `https://app.vercel.app,http://localhost:3000` |
-| `PORT` | ❌ | Server port (auto-set by Render) | - |
-| `SUPABASE_URL` | ⚠️ | Supabase project URL (optional) | `https://xxx.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | ⚠️ | Supabase service role key (optional) | `eyJ...` |
+| `NODE_ENV` | âœ… | Environment | `production` |
+| `JWT_SECRET` | âœ… | JWT signing secret (min 32 chars) | `openssl rand -base64 32` |
+| `OPENAI_API_KEY` | âœ… | OpenAI API key | `sk-...` |
+| `ALLOWED_ORIGINS` | âœ… | Comma-separated frontend URLs | `https://app.vercel.app,http://localhost:3000` |
+| `PORT` | âŒ | Server port (auto-set by Render) | - |
+| `SUPABASE_URL` | âš ï¸ | Supabase project URL (optional) | `https://xxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | âš ï¸ | Supabase service role key (optional) | `eyJ...` |
 
 ### Frontend (Vercel)
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `VITE_API_BASE_URL` | ✅ | Backend API URL | `https://backend.onrender.com` |
+| `VITE_API_BASE_URL` | âœ… | Backend API URL | `https://backend.onrender.com` |
 
 ---
 
-## ✅ Post-Deployment Checklist
+## âœ… Post-Deployment Checklist
 
 ### Backend
 - [ ] Health endpoint returns `status: "ok"`
@@ -397,14 +397,14 @@ Headers: Authorization: Bearer <token>
 - [ ] No "VITE_API_BASE_URL is not set" errors
 
 ### Integration
-- [ ] User can login → get JWT → use Single Chat → use Council Session
+- [ ] User can login â†’ get JWT â†’ use Single Chat â†’ use Council Session
 - [ ] All API calls use correct backend URL
 - [ ] All API calls include `Authorization: Bearer <token>` header
 - [ ] 401 errors trigger auto-logout
 
 ---
 
-## 🆘 Support
+## ðŸ†˜ Support
 
 Bei Problemen:
 1. Check Render Logs (Backend)

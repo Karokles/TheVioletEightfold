@@ -2,7 +2,7 @@
 
 const BASE_URL = process.argv[2] || 'http://localhost:3001';
 const TEST_USERNAME = 'lion';
-const TEST_SECRET = 'TuerOhneWiederkehr2025';
+const TEST_SECRET = process.env.LOCAL_SECRET_LION || 'dev-lion-secret';
 
 let authToken = '';
 

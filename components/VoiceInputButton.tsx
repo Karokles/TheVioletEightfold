@@ -41,12 +41,14 @@ const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
 interface VoiceInputButtonProps {
   language: Language;
   disabled?: boolean;
+  className?: string;
   onTranscript: (text: string) => void;
 }
 
 export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   language,
   disabled = false,
+  className = '',
   onTranscript,
 }) => {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -131,7 +133,7 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
         isListening
           ? 'border-emerald-300/40 bg-emerald-400/15 text-emerald-100 shadow-[0_0_18px_rgba(52,211,153,0.18)]'
           : 'border-purple-500/20 bg-[#150a26] text-purple-300 hover:border-purple-400/50 hover:bg-purple-900/25 hover:text-white'
-      } disabled:cursor-not-allowed disabled:opacity-30`}
+      } disabled:cursor-not-allowed disabled:opacity-30 ${className}`}
     >
       {isListening ? <MicOff size={19} /> : <Mic size={19} />}
     </button>

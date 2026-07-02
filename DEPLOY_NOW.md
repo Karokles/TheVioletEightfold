@@ -1,28 +1,28 @@
-# Deploy Now - Step-by-Step Guide
+﻿# Deploy Now - Step-by-Step Guide
 
 **Date:** 2025-01-27  
 **Status:** Ready for Deployment
 
 ---
 
-## 🚀 Quick Deploy Checklist
+## ðŸš€ Quick Deploy Checklist
 
 ### Prerequisites
 - [ ] GitHub Repo: `Karokles/TheVioletEightfold` (oder dein Repo)
-- [ ] Render Account (für Backend)
-- [ ] Vercel Account (für Frontend)
+- [ ] Render Account (fÃ¼r Backend)
+- [ ] Vercel Account (fÃ¼r Frontend)
 - [ ] OpenAI API Key
 - [ ] Terminal/Command Line Zugriff
 
 ---
 
-## 📋 Step 1: Prepare Environment Variables
+## ðŸ“‹ Step 1: Prepare Environment Variables
 
 ### Generate JWT_SECRET
 ```bash
 openssl rand -base64 32
 ```
-**Kopiere den Output** - du brauchst ihn für Render.
+**Kopiere den Output** - du brauchst ihn fÃ¼r Render.
 
 ### Get OpenAI API Key
 - Gehe zu: https://platform.openai.com/api-keys
@@ -31,14 +31,14 @@ openssl rand -base64 32
 
 ---
 
-## 🔧 Step 2: Deploy Backend (Render)
+## ðŸ”§ Step 2: Deploy Backend (Render)
 
 ### 2.1 Create Render Service
 
 1. **Gehe zu:** https://dashboard.render.com
-2. **Klicke:** "New +" → "Web Service"
+2. **Klicke:** "New +" â†’ "Web Service"
 3. **Connect Repository:**
-   - Wähle: `Karokles/TheVioletEightfold` (oder dein Repo)
+   - WÃ¤hle: `Karokles/TheVioletEightfold` (oder dein Repo)
    - Branch: `main`
 
 ### 2.2 Configure Service
@@ -62,7 +62,7 @@ cd server && npm start
 
 ### 2.3 Set Environment Variables
 
-**Gehe zu:** Render Dashboard → Your Service → Environment
+**Gehe zu:** Render Dashboard â†’ Your Service â†’ Environment
 
 **Add these variables:**
 
@@ -91,7 +91,7 @@ cd server && npm start
 Du solltest sehen:
 ```
 [STARTUP] Initializing server...
-[STARTUP] ✅ Server running on port <PORT>
+[STARTUP] âœ… Server running on port <PORT>
 [STARTUP] Health check: http://0.0.0.0:<PORT>/api/health
 ```
 
@@ -105,18 +105,18 @@ curl https://your-backend.onrender.com/api/health
 {"status":"ok","timestamp":"..."}
 ```
 
-**Notiz:** Kopiere die Backend URL (z.B. `https://violet-eightfold-xxxx.onrender.com`) - du brauchst sie für Vercel.
+**Notiz:** Kopiere die Backend URL (z.B. `https://violet-eightfold-xxxx.onrender.com`) - du brauchst sie fÃ¼r Vercel.
 
 ---
 
-## 🎨 Step 3: Deploy Frontend (Vercel)
+## ðŸŽ¨ Step 3: Deploy Frontend (Vercel)
 
 ### 3.1 Create Vercel Project
 
 1. **Gehe zu:** https://vercel.com/dashboard
-2. **Klicke:** "Add New..." → "Project"
+2. **Klicke:** "Add New..." â†’ "Project"
 3. **Import Repository:**
-   - Wähle: `Karokles/TheVioletEightfold` (oder dein Repo)
+   - WÃ¤hle: `Karokles/TheVioletEightfold` (oder dein Repo)
    - Framework Preset: **Vite** (wird automatisch erkannt)
 
 ### 3.2 Configure Project
@@ -130,14 +130,14 @@ curl https://your-backend.onrender.com/api/health
 
 ### 3.3 Set Environment Variables
 
-**Gehe zu:** Project Settings → Environment Variables
+**Gehe zu:** Project Settings â†’ Environment Variables
 
 **Add:**
 | Variable | Value | Environment |
 |----------|-------|-------------|
 | `VITE_API_BASE_URL` | `https://your-backend.onrender.com` | Production, Preview, Development |
 
-**Wichtig:** Ersetze `your-backend.onrender.com` mit deiner tatsächlichen Render Backend URL.
+**Wichtig:** Ersetze `your-backend.onrender.com` mit deiner tatsÃ¤chlichen Render Backend URL.
 
 ### 3.4 Deploy
 
@@ -149,7 +149,7 @@ curl https://your-backend.onrender.com/api/health
 
 **Wichtig:** Nach dem Vercel-Deploy musst du Render aktualisieren!
 
-1. **Gehe zurück zu Render:** Dashboard → Your Service → Environment
+1. **Gehe zurÃ¼ck zu Render:** Dashboard â†’ Your Service â†’ Environment
 2. **Update `ALLOWED_ORIGINS`:**
    ```
    https://your-actual-vercel-domain.vercel.app,http://localhost:3000
@@ -158,16 +158,16 @@ curl https://your-backend.onrender.com/api/health
 
 ---
 
-## ✅ Step 4: Verify Deployment
+## âœ… Step 4: Verify Deployment
 
 ### 4.1 Test Frontend
 
-1. **Öffne:** Deine Vercel URL (z.B. `https://the-violet-eightfold.vercel.app`)
+1. **Ã–ffne:** Deine Vercel URL (z.B. `https://the-violet-eightfold.vercel.app`)
 2. **Test Login:**
    - Username: `lion`
-   - Secret: `TuerOhneWiederkehr2025`
-3. **Test Single Chat:** Archetype auswählen → Nachricht senden
-4. **Test Council Session:** Topic eingeben → Session starten
+   - Secret: `<local-test-secret>`
+3. **Test Single Chat:** Archetype auswÃ¤hlen â†’ Nachricht senden
+4. **Test Council Session:** Topic eingeben â†’ Session starten
 
 ### 4.2 Check Browser Console
 
@@ -185,14 +185,14 @@ curl https://your-backend.onrender.com/api/health
 
 ---
 
-## 🔍 Troubleshooting
+## ðŸ” Troubleshooting
 
 ### Backend nicht erreichbar
 
 **Problem:** Health endpoint gibt 404 oder Timeout
 
 **Fix:**
-1. Check Render Logs für Errors
+1. Check Render Logs fÃ¼r Errors
 2. Verify `JWT_SECRET` ist gesetzt
 3. Verify Health Check Path: `/api/health`
 4. Check Service Status: Sollte "Live" sein
@@ -205,7 +205,7 @@ curl https://your-backend.onrender.com/api/health
 1. Check `ALLOWED_ORIGINS` in Render
 2. Muss exakte Vercel-Domain enthalten (ohne trailing slash)
 3. Case-sensitive
-4. Redeploy Backend nach Änderung
+4. Redeploy Backend nach Ã„nderung
 
 ### Frontend zeigt "VITE_API_BASE_URL is not set"
 
@@ -213,8 +213,8 @@ curl https://your-backend.onrender.com/api/health
 
 **Fix:**
 1. Check Vercel Environment Variables
-2. Variable heißt `VITE_API_BASE_URL` (nicht `VITE_API_URL`)
-3. Muss für alle Environments gesetzt sein
+2. Variable heiÃŸt `VITE_API_BASE_URL` (nicht `VITE_API_URL`)
+3. Muss fÃ¼r alle Environments gesetzt sein
 4. Redeploy Frontend
 
 ### Login funktioniert nicht
@@ -223,12 +223,12 @@ curl https://your-backend.onrender.com/api/health
 
 **Fix:**
 1. Check `JWT_SECRET` in Render ist gesetzt
-2. Check Render Logs für `[AUTH]` Messages
-3. Try logging in again (Token könnte abgelaufen sein)
+2. Check Render Logs fÃ¼r `[AUTH]` Messages
+3. Try logging in again (Token kÃ¶nnte abgelaufen sein)
 
 ---
 
-## 📊 Deployment Checklist
+## ðŸ“Š Deployment Checklist
 
 ### Pre-Deployment
 - [x] Code committed und gepusht zu GitHub
@@ -250,7 +250,7 @@ curl https://your-backend.onrender.com/api/health
 - [ ] Repository verbunden
 - [ ] Environment Variable gesetzt (VITE_API_BASE_URL)
 - [ ] Deployment erfolgreich
-- [ ] Frontend lädt ohne Fehler
+- [ ] Frontend lÃ¤dt ohne Fehler
 
 ### Post-Deployment
 - [ ] Render ALLOWED_ORIGINS mit Vercel-Domain aktualisiert
@@ -262,13 +262,13 @@ curl https://your-backend.onrender.com/api/health
 
 ---
 
-## 🆘 Support
+## ðŸ†˜ Support
 
 **Render Logs:**
-- Dashboard → Your Service → Logs
+- Dashboard â†’ Your Service â†’ Logs
 
 **Vercel Logs:**
-- Dashboard → Your Project → Deployments → Click Deployment → Logs
+- Dashboard â†’ Your Project â†’ Deployments â†’ Click Deployment â†’ Logs
 
 **Health Checks:**
 ```bash
@@ -281,7 +281,7 @@ curl https://your-backend.onrender.com/api/auth/health
 
 ---
 
-## 📝 Quick Reference
+## ðŸ“ Quick Reference
 
 ### Render Backend URL Format
 ```
@@ -306,7 +306,7 @@ https://<project-name>.vercel.app
 
 ---
 
-**Ready to Deploy!** 🚀
+**Ready to Deploy!** ðŸš€
 
 Folge den Schritten oben und du solltest in 10-15 Minuten live sein.
 

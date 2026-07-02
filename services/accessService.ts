@@ -36,6 +36,7 @@ export interface AccessStatus {
   weeklyResetAt: string;
   freeLimits: {
     singleVoiceReplies: number;
+    singleVoiceRepliesPerArchetype: number;
     councilSessions: number;
     councilRepliesPerSession: number;
     blueprintSaves: number;
@@ -43,6 +44,7 @@ export interface AccessStatus {
   };
   usage: {
     singleVoiceReplies: number;
+    singleVoiceRepliesByArchetype: Record<string, number>;
     councilSessions: number;
     blueprintSaves: number;
   };

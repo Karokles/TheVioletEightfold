@@ -1,4 +1,4 @@
-# Debugging Runbook - Production Issues
+﻿# Debugging Runbook - Production Issues
 
 **Last Updated:** 2025-01-27  
 **Version:** 1.0
@@ -9,23 +9,23 @@
 
 ```
 1. Is backend responding?
-   ├─ NO → Check Render logs, verify service is running
-   └─ YES → Continue to step 2
+   â”œâ”€ NO â†’ Check Render logs, verify service is running
+   â””â”€ YES â†’ Continue to step 2
 
 2. Is frontend loading?
-   ├─ NO → Check Vercel build logs, verify build succeeded
-   └─ YES → Continue to step 3
+   â”œâ”€ NO â†’ Check Vercel build logs, verify build succeeded
+   â””â”€ YES â†’ Continue to step 3
 
 3. Are API calls failing?
-   ├─ CORS errors → Check ALLOWED_ORIGINS env var
-   ├─ 401 errors → Check auth token, verify user logged in
-   ├─ 500 errors → Check backend logs, verify OPENAI_API_KEY
-   └─ Network errors → Check VITE_API_BASE_URL, verify backend URL
+   â”œâ”€ CORS errors â†’ Check ALLOWED_ORIGINS env var
+   â”œâ”€ 401 errors â†’ Check auth token, verify user logged in
+   â”œâ”€ 500 errors â†’ Check backend logs, verify OPENAI_API_KEY
+   â””â”€ Network errors â†’ Check VITE_API_BASE_URL, verify backend URL
 
 4. Are features working?
-   ├─ Single chat fails → Check backend logs, verify OpenAI API key
-   ├─ Council session fails → Check backend logs, verify request format
-   └─ Integration button does nothing → Expected (stubbed for MVP)
+   â”œâ”€ Single chat fails â†’ Check backend logs, verify OpenAI API key
+   â”œâ”€ Council session fails â†’ Check backend logs, verify request format
+   â””â”€ Integration button does nothing â†’ Expected (stubbed for MVP)
 ```
 
 ---
@@ -42,7 +42,7 @@
 #### Diagnostic Steps
 1. **Check Render Logs:**
    ```
-   Render Dashboard → Your Service → Logs
+   Render Dashboard â†’ Your Service â†’ Logs
    ```
    Look for:
    - "Server running on port XXXX" (success)
@@ -62,7 +62,7 @@
 
 #### Solutions
 - **Missing OPENAI_API_KEY:**
-  - Set in Render → Environment Variables
+  - Set in Render â†’ Environment Variables
   - Redeploy service
 
 - **Build Fails:**
@@ -86,7 +86,7 @@
 #### Diagnostic Steps
 1. **Check Vercel Build Logs:**
    ```
-   Vercel Dashboard → Deployments → [Latest] → Build Logs
+   Vercel Dashboard â†’ Deployments â†’ [Latest] â†’ Build Logs
    ```
    Look for:
    - "VITE_API_BASE_URL is not set" (production check)
@@ -103,7 +103,7 @@
 
 #### Solutions
 - **Missing VITE_API_BASE_URL:**
-  - Set in Vercel → Settings → Environment Variables
+  - Set in Vercel â†’ Settings â†’ Environment Variables
   - Redeploy (rebuild required)
 
 - **Build Errors:**
@@ -123,7 +123,7 @@
 #### Diagnostic Steps
 1. **Check Request Origin:**
    ```
-   Browser DevTools → Network → [Request] → Headers → Request Headers → Origin
+   Browser DevTools â†’ Network â†’ [Request] â†’ Headers â†’ Request Headers â†’ Origin
    ```
    Note the exact origin URL (e.g., `https://your-app.vercel.app`)
 
@@ -170,7 +170,7 @@
 #### Diagnostic Steps
 1. **Check Token Storage:**
    ```
-   Browser DevTools → Application → Local Storage → [Your Domain]
+   Browser DevTools â†’ Application â†’ Local Storage â†’ [Your Domain]
    ```
    Look for:
    - `vc_auth_token` (should exist)
@@ -178,7 +178,7 @@
 
 2. **Check Request Headers:**
    ```
-   Browser DevTools → Network → [Request] → Headers → Request Headers
+   Browser DevTools â†’ Network â†’ [Request] â†’ Headers â†’ Request Headers
    ```
    Verify:
    - `Authorization: Bearer <token>` header exists
@@ -214,7 +214,7 @@
 #### Diagnostic Steps
 1. **Check Backend Logs:**
    ```
-   Render Dashboard → Logs
+   Render Dashboard â†’ Logs
    ```
    Look for:
    - "OpenAI API key not configured"
@@ -261,7 +261,7 @@
 #### Diagnostic Steps
 1. **Check Environment Variable:**
    ```
-   Vercel Dashboard → Settings → Environment Variables
+   Vercel Dashboard â†’ Settings â†’ Environment Variables
    ```
    Verify:
    - `VITE_API_BASE_URL` is set
@@ -270,7 +270,7 @@
 
 2. **Check Build Output:**
    ```
-   Vercel Dashboard → Deployments → [Latest] → Build Logs
+   Vercel Dashboard â†’ Deployments â†’ [Latest] â†’ Build Logs
    ```
    Look for:
    - "VITE_API_BASE_URL is not set" error (should fail build)
@@ -278,7 +278,7 @@
 
 3. **Check Runtime:**
    ```
-   Browser DevTools → Console
+   Browser DevTools â†’ Console
    ```
    Look for:
    - Errors about API base URL
@@ -306,7 +306,7 @@
 #### Diagnostic Steps
 1. **Check localStorage Keys:**
    ```
-   Browser DevTools → Application → Local Storage
+   Browser DevTools â†’ Application â†’ Local Storage
    ```
    Verify keys are user-scoped:
    - `user_${userId}_lore`
@@ -373,7 +373,7 @@ curl https://thevioleteightfold-4224.onrender.com/api/health
 ```bash
 curl -X POST https://thevioleteightfold-4224.onrender.com/api/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"lion","secret":"TuerOhneWiederkehr2025"}'
+  -d '{"username":"lion","secret":"<local-test-secret>"}'
 # Expected: {"userId":"lion","token":"..."}
 ```
 

@@ -60,8 +60,23 @@ create table if not exists public.usage_counters (
       'blueprint_save',
       'cycle_day_6'
     )
+    or feature ~ '^single_voice_reply:(SOVEREIGN|WARRIOR|SAGE|LOVER|CREATOR|CAREGIVER|EXPLORER|ALCHEMIST)$'
   )
 );
+
+alter table public.usage_counters
+  drop constraint if exists usage_counters_feature_check;
+
+alter table public.usage_counters
+  add constraint usage_counters_feature_check check (
+    feature in (
+      'single_voice_reply',
+      'council_session',
+      'blueprint_save',
+      'cycle_day_6'
+    )
+    or feature ~ '^single_voice_reply:(SOVEREIGN|WARRIOR|SAGE|LOVER|CREATOR|CAREGIVER|EXPLORER|ALCHEMIST)$'
+  );
 
 do $$
 begin

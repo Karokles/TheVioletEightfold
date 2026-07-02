@@ -1,0 +1,230 @@
+{
+  "users": {
+    "launch-test": {
+      "questLogEntries": [
+        {
+          "id": "1a2b3c4d-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "title": "Exploring Personal Change",
+          "content": "The user reflects on the importance of self-awareness and the need to let go of unproductive behaviors to engage more fully with others.",
+          "tags": [
+            "self-awareness",
+            "personal growth",
+            "change"
+          ],
+          "relatedArchetypes": [],
+          "sourceSessionId": "session-001"
+        }
+      ],
+      "soulTimelineEvents": [
+        {
+          "id": "7a8b9c0d-e1f2-3g4h-5i6j-k7l8m9n0o1p2",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "label": "Realization of Self-Care Importance",
+          "summary": "The user acknowledges the need to prioritize their own well-being to genuinely care for others.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [
+            "self-care",
+            "awareness"
+          ],
+          "sourceSessionId": "session-001"
+        },
+        {
+          "id": "3a4b5c6d-7e8f-9g0h-1i2j-k3l4m5n6o7p8",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "label": "Understanding the Need for Change",
+          "summary": "The user realizes that to connect with collective consciousness, they must first address their own internal barriers and self-judgments.",
+          "type": "BREAKTHROUGH",
+          "intensity": 10,
+          "tags": [
+            "change",
+            "self-discovery"
+          ],
+          "sourceSessionId": "session-001"
+        }
+      ],
+      "breakthroughs": [
+        {
+          "id": "3a4b5c6d-7e8f-9g0h-1i2j-k3l4m5n6o7p8",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "title": "Understanding the Need for Change",
+          "insight": "The user realizes that to connect with collective consciousness, they must first address their own internal barriers and self-judgments.",
+          "trigger": "Reflection on personal perspective and its impact on relationships.",
+          "action": "Commit to self-care and active engagement with their own well-being.",
+          "tags": [
+            "change",
+            "self-discovery"
+          ],
+          "sourceSessionId": "session-001"
+        }
+      ],
+      "emotionalState": {
+        "schemaVersion": 1,
+        "valence": "MIXED",
+        "activation": "MEDIUM",
+        "clarity": "UNCERTAIN",
+        "primarySignals": [],
+        "supportNeeds": [
+          "ACTION"
+        ],
+        "overloadRisk": false,
+        "confidence": 0.5,
+        "updatedAt": "2023-10-01T12:00:00Z"
+      },
+      "attributeUpdates": [],
+      "skillUpdates": []
+    },
+    "lion": {
+      "questLogEntries": [
+        {
+          "id": "cycle-1782502030814-cycle-day-7-quest",
+          "createdAt": "2026-07-02T11:35:34.664Z",
+          "title": "Tag 7: Erste Muster-Verschiebung",
+          "content": "Zyklus: ich habe lange zeit meine Kraft und mein selbstbild ausgelagert an andere. Signal: schmerz aber nicht mir selbst gegenüber sondern anderen Neue Deutung: Ich glaube schon dass leute sich durchaus überrrumpelt davon gefühlt haben aber mittlerweile glaube ich auch das dieser ausdruck und die änderung über den freien willen hinaus nicht umbedingt von mir ausging und ich auch unter diesem ausdruck, als empänger wie ewine antenne gelitten habe Handlung: naja könte imgeist und handeln tatsächlich einen bewusst stärkeen fokus drauf legen meine handlungen generell nicht von anderen abhängig zu machen bzw eher angebote also Kunst als angebot schalten und wer auf dieses eingehen möchte hat sich er selber dazu entschieden also freien willen umgehen aberholy grailquestion im sinne des, derzeit bin ich bei universum angelangt Anti-Ego: meinen schmerz teilweise, meine angst, rechtfertigeoder versuche mein verhalten zu rechtfertigen und das oft mit anderen in der schusslaufbahn",
+          "tags": [
+            "cycle",
+            "day-7",
+            "formation"
+          ],
+          "sourceSessionId": "cycle-1782502030814"
+        },
+        {
+          "id": "1",
+          "createdAt": "2026-06-27T14:34:01.322Z",
+          "title": "Emotionale Distanzierung",
+          "content": "Der Benutzer sucht nach Wegen, sich von emotionalen Einflüssen, insbesondere von seinem Vater, zu distanzieren.",
+          "tags": [],
+          "relatedArchetypes": [],
+          "sourceSessionId": "session_001"
+        },
+        {
+          "id": "1c1d2f3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+          "createdAt": "2023-10-02T12:00:00Z",
+          "title": "Integration von Erkenntnissen über freien Willen",
+          "content": "Der Nutzer reflektiert über den Umgang mit dem freien Willen anderer und die Balance zwischen persönlichem Wunsch und Respekt für die Autonomie von Tuana.",
+          "tags": [],
+          "relatedArchetypes": [],
+          "sourceSessionId": "session-12345"
+        },
+        {
+          "id": "1a2b3c4d-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "title": "Reflexionsraum schaffen",
+          "content": "Der Benutzer möchte einen Raum für Reflexion schaffen, um Klarheit über die Herausforderungen der Welt zu gewinnen und Verantwortung zu übernehmen.",
+          "tags": [],
+          "relatedArchetypes": [],
+          "sourceSessionId": "session-12345"
+        }
+      ],
+      "soulTimelineEvents": [
+        {
+          "id": "cycle-1782502030814-cycle-day-7-timeline",
+          "createdAt": "2026-07-02T11:35:34.664Z",
+          "label": "Tag 7: Erste Muster-Verschiebung",
+          "summary": "Suche nach Kontakt mit dem Muster, nicht nach Perfektion.",
+          "intensity": 5,
+          "type": "CYCLE_MILESTONE",
+          "tags": [
+            "cycle",
+            "day-7"
+          ],
+          "sourceSessionId": "cycle-1782502030814"
+        },
+        {
+          "id": "1",
+          "createdAt": "2026-06-27T14:34:01.322Z",
+          "label": "Emotionale Distanzierung",
+          "summary": "Der Benutzer reflektiert über die Notwendigkeit, sich von negativen emotionalen Einflüssen zu distanzieren.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [],
+          "sourceSessionId": "session_001"
+        },
+        {
+          "id": "2c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f",
+          "createdAt": "2023-10-02T12:00:00Z",
+          "label": "Integration von Erkenntnissen über freien Willen",
+          "summary": "Der Nutzer erkennt die Notwendigkeit, den freien Willen von Tuana zu respektieren, während er gleichzeitig seine eigenen Bedürfnisse verfolgt.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [],
+          "sourceSessionId": "session-12345"
+        },
+        {
+          "id": "6p7q8r9s-0t1u-2v3w-4x5y-6z7a8b9c0d1e",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "label": "Reflexionsraum schaffen",
+          "summary": "Der Benutzer hat den Wunsch geäußert, einen Raum für Reflexion zu schaffen, um Klarheit über die Herausforderungen der Welt zu gewinnen.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [],
+          "sourceSessionId": "session-12345"
+        }
+      ],
+      "breakthroughs": [],
+      "emotionalState": {
+        "schemaVersion": 1,
+        "valence": "MIXED",
+        "activation": "MEDIUM",
+        "clarity": "UNCERTAIN",
+        "primarySignals": [],
+        "supportNeeds": [],
+        "overloadRisk": false,
+        "confidence": 0.5,
+        "updatedAt": "2023-10-02T12:00:00Z"
+      },
+      "attributeUpdates": [],
+      "skillUpdates": []
+    },
+    "tuana": {
+      "questLogEntries": [
+        {
+          "id": "1a2b3c4d-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+          "createdAt": "2026-06-27T14:38:30.717Z",
+          "title": "Reflexion über die Beziehung zum Vater",
+          "content": "Der Benutzer reflektiert über komplexe Emotionen und die Dynamik in der Beziehung zu seinem Vater, insbesondere in Bezug auf Freude und Einschränkungen.",
+          "tags": [],
+          "relatedArchetypes": [],
+          "sourceSessionId": "session-2026-06-27"
+        }
+      ],
+      "soulTimelineEvents": [
+        {
+          "id": "7a8b9c0d-1e2f-3g4h-5i6j-k7l8m9n0o1p2",
+          "createdAt": "2026-06-27T14:38:30.717Z",
+          "label": "Reflexion über die Beziehung zum Vater",
+          "summary": "Der Benutzer reflektiert über komplexe Emotionen und die Dynamik in der Beziehung zu seinem Vater, insbesondere in Bezug auf Freude und Einschränkungen.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [],
+          "sourceSessionId": "session-2026-06-27"
+        },
+        {
+          "id": "7a8b9c0d-e1f2-3g4h-5i6j-k7l8m9n0o1p2",
+          "createdAt": "2023-10-01T12:00:00Z",
+          "label": "Reflexion über die Beziehung zu meinem Vater",
+          "summary": "Der Benutzer erkennt die Komplexität seiner Gefühle in Bezug auf die Beziehung zu seinem Vater und die damit verbundenen Einschränkungen.",
+          "intensity": 5,
+          "type": "EVENT",
+          "tags": [],
+          "sourceSessionId": "session-123456"
+        }
+      ],
+      "breakthroughs": [],
+      "emotionalState": {
+        "schemaVersion": 1,
+        "valence": "MIXED",
+        "activation": "MEDIUM",
+        "clarity": "UNCERTAIN",
+        "primarySignals": [],
+        "supportNeeds": [],
+        "overloadRisk": false,
+        "confidence": 0.5,
+        "updatedAt": "2026-06-27T14:38:30.717Z"
+      },
+      "attributeUpdates": [],
+      "skillUpdates": []
+    }
+  }
+}

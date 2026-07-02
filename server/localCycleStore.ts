@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { basename, dirname, join } from 'node:path';
 
 export type LocalCyclePacingMode = 'STABILIZATION' | 'EXPLORATION' | 'INTEGRATION';
 
@@ -46,9 +47,19 @@ type StoreFile = {
   users: Record<string, Partial<LocalCycleState>>;
 };
 
-const STORE_PATH = process.env.LOCAL_CYCLE_STORE_PATH || join(process.cwd(), 'data', 'cycle-state.json');
+const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+const serverDirectory = basename(moduleDirectory) === 'dist' ? dirname(moduleDirectory) : moduleDirectory;
+const STORE_PATH = process.env.LOCAL_CYCLE_STORE_PATH || join(serverDirectory, 'data', 'cycle-state.json');
+const BACKUP_PATH = `${STORE_PATH}.backup`;
 const CYCLE_SCHEMA_VERSION = 1;
 const CYCLE_LENGTH_DAYS = 63;
+let storeQueue: Promise<void> = Promise.resolve();
+
+const withStoreLock = <T>(operation: () => Promise<T>): Promise<T> => {
+  const result = storeQueue.catch(() => undefined).then(operation);
+  storeQueue = result.then(() => undefined, () => undefined);
+  return result;
+};
 
 const emptyCycleState = (): LocalCycleState => ({
   currentCycle: null,
@@ -173,16 +184,32 @@ const normalizeState = (state: Partial<LocalCycleState> = {}): LocalCycleState =
   };
 };
 
+const parseStoreFile = async (path: string): Promise<StoreFile> => {
+  const raw = await readFile(path, 'utf8');
+  const parsed = JSON.parse(raw) as StoreFile;
+  return {
+    users: parsed && typeof parsed.users === 'object' && parsed.users ? parsed.users : {},
+  };
+};
+
 const readStore = async (): Promise<StoreFile> => {
   try {
-    const raw = await readFile(STORE_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as StoreFile;
-    return {
-      users: parsed && typeof parsed.users === 'object' && parsed.users ? parsed.users : {},
-    };
+    return await parseStoreFile(STORE_PATH);
   } catch (error: any) {
     if (error?.code !== 'ENOENT') {
-      console.warn('[LOCAL_CYCLE_STORE] Failed to read cycle store. Starting from empty state.', error.message);
+      console.warn('[LOCAL_CYCLE_STORE] Failed to read primary cycle store. Trying backup.', error.message);
+    }
+  }
+
+  try {
+    const backup = await parseStoreFile(BACKUP_PATH);
+    await mkdir(dirname(STORE_PATH), { recursive: true });
+    await copyFile(BACKUP_PATH, STORE_PATH);
+    console.warn('[LOCAL_CYCLE_STORE] Recovered cycle store from backup.');
+    return backup;
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('[LOCAL_CYCLE_STORE] Failed to read cycle backup. Starting from empty state.', error.message);
     }
     return { users: {} };
   }
@@ -190,38 +217,71 @@ const readStore = async (): Promise<StoreFile> => {
 
 const writeStore = async (store: StoreFile): Promise<void> => {
   await mkdir(dirname(STORE_PATH), { recursive: true });
-  await writeFile(STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
+  const temporaryPath = `${STORE_PATH}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
+
+  try {
+    await copyFile(STORE_PATH, BACKUP_PATH);
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  try {
+    await rename(temporaryPath, STORE_PATH);
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST' && error?.code !== 'EPERM') {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
+    await copyFile(temporaryPath, STORE_PATH);
+    await unlink(temporaryPath).catch(() => undefined);
+  }
 };
 
 export const loadLocalCycleState = async (userId: string): Promise<LocalCycleState> => {
-  const store = await readStore();
-  return normalizeState(store.users[userId] || emptyCycleState());
+  return withStoreLock(async () => {
+    const store = await readStore();
+    return normalizeState(store.users[userId] || emptyCycleState());
+  });
 };
 
 export const saveLocalCurrentCycle = async (
   userId: string,
   cycle: LocalIntegrationCycle,
 ): Promise<LocalCycleState> => {
-  const normalized = normalizeCycle({
-    ...cycle,
-    updatedAt: new Date().toISOString(),
-  });
+  const normalized = normalizeCycle(cycle);
 
   if (!normalized || normalized.status === 'ARCHIVED') {
     throw new Error('A valid active or completed cycle is required.');
   }
 
-  const store = await readStore();
-  const existing = normalizeState(store.users[userId] || emptyCycleState());
-  const next = normalizeState({
-    ...existing,
-    currentCycle: normalized,
-    updatedAt: new Date().toISOString(),
-  });
+  return withStoreLock(async () => {
+    const store = await readStore();
+    const existing = normalizeState(store.users[userId] || emptyCycleState());
+    const existingTimestamp = existing.currentCycle
+      ? new Date(existing.currentCycle.updatedAt || existing.currentCycle.createdAt).getTime() || 0
+      : 0;
+    const requestedTimestamp = new Date(normalized.updatedAt || normalized.createdAt).getTime() || 0;
 
-  store.users[userId] = next;
-  await writeStore(store);
-  return next;
+    // Ignore delayed writes from older requests. This is especially important
+    // when autosaves from rapid edits arrive out of order.
+    if (existing.currentCycle && existingTimestamp > requestedTimestamp) {
+      return existing;
+    }
+
+    const next = normalizeState({
+      ...existing,
+      currentCycle: normalized,
+      updatedAt: new Date().toISOString(),
+    });
+
+    store.users[userId] = next;
+    await writeStore(store);
+    return next;
+  });
 };
 
 export const archiveLocalCycle = async (
@@ -233,23 +293,26 @@ export const archiveLocalCycle = async (
     throw new Error('A valid cycle is required.');
   }
 
-  const archivedAt = new Date().toISOString();
-  const archivedCycle: LocalIntegrationCycle = {
-    ...normalized,
-    status: 'ARCHIVED',
-    updatedAt: archivedAt,
-    completedAt: normalized.completedAt || archivedAt,
-  };
+  return withStoreLock(async () => {
+    const archivedAt = new Date().toISOString();
+    const archivedCycle: LocalIntegrationCycle = {
+      ...normalized,
+      status: 'ARCHIVED',
+      updatedAt: archivedAt,
+      completedAt: normalized.completedAt || archivedAt,
+    };
 
-  const store = await readStore();
-  const existing = normalizeState(store.users[userId] || emptyCycleState());
-  const next = normalizeState({
-    currentCycle: null,
-    archivedCycles: [archivedCycle, ...existing.archivedCycles],
-    updatedAt: archivedAt,
+    const store = await readStore();
+    const existing = normalizeState(store.users[userId] || emptyCycleState());
+    const next = normalizeState({
+      // A delayed archive request must not clear a newer, different cycle.
+      currentCycle: existing.currentCycle?.id === normalized.id ? null : existing.currentCycle,
+      archivedCycles: [archivedCycle, ...existing.archivedCycles],
+      updatedAt: archivedAt,
+    });
+
+    store.users[userId] = next;
+    await writeStore(store);
+    return next;
   });
-
-  store.users[userId] = next;
-  await writeStore(store);
-  return next;
 };

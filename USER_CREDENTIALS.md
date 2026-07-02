@@ -1,50 +1,40 @@
-# User Credentials
+# Local Test Credentials
 
-This file contains the test user credentials for The Violet Eightfold app.
+This file documents local fallback users for development only. Production accounts are created through Supabase Auth and the admin panel.
 
-## Test Users
+## Local Users
 
-| Username | Secret (Password) |
-|----------|------------------|
-| `lion` | `TuerOhneWiederkehr2025` |
-| `selma` | `moonlight-whisper` |
-| `alicia` | `form-follows-function` |
-| `marie` | `haute-couture` |
-| `friend5` | `friend5-test-secret` |
-| `sophia` | `know-thyself` |
-| `isabell` | `ceylon` |
-| `dorothee` | `schattengarten` |
-| `serigne` | `cher-amadu` |
-| `benjamin` | `tragwerk` |
-| `anna` | `amethyst` |
+| Username | Secret source | Access |
+|----------|---------------|--------|
+| `lion` | `LOCAL_SECRET_LION` or `dev-lion-secret` | Founder / protected local |
+| `selma` | `LOCAL_SECRET_SELMA` or `dev-selma-secret` | Test |
+| `alicia` | `LOCAL_SECRET_ALICIA` or `dev-alicia-secret` | Test |
+| `marie` | `LOCAL_SECRET_MARIE` or `dev-marie-secret` | Test |
+| `friend5` | `LOCAL_SECRET_FRIEND5` or `dev-friend5-secret` | Test |
+| `sophia` | `LOCAL_SECRET_SOPHIA` or `dev-sophia-secret` | Test |
+| `isabell` | `LOCAL_SECRET_ISABELL` or `dev-isabell-secret` | Test |
+| `dorothee` | `LOCAL_SECRET_DOROTHEE` or `dev-dorothee-secret` | Test |
+| `serigne` | `LOCAL_SECRET_SERIGNE` or `dev-serigne-secret` | Test |
+| `benjamin` | `LOCAL_SECRET_BENJAMIN` or `dev-benjamin-secret` | Test |
+| `anna` | `LOCAL_SECRET_ANNA` or `dev-anna-secret` | Test |
+| `tuana` | `LOCAL_SECRET_TUANA` or `dev-tuana-secret` | Founder / full local access |
 
 ## Usage
 
-When logging into the app, use:
-- **Username**: One of the usernames from the table above
-- **Secret**: The corresponding secret/password from the table
+Local fallback login is intended for development only and requires `LOCAL_AUTH_ENABLED=true`.
 
-## Example
-
-To log in as selma:
-- Username: `selma`
-- Secret: `moonlight-whisper`
+Example:
+- Username: `lion`
+- Secret: `dev-lion-secret`
 
 ## Security Note
 
-⚠️ **For Production**: These are test credentials. In production, you should:
-1. Store user credentials in a secure database
-2. Use proper password hashing (already implemented with SHA-256)
-3. Never commit real user passwords to the repository
-4. Consider implementing proper authentication with JWT tokens or OAuth
+For production:
+1. Keep `LOCAL_AUTH_ENABLED=false`.
+2. Create accounts through Supabase Auth and the admin panel.
+3. Never commit real user passwords or service keys.
+4. Use environment variables for any local-only overrides.
 
 ## Location in Code
 
-These credentials are defined in `server/server.ts` (lines 156-214).
-
-**Notes**:
-- The password for `sophia` is `know-thyself` - a reference to the Socratic maxim "γνῶθι σεαυτόν" (know thyself), fitting for a wisdom-seeking user named after the Greek word for wisdom.
-- The password for `isabell` is `ceylon` - a subtle reference to the former name of Sri Lanka.
-- The password for `benjamin` is `tragwerk` - a reference to structural engineering (Tragwerk = load-bearing structure in German), fitting for a civil engineer.
-- The password for `anna` is `amethyst` - a reference to the purple gemstone, fitting for The Violet Eightfold app's purple theme.
-
+The local fallback user list is defined in `server/server.ts`.

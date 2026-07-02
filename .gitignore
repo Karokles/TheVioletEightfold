@@ -30,6 +30,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Codex/local working artifacts
+.codex-temp/
+
+# Local/private launch artifacts
+LazarusWebsite/
+Lionceau_Nicolai_Khadim_Osahon_CV_EN.*
+*_AUDIT.md
+*_PLAN.md
+*_OVERVIEW.md
+LAZARUS_63_DAY_INTEGRATION_CYCLE_RESEARCH.md
+site/postcss.config.js
+
 # Local backend fallback persistence
 server/data/
 
