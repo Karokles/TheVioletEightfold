@@ -434,6 +434,12 @@ h3 {
   transform: translateY(-1px);
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
 .button-primary {
   color: #180f2c;
   border-color: rgba(255, 255, 255, 0.16);
@@ -1443,6 +1449,27 @@ h3 {
 .access-form .button {
   justify-self: start;
   margin-top: 4px;
+}
+
+.access-status {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.access-status-success {
+  border: 1px solid rgba(154, 223, 169, 0.26);
+  color: rgba(223, 255, 231, 0.92);
+  background: rgba(94, 184, 119, 0.12);
+}
+
+.access-status-error {
+  border: 1px solid rgba(244, 149, 149, 0.28);
+  color: rgba(255, 224, 224, 0.94);
+  background: rgba(202, 78, 78, 0.13);
 }
 
 @keyframes chamber-float {

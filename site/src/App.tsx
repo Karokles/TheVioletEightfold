@@ -11,6 +11,7 @@ const AMBIENT_AUDIO_SRC = '/audio/god-on-the-code-web.mp3';
 const AMBIENT_AUDIO_VOLUME = 0.22;
 const STAR_COUNT = 180;
 const ACCESS_REQUEST_EMAIL = 'lazarus8engine@gmail.com';
+const ACCESS_REQUEST_ENDPOINT = `https://formsubmit.co/ajax/${ACCESS_REQUEST_EMAIL}`;
 
 let ambientAudioElement: HTMLAudioElement | null = null;
 
@@ -272,6 +273,9 @@ export default function App() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [accessModalOpen, setAccessModalOpen] = useState(false);
+  const [accessRequestState, setAccessRequestState] = useState<'idle' | 'submitting' | 'sent' | 'error'>(
+    'idle'
+  );
 
   useEffect(() => {
     let frame = 0;
@@ -429,14 +433,14 @@ export default function App() {
     }
   };
 
-  const openAccessModal = () => setAccessModalOpen(true);
+  const openAccessModal = () => {
+    setAccessRequestState('idle');
+    setAccessModalOpen(true);
+  };
 
   const closeAccessModal = () => setAccessModalOpen(false);
 
-  const handleAccessRequestSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
+  const getAccessRequestMailto = (formData: FormData) => {
     const details = [
       ['Name', formData.get('name')],
       ['E-Mail', formData.get('email')],
@@ -453,8 +457,38 @@ export default function App() {
       `Hallo Lazarus Engine,\n\nich moechte Zugang zur App anfragen.\n\n${details}\n\nDanke.`
     );
 
-    window.location.href = `mailto:${ACCESS_REQUEST_EMAIL}?subject=${subject}&body=${body}`;
-    closeAccessModal();
+    return `mailto:${ACCESS_REQUEST_EMAIL}?subject=${subject}&body=${body}`;
+  };
+
+  const handleAccessRequestSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    formData.set('_subject', 'Lazarus Engine App-Zugangsanfrage');
+    formData.set('_template', 'table');
+    formData.set('_captcha', 'false');
+
+    setAccessRequestState('submitting');
+
+    try {
+      const response = await fetch(ACCESS_REQUEST_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Access request failed');
+      }
+
+      form.reset();
+      setAccessRequestState('sent');
+    } catch {
+      setAccessRequestState('error');
+    }
   };
 
   return (
@@ -718,9 +752,37 @@ export default function App() {
                 <input name="privacy" type="checkbox" required />
                 <span>I agree that my details may be used to answer this access request.</span>
               </label>
-              <button className="button button-primary" type="submit">
-                Send Request
+              {accessRequestState === 'sent' && (
+                <p className="access-status access-status-success" role="status">
+                  Request sent. Please check your inbox for the Lazarus reply.
+                </p>
+              )}
+              {accessRequestState === 'error' && (
+                <p className="access-status access-status-error" role="alert">
+                  Sending failed. Please use the fallback mail link below.
+                </p>
+              )}
+              <button
+                className="button button-primary"
+                type="submit"
+                disabled={accessRequestState === 'submitting'}
+              >
+                {accessRequestState === 'submitting' ? 'Sending...' : 'Send Request'}
               </button>
+              {accessRequestState === 'error' && (
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => {
+                    const formData = new FormData(
+                      document.querySelector('.access-form') as HTMLFormElement
+                    );
+                    window.location.href = getAccessRequestMailto(formData);
+                  }}
+                >
+                  Open Email Draft
+                </button>
+              )}
             </form>
           </section>
         </div>
