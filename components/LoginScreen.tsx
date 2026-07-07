@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { login as localLogin } from '../services/aiService';
-import { consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail } from '../services/supabaseAuth';
+import { changePasswordWithCurrentPassword, consumeSupabaseAuthRedirect, hasSupabaseAuthRedirectParams, isSupabaseAuthAvailable, resendSignupConfirmation, signInWithEmail } from '../services/supabaseAuth';
 import { setCurrentUser } from '../services/userService';
 import { getUIText } from '../config/loader';
 import { Language } from '../types';
-import { LogIn, Sparkles } from 'lucide-react';
+import { KeyRound, LogIn, Sparkles } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -15,9 +15,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
   const authMode = import.meta.env.VITE_AUTH_MODE || 'local';
   const supabaseEnabled = authMode === 'supabase' && isSupabaseAuthAvailable;
   const supabaseMisconfigured = authMode === 'supabase' && !isSupabaseAuthAvailable;
-  const [formMode, setFormMode] = useState<'signIn' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
+  const [formMode, setFormMode] = useState<'signIn' | 'changePassword' | 'local'>(supabaseEnabled ? 'signIn' : 'local');
   const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -40,6 +41,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
   const invalidApiKeyMessage = language === 'DE'
     ? 'Der Live-Login ist gerade falsch konfiguriert. Der Supabase Publishable Key passt nicht zum aktiven Projekt.'
     : 'Live login is misconfigured right now. The Supabase publishable key does not match the active project.';
+  const passwordChangedMessage = language === 'DE'
+    ? 'Passwort geaendert. Du wirst angemeldet...'
+    : 'Password changed. Signing you in...';
+  const passwordTooShortMessage = language === 'DE'
+    ? 'Das neue Passwort muss mindestens 6 Zeichen lang sein.'
+    : 'The new password must be at least 6 characters.';
 
   const normalizeAuthErrorMessage = (rawMessage: string) => {
     if (/invalid api key/i.test(rawMessage)) {
@@ -95,6 +102,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
         const normalizedEmail = normalizeEmailInput(email);
         const authResult = await signInWithEmail(normalizedEmail, secret);
         setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || normalizedEmail);
+      } else if (formMode === 'changePassword') {
+        const normalizedEmail = normalizeEmailInput(email);
+        if (newPassword.length < 6) {
+          throw new Error(passwordTooShortMessage);
+        }
+        const authResult = await changePasswordWithCurrentPassword(normalizedEmail, secret, newPassword);
+        setMessage(passwordChangedMessage);
+        setCurrentUser(authResult.userId, authResult.token, authResult.displayName || authResult.email || normalizedEmail);
       } else {
         const authResult = await localLogin(username, secret);
         setCurrentUser(authResult.userId, authResult.token, authResult.displayName || username);
@@ -102,7 +117,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
       onLoginSuccess();
     } catch (err: any) {
       const message = normalizeAuthErrorMessage(err.message || ui.LOGIN_ERROR);
-      if (formMode === 'signIn' && message.toLowerCase().includes('email not confirmed')) {
+      if ((formMode === 'signIn' || formMode === 'changePassword') && message.toLowerCase().includes('email not confirmed')) {
         setPendingConfirmationEmail(normalizeEmailInput(email));
         setError(notConfirmedMessage);
       } else {
@@ -136,6 +151,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
     }
   };
 
+  const switchSupabaseMode = (nextMode: 'signIn' | 'changePassword') => {
+    setFormMode(nextMode);
+    setError('');
+    setMessage('');
+    setSecret('');
+    setNewPassword('');
+  };
+
   return (
     <div className="min-h-screen bg-violet-950 text-violet-100 font-sans flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -166,6 +189,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
               {language === 'DE'
                 ? 'Konten werden vorerst nur ueber das Admin-Panel erstellt.'
                 : 'Accounts are currently created by an administrator only.'}
+            </div>
+          )}
+
+          {supabaseEnabled && (
+            <div className="mb-6 grid grid-cols-2 gap-2 rounded-lg border border-purple-500/20 bg-violet-950/45 p-1">
+              <button
+                type="button"
+                onClick={() => switchSupabaseMode('signIn')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition-all ${
+                  formMode === 'signIn'
+                    ? 'bg-purple-500 text-white shadow-lg shadow-purple-900/30'
+                    : 'text-purple-200/70 hover:bg-purple-500/10 hover:text-purple-100'
+                }`}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => switchSupabaseMode('changePassword')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition-all ${
+                  formMode === 'changePassword'
+                    ? 'bg-purple-500 text-white shadow-lg shadow-purple-900/30'
+                    : 'text-purple-200/70 hover:bg-purple-500/10 hover:text-purple-100'
+                }`}
+              >
+                {language === 'DE' ? 'Passwort' : 'Password'}
+              </button>
             </div>
           )}
 
@@ -238,7 +288,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
 
             <div>
               <label className="block text-sm font-medium text-purple-300 mb-2">
-                {formMode === 'local' ? ui.LOGIN_SECRET : 'Password'}
+                {formMode === 'local'
+                  ? ui.LOGIN_SECRET
+                  : formMode === 'changePassword'
+                    ? (language === 'DE' ? 'Aktuelles Passwort' : 'Current password')
+                    : 'Password'}
               </label>
               <input
                 type="password"
@@ -251,9 +305,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
               />
             </div>
 
+            {formMode === 'changePassword' && (
+              <div>
+                <label className="block text-sm font-medium text-purple-300 mb-2">
+                  {language === 'DE' ? 'Neues Passwort' : 'New password'}
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-violet-950/50 border border-purple-500/20 rounded-lg text-violet-100 placeholder-purple-500/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+                  placeholder={language === 'DE' ? 'Neues Passwort' : 'New password'}
+                  required
+                  minLength={6}
+                  disabled={loading}
+                />
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={supabaseMisconfigured || loading || !secret || (formMode === 'local' ? !username : !email)}
+              disabled={supabaseMisconfigured || loading || !secret || (formMode === 'local' ? !username : !email) || (formMode === 'changePassword' && newPassword.length < 6)}
               className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold uppercase tracking-widest rounded-lg shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               {loading ? (
@@ -263,8 +335,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, langua
                 </>
               ) : (
                 <>
-                  <LogIn size={20} />
-                  <span>{ui.LOGIN_BUTTON}</span>
+                  {formMode === 'changePassword' ? <KeyRound size={20} /> : <LogIn size={20} />}
+                  <span>
+                    {formMode === 'changePassword'
+                      ? (language === 'DE' ? 'Passwort aendern' : 'Change Password')
+                      : ui.LOGIN_BUTTON}
+                  </span>
                 </>
               )}
             </button>

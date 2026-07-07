@@ -266,6 +266,42 @@ export const signInWithEmail = async (email: string, password: string): Promise<
   return toAuthResult(data.session);
 };
 
+export const changePasswordWithCurrentPassword = async (
+  email: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<SupabaseAuthResult> => {
+  const client = requireClient();
+  const normalizedEmail = normalizeEmail(email) || email.trim();
+  const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: currentPassword,
+  });
+
+  if (signInError) {
+    throw new Error(signInError.message);
+  }
+
+  if (!signInData.session) {
+    throw new Error('No active Supabase session returned.');
+  }
+
+  const { error } = await client.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const { data: refreshedSession, error: sessionError } = await client.auth.getSession();
+  if (sessionError) {
+    throw new Error(sessionError.message);
+  }
+
+  return toAuthResult(refreshedSession.session || signInData.session);
+};
+
 export const signUpWithEmail = async (
   email: string,
   password: string,
