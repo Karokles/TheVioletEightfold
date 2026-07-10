@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Crown, Database, KeyRound, Mail, RefreshCw, Save, Search, Shield, Trash2, UserPlus, UserRound } from 'lucide-react';
+import { Activity, CheckCircle2, Crown, Database, KeyRound, Mail, MessageCircle, RefreshCw, Save, Search, Shield, Trash2, UserPlus, UserRound } from 'lucide-react';
 import { AdminAccount, AdminEntitlement, createAdminAccount, deleteAdminAccount, getAdminAccounts, updateAdminAccount } from '../services/adminService';
 import { Language } from '../types';
 
@@ -24,6 +24,13 @@ const copy = {
     communication: 'Communication',
     council: 'Council',
     blueprint: 'Blueprint',
+    usage: 'Usage',
+    total: 'Total',
+    week: 'Week',
+    chat: 'Chat',
+    messages: 'Messages',
+    userInputs: 'User inputs',
+    lastInteraction: 'Last activity',
     offline: 'Offline',
     updated: 'Updated',
     lastSignIn: 'Last sign-in',
@@ -55,6 +62,13 @@ const copy = {
     communication: 'Kommunikation',
     council: 'Council',
     blueprint: 'Blueprint',
+    usage: 'Nutzung',
+    total: 'Gesamt',
+    week: 'Woche',
+    chat: 'Chat',
+    messages: 'Messages',
+    userInputs: 'User-Inputs',
+    lastInteraction: 'Letzte Aktivitaet',
     offline: 'Offline',
     updated: 'Aktualisiert',
     lastSignIn: 'Letzter Login',
@@ -84,6 +98,37 @@ const formatDate = (value?: string | null): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString();
+};
+
+const formatDateTime = (value?: string | null): string => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString([], {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatNumber = (value?: number | null): string => {
+  return new Intl.NumberFormat().format(value || 0);
+};
+
+const getUsage = (account: AdminAccount) => account.usage || {
+  totalInteractions: 0,
+  weeklyInteractions: 0,
+  directChatReplies: 0,
+  councilSessions: 0,
+  blueprintSaves: 0,
+  cycleUnlocks: 0,
+  persistedDirectSessions: 0,
+  persistedCouncilSessions: 0,
+  persistedMessages: 0,
+  persistedUserMessages: 0,
+  lastInteractionAt: null,
 };
 
 export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
@@ -219,6 +264,22 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
         account.entitlement,
       ].some(value => String(value || '').toLowerCase().includes(normalizedSearch)))
     : accounts;
+  const usageTotals = visibleAccounts.reduce((totals, account) => {
+    const usage = getUsage(account);
+    return {
+      totalInteractions: totals.totalInteractions + usage.totalInteractions,
+      weeklyInteractions: totals.weeklyInteractions + usage.weeklyInteractions,
+      directChatReplies: totals.directChatReplies + usage.directChatReplies,
+      councilSessions: totals.councilSessions + usage.councilSessions,
+      persistedUserMessages: totals.persistedUserMessages + usage.persistedUserMessages,
+    };
+  }, {
+    totalInteractions: 0,
+    weeklyInteractions: 0,
+    directChatReplies: 0,
+    councilSessions: 0,
+    persistedUserMessages: 0,
+  });
 
   return (
     <div className="relative flex-1 overflow-y-auto bg-[#05020a] px-4 py-6 md:px-8">
@@ -256,6 +317,24 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-purple-300/55">
             {visibleAccounts.length} / {accounts.length}
           </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-5">
+          {[
+            [t.total, usageTotals.totalInteractions],
+            [t.week, usageTotals.weeklyInteractions],
+            [t.chat, usageTotals.directChatReplies],
+            [t.council, usageTotals.councilSessions],
+            [t.userInputs, usageTotals.persistedUserMessages],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-lg border border-purple-500/15 bg-[#0d0615]/86 p-4">
+              <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-300/60">
+                <Activity size={13} />
+                {label}
+              </div>
+              <div className="text-2xl font-bold tracking-[0.04em] text-white">{formatNumber(Number(value))}</div>
+            </div>
+          ))}
         </div>
 
         {databaseStatus === 'disabled' && (
@@ -366,12 +445,13 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
         </form>
 
         <section className="overflow-x-auto rounded-lg border border-purple-500/15 bg-[#0d0615]/86">
-          <table className="min-w-[1360px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1620px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-purple-500/15 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-300">
                 <th className="px-4 py-3">{t.account}</th>
                 <th className="px-4 py-3">{t.auth}</th>
                 <th className="px-4 py-3">{t.status}</th>
+                <th className="px-4 py-3">{t.usage}</th>
                 <th className="px-4 py-3">Beta</th>
                 <th className="px-4 py-3">{t.communication}</th>
                 <th className="px-4 py-3">{t.council}</th>
@@ -385,7 +465,7 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
             <tbody>
               {loading && accounts.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-purple-200/70">
+                  <td colSpan={12} className="px-4 py-10 text-center text-sm text-purple-200/70">
                     <RefreshCw size={18} className="mx-auto mb-3 animate-spin text-purple-300" />
                     {t.loading}
                   </td>
@@ -394,13 +474,15 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
 
               {!loading && visibleAccounts.length === 0 && !error && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-purple-200/60">
+                  <td colSpan={12} className="px-4 py-10 text-center text-sm text-purple-200/60">
                     {t.empty}
                   </td>
                 </tr>
               )}
 
-              {visibleAccounts.map(account => (
+              {visibleAccounts.map(account => {
+                const usage = getUsage(account);
+                return (
                 <tr key={account.userId} className="border-b border-purple-500/10 text-purple-100/80 last:border-b-0">
                   <td className="px-4 py-3">
                     <div className="font-bold text-white">{account.displayName}</div>
@@ -430,6 +512,32 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                     {account.entitlement === 'founder' && (
                       <Crown size={14} className="ml-2 inline text-amber-200" />
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="grid w-64 grid-cols-2 gap-2">
+                      <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5">
+                        <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-purple-300/45">{t.total}</div>
+                        <div className="font-bold text-white">{formatNumber(usage.totalInteractions)}</div>
+                      </div>
+                      <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5">
+                        <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-purple-300/45">{t.week}</div>
+                        <div className="font-bold text-white">{formatNumber(usage.weeklyInteractions)}</div>
+                      </div>
+                      <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5">
+                        <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.12em] text-purple-300/45">
+                          <MessageCircle size={10} />
+                          {t.chat}
+                        </div>
+                        <div className="font-bold text-white">{formatNumber(usage.directChatReplies)}</div>
+                      </div>
+                      <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5">
+                        <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-purple-300/45">{t.council}</div>
+                        <div className="font-bold text-white">{formatNumber(usage.councilSessions)}</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 text-[10px] text-purple-300/45">
+                      {t.userInputs}: {formatNumber(usage.persistedUserMessages)} · {t.messages}: {formatNumber(usage.persistedMessages)} · {t.lastInteraction}: {formatDateTime(usage.lastInteractionAt)}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <input
@@ -483,8 +591,8 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                       {account.offlineOnly ? 'Local' : 'DB'}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-xs text-purple-300/50">{formatDate(account.lastSignInAt)}</td>
-                  <td className="px-4 py-3 text-xs text-purple-300/50">{formatDate(account.updatedAt || account.createdAt)}</td>
+                  <td className="px-4 py-3 text-xs text-purple-300/50">{formatDateTime(account.lastSignInAt)}</td>
+                  <td className="px-4 py-3 text-xs text-purple-300/50">{formatDateTime(account.updatedAt || account.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <button
@@ -506,7 +614,8 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </section>

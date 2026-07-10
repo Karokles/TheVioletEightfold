@@ -86,6 +86,19 @@ export interface AdminAccount {
     weeklyCouncilSessions: number | null;
     weeklyMeaningAnalyses: number | null;
   };
+  usage?: {
+    totalInteractions: number;
+    weeklyInteractions: number;
+    directChatReplies: number;
+    councilSessions: number;
+    blueprintSaves: number;
+    cycleUnlocks: number;
+    persistedDirectSessions: number;
+    persistedCouncilSessions: number;
+    persistedMessages: number;
+    persistedUserMessages: number;
+    lastInteractionAt?: string | null;
+  };
 }
 
 export interface AdminAccountsResponse {

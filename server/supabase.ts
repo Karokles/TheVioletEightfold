@@ -305,10 +305,26 @@ export interface AdminAccountRecord {
   preferences?: any;
   access?: UserAccessRecord | null;
   usage?: UsageCounterRecord[];
+  usageSummary?: AdminUsageSummaryRecord;
   created_at?: string | null;
   updated_at?: string | null;
   profile_created_at?: string | null;
   profile_updated_at?: string | null;
+}
+
+export interface AdminUsageSummaryRecord {
+  user_id: string;
+  total_interactions: number;
+  weekly_interactions: number;
+  direct_chat_replies: number;
+  council_sessions: number;
+  blueprint_saves: number;
+  cycle_unlocks: number;
+  persisted_direct_sessions: number;
+  persisted_council_sessions: number;
+  persisted_messages: number;
+  persisted_user_messages: number;
+  last_interaction_at: string | null;
 }
 
 export type AccessTier = 'free' | 'paid_beta' | 'founder' | 'blocked';
@@ -500,7 +516,138 @@ export const listUsageCountersForPeriod = async (periodKey: string): Promise<Usa
   }
 };
 
-export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
+const emptyAdminUsageSummary = (userId: string): AdminUsageSummaryRecord => ({
+  user_id: userId,
+  total_interactions: 0,
+  weekly_interactions: 0,
+  direct_chat_replies: 0,
+  council_sessions: 0,
+  blueprint_saves: 0,
+  cycle_unlocks: 0,
+  persisted_direct_sessions: 0,
+  persisted_council_sessions: 0,
+  persisted_messages: 0,
+  persisted_user_messages: 0,
+  last_interaction_at: null,
+});
+
+const keepLatestTimestamp = (left?: string | null, right?: string | null): string | null => {
+  if (!left) return right || null;
+  if (!right) return left;
+  return right > left ? right : left;
+};
+
+const listAllRows = async <T>(table: string, columns: string): Promise<T[]> => {
+  const rows: T[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; from < 100000; from += pageSize) {
+    const { data, error } = await getSupabaseClient()
+      .from(table)
+      .select(columns)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`[SUPABASE] Error listing ${table}:`, error.message);
+      return rows;
+    }
+
+    rows.push(...((data || []) as T[]));
+    if (!data || data.length < pageSize) {
+      return rows;
+    }
+  }
+
+  return rows;
+};
+
+export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminUsageSummaryRecord[]> => {
+  if (!isSupabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const [usageCounters, councilSessions, councilMessages] = await Promise.all([
+      listAllRows<UsageCounterRecord>('usage_counters', 'user_id, period_key, feature, count, created_at, updated_at'),
+      listAllRows<{ user_id: string; mode?: string | null; created_at?: string | null; updated_at?: string | null }>(
+        'council_sessions',
+        'user_id, mode, created_at, updated_at',
+      ),
+      listAllRows<{ user_id: string; role?: string | null; created_at?: string | null }>(
+        'council_messages',
+        'user_id, role, created_at',
+      ),
+    ]);
+
+    const byUser = new Map<string, AdminUsageSummaryRecord>();
+    const getSummary = (userId: string) => {
+      const existing = byUser.get(userId);
+      if (existing) return existing;
+      const created = emptyAdminUsageSummary(userId);
+      byUser.set(userId, created);
+      return created;
+    };
+
+    usageCounters.forEach(counter => {
+      const summary = getSummary(counter.user_id);
+      const count = Math.max(0, Number(counter.count) || 0);
+      summary.total_interactions += count;
+      if (counter.period_key === periodKey) {
+        summary.weekly_interactions += count;
+      }
+      if (counter.feature === 'council_session') {
+        summary.council_sessions += count;
+      } else if (counter.feature === 'blueprint_save') {
+        summary.blueprint_saves += count;
+      } else if (counter.feature === 'cycle_day_6') {
+        summary.cycle_unlocks += count;
+      } else if (counter.feature === 'single_voice_reply' || counter.feature.startsWith('single_voice_reply:')) {
+        summary.direct_chat_replies += count;
+      }
+      summary.last_interaction_at = keepLatestTimestamp(
+        summary.last_interaction_at,
+        counter.updated_at || counter.created_at || null,
+      );
+    });
+
+    councilSessions.forEach(session => {
+      const summary = getSummary(session.user_id);
+      if (session.mode === 'direct') {
+        summary.persisted_direct_sessions += 1;
+      } else if (session.mode === 'council') {
+        summary.persisted_council_sessions += 1;
+      }
+      summary.last_interaction_at = keepLatestTimestamp(
+        summary.last_interaction_at,
+        session.updated_at || session.created_at || null,
+      );
+    });
+
+    councilMessages.forEach(message => {
+      const summary = getSummary(message.user_id);
+      summary.persisted_messages += 1;
+      if (message.role === 'user') {
+        summary.persisted_user_messages += 1;
+      }
+      summary.last_interaction_at = keepLatestTimestamp(summary.last_interaction_at, message.created_at || null);
+    });
+
+    byUser.forEach(summary => {
+      const persistedFeatureInteractions = summary.blueprint_saves + summary.cycle_unlocks;
+      summary.total_interactions = Math.max(
+        summary.total_interactions,
+        summary.persisted_user_messages + persistedFeatureInteractions,
+      );
+    });
+
+    return Array.from(byUser.values());
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in listAdminUsageSummaries:', error.message);
+    return [];
+  }
+};
+
+export const listAdminAccounts = async (periodKey: string): Promise<AdminAccountRecord[]> => {
   if (!isSupabaseConfigured()) {
     return [];
   }
@@ -524,6 +671,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
       { data: users, error: usersError },
       { data: profiles, error: profilesError },
       accessRecords,
+      usageSummaries,
     ] = await Promise.all([
       getSupabaseClient()
         .from('users')
@@ -534,6 +682,7 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
         .select('user_id, display_name, language, preferences, created_at, updated_at')
         .order('updated_at', { ascending: false }),
       listUserAccessRecords(),
+      listAdminUsageSummaries(periodKey),
     ]);
 
     if (usersError) {
@@ -589,9 +738,17 @@ export const listAdminAccounts = async (): Promise<AdminAccountRecord[]> => {
       });
     });
 
+    usageSummaries.forEach(usageSummary => {
+      const existing = byId.get(usageSummary.user_id) || { user_id: usageSummary.user_id };
+      byId.set(usageSummary.user_id, {
+        ...existing,
+        usageSummary,
+      });
+    });
+
     return Array.from(byId.values()).sort((a, b) => {
-      const left = a.profile_updated_at || a.updated_at || a.last_sign_in_at || a.created_at || a.auth_created_at || '';
-      const right = b.profile_updated_at || b.updated_at || b.last_sign_in_at || b.created_at || b.auth_created_at || '';
+      const left = a.usageSummary?.last_interaction_at || a.profile_updated_at || a.updated_at || a.last_sign_in_at || a.created_at || a.auth_created_at || '';
+      const right = b.usageSummary?.last_interaction_at || b.profile_updated_at || b.updated_at || b.last_sign_in_at || b.created_at || b.auth_created_at || '';
       return right.localeCompare(left);
     });
   } catch (error: any) {

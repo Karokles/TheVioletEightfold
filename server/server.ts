@@ -589,6 +589,19 @@ const toAdminAccountResponse = (account: any) => {
       weeklyCouncilSessions: settings.weeklyCouncilSessions ?? null,
       weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
     },
+    usage: {
+      totalInteractions: account.usageSummary?.total_interactions || 0,
+      weeklyInteractions: account.usageSummary?.weekly_interactions || 0,
+      directChatReplies: account.usageSummary?.direct_chat_replies || 0,
+      councilSessions: account.usageSummary?.council_sessions || 0,
+      blueprintSaves: account.usageSummary?.blueprint_saves || 0,
+      cycleUnlocks: account.usageSummary?.cycle_unlocks || 0,
+      persistedDirectSessions: account.usageSummary?.persisted_direct_sessions || 0,
+      persistedCouncilSessions: account.usageSummary?.persisted_council_sessions || 0,
+      persistedMessages: account.usageSummary?.persisted_messages || 0,
+      persistedUserMessages: account.usageSummary?.persisted_user_messages || 0,
+      lastInteractionAt: account.usageSummary?.last_interaction_at || null,
+    },
   };
 };
 
@@ -1792,7 +1805,7 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
       return res.json({ accounts: [], databaseStatus: 'disabled' });
     }
 
-    const accounts = await listAdminAccounts();
+    const accounts = await listAdminAccounts(getWeekKey());
     res.json({
       databaseStatus: 'configured',
       accounts: accounts.map(toAdminAccountResponse),
