@@ -49,17 +49,61 @@ export const isSupabaseConfigured = () => {
   return !!supabaseClient;
 };
 
-export const getSupabaseAdminKeyInfo = () => {
-  const key = SUPABASE_AUTH_ADMIN_KEY || '';
+const getKeyKind = (key: string): 'jwt' | 'supabase_secret' | 'publishable' | 'other' | 'missing' => {
+  if (!key) return 'missing';
+  if (key.startsWith('eyJ')) return 'jwt';
+  if (key.startsWith('sb_secret_')) return 'supabase_secret';
+  if (key.startsWith('sb_publishable_')) return 'publishable';
+  return 'other';
+};
+
+const getJwtRole = (key: string): string | null => {
+  if (!key.startsWith('eyJ')) return null;
+
+  try {
+    const [, payload] = key.split('.');
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    return typeof decoded?.role === 'string' ? decoded.role : null;
+  } catch {
+    return null;
+  }
+};
+
+const getKeyDiagnostic = (key: string) => {
+  const kind = getKeyKind(key);
+  const jwtRole = getJwtRole(key);
+  const isServiceRole = kind === 'supabase_secret' || jwtRole === 'service_role';
+
   return {
-    hasAuthAdminKey: Boolean(key),
-    authAdminKeyKind: key.startsWith('eyJ')
+    hasKey: Boolean(key),
+    kind,
+    jwtRole,
+    isServiceRole,
+  };
+};
+
+export const getSupabaseAdminKeyInfo = () => {
+  const authKey = SUPABASE_AUTH_ADMIN_KEY || '';
+  const databaseKey = SUPABASE_SERVICE_ROLE_KEY || '';
+  const authAdminKey = getKeyDiagnostic(authKey);
+  const databaseAdminKey = getKeyDiagnostic(databaseKey);
+
+  return {
+    hasAuthAdminKey: authAdminKey.hasKey,
+    authAdminKeyKind: authAdminKey.kind === 'jwt' && authAdminKey.jwtRole === 'service_role'
       ? 'jwt_service_role'
-      : key.startsWith('sb_secret_')
-        ? 'supabase_secret'
-        : key
-          ? 'other'
-          : 'missing',
+      : authAdminKey.kind,
+    authAdminKeyRole: authAdminKey.jwtRole,
+    authAdminKeyIsServiceRole: authAdminKey.isServiceRole,
+    hasDatabaseAdminKey: databaseAdminKey.hasKey,
+    databaseAdminKeyKind: databaseAdminKey.kind === 'jwt' && databaseAdminKey.jwtRole === 'service_role'
+      ? 'jwt_service_role'
+      : databaseAdminKey.kind,
+    databaseAdminKeyRole: databaseAdminKey.jwtRole,
+    databaseAdminKeyIsServiceRole: databaseAdminKey.isServiceRole,
   };
 };
 

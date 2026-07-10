@@ -1442,8 +1442,19 @@ app.get('/api/auth/readiness', async (req: Request, res: Response) => {
     authAdmin: {
       ok: authAdmin.ok,
       keyKind: adminKeyInfo.authAdminKeyKind,
+      keyRole: adminKeyInfo.authAdminKeyRole,
+      isServiceRole: adminKeyInfo.authAdminKeyIsServiceRole,
       hasKey: adminKeyInfo.hasAuthAdminKey,
       message: authAdmin.ok ? undefined : authAdmin.message,
+    },
+    databaseAdmin: {
+      keyKind: adminKeyInfo.databaseAdminKeyKind,
+      keyRole: adminKeyInfo.databaseAdminKeyRole,
+      isServiceRole: adminKeyInfo.databaseAdminKeyIsServiceRole,
+      hasKey: adminKeyInfo.hasDatabaseAdminKey,
+      warning: adminKeyInfo.databaseAdminKeyIsServiceRole
+        ? undefined
+        : 'SUPABASE_SERVICE_ROLE_KEY is not a service_role database key; server writes can be blocked by RLS.',
     },
     supabaseProjectRef,
   });
