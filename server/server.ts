@@ -614,6 +614,14 @@ const toAdminAccountResponse = (account: any) => {
       persistedCouncilSessions: readAdminUsageNumber(usageSummary.persisted_council_sessions),
       persistedMessages: Math.max(readAdminUsageNumber(usageSummary.persisted_messages), readAdminUsageNumber(adminUsage.persistedMessages)),
       persistedUserMessages: Math.max(readAdminUsageNumber(usageSummary.persisted_user_messages), readAdminUsageNumber(adminUsage.persistedUserMessages)),
+      sources: {
+        counterRows: readAdminUsageNumber(usageSummary.counter_rows),
+        sessionRows: readAdminUsageNumber(usageSummary.session_rows),
+        messageRows: readAdminUsageNumber(usageSummary.message_rows),
+        loreRows: readAdminUsageNumber(usageSummary.lore_rows),
+        loreUserMessages: readAdminUsageNumber(usageSummary.lore_user_messages),
+        loreMessages: readAdminUsageNumber(usageSummary.lore_messages),
+      },
       lastInteractionAt: keepNewestIso(usageSummary.last_interaction_at, typeof adminUsage.lastInteractionAt === 'string' ? adminUsage.lastInteractionAt : null),
     },
   };

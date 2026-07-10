@@ -30,6 +30,7 @@ const copy = {
     chat: 'Chat',
     messages: 'Messages',
     userInputs: 'User inputs',
+    sources: 'Sources',
     lastInteraction: 'Last activity',
     offline: 'Offline',
     updated: 'Updated',
@@ -68,6 +69,7 @@ const copy = {
     chat: 'Chat',
     messages: 'Messages',
     userInputs: 'User-Inputs',
+    sources: 'Quellen',
     lastInteraction: 'Letzte Aktivitaet',
     offline: 'Offline',
     updated: 'Aktualisiert',
@@ -128,6 +130,14 @@ const getUsage = (account: AdminAccount) => account.usage || {
   persistedCouncilSessions: 0,
   persistedMessages: 0,
   persistedUserMessages: 0,
+  sources: {
+    counterRows: 0,
+    sessionRows: 0,
+    messageRows: 0,
+    loreRows: 0,
+    loreUserMessages: 0,
+    loreMessages: 0,
+  },
   lastInteractionAt: null,
 };
 
@@ -537,6 +547,9 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                     </div>
                     <div className="mt-2 text-[10px] text-purple-300/45">
                       {t.userInputs}: {formatNumber(usage.persistedUserMessages)} · {t.messages}: {formatNumber(usage.persistedMessages)} · {t.lastInteraction}: {formatDateTime(usage.lastInteractionAt)}
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-purple-300/35">
+                      {t.sources}: C{usage.sources?.counterRows || 0}/S{usage.sources?.sessionRows || 0}/M{usage.sources?.messageRows || 0}/L{usage.sources?.loreRows || 0}
                     </div>
                   </td>
                   <td className="px-4 py-3">

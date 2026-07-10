@@ -97,6 +97,14 @@ export interface AdminAccount {
     persistedCouncilSessions: number;
     persistedMessages: number;
     persistedUserMessages: number;
+    sources?: {
+      counterRows: number;
+      sessionRows: number;
+      messageRows: number;
+      loreRows: number;
+      loreUserMessages: number;
+      loreMessages: number;
+    };
     lastInteractionAt?: string | null;
   };
 }

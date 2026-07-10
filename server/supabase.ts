@@ -324,6 +324,12 @@ export interface AdminUsageSummaryRecord {
   persisted_council_sessions: number;
   persisted_messages: number;
   persisted_user_messages: number;
+  counter_rows: number;
+  session_rows: number;
+  message_rows: number;
+  lore_rows: number;
+  lore_user_messages: number;
+  lore_messages: number;
   last_interaction_at: string | null;
 }
 
@@ -528,6 +534,12 @@ const emptyAdminUsageSummary = (userId: string): AdminUsageSummaryRecord => ({
   persisted_council_sessions: 0,
   persisted_messages: 0,
   persisted_user_messages: 0,
+  counter_rows: 0,
+  session_rows: 0,
+  message_rows: 0,
+  lore_rows: 0,
+  lore_user_messages: 0,
+  lore_messages: 0,
   last_interaction_at: null,
 });
 
@@ -596,7 +608,7 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
   }
 
   try {
-    const [usageCounters, councilSessions, councilMessages] = await Promise.all([
+    const [usageCounters, councilSessions, councilMessages, loreEntries] = await Promise.all([
       listAllRows<UsageCounterRecord>('usage_counters', 'user_id, period_key, feature, count, created_at, updated_at'),
       listAllRows<{ user_id: string; mode?: string | null; messages?: any; created_at?: string | null; updated_at?: string | null }>(
         'council_sessions',
@@ -605,6 +617,10 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
       listAllRows<{ user_id: string; role?: string | null; created_at?: string | null }>(
         'council_messages',
         'user_id, role, created_at',
+      ),
+      listAllRows<{ user_id: string; type?: string | null; content?: any; created_at?: string | null }>(
+        'lore_entries',
+        'user_id, type, content, created_at',
       ),
     ]);
 
@@ -620,6 +636,7 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
     usageCounters.forEach(counter => {
       const summary = getSummary(counter.user_id);
       const count = Math.max(0, Number(counter.count) || 0);
+      summary.counter_rows += 1;
       summary.total_interactions += count;
       if (counter.period_key === periodKey) {
         summary.weekly_interactions += count;
@@ -642,6 +659,7 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
     const sessionDerivedCounts = new Map<string, { directUserMessages: number; weeklyInteractions: number }>();
     councilSessions.forEach(session => {
       const summary = getSummary(session.user_id);
+      summary.session_rows += 1;
       const existingDerived = sessionDerivedCounts.get(session.user_id) || { directUserMessages: 0, weeklyInteractions: 0 };
       const sessionMessages = getSessionMessages(session.messages);
       const userMessageCount = countUserMessages(sessionMessages);
@@ -685,6 +703,7 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
       messageTableCounts.set(message.user_id, existing);
 
       const summary = getSummary(message.user_id);
+      summary.message_rows += 1;
       summary.last_interaction_at = keepLatestTimestamp(summary.last_interaction_at, message.created_at || null);
     });
 
@@ -692,6 +711,35 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
       const summary = getSummary(userId);
       summary.persisted_messages = Math.max(summary.persisted_messages, counts.messages);
       summary.persisted_user_messages = Math.max(summary.persisted_user_messages, counts.userMessages);
+    });
+
+    loreEntries.forEach(entry => {
+      if (entry.type !== 'direct' && entry.type !== 'council' && entry.type !== 'integration') {
+        return;
+      }
+      const summary = getSummary(entry.user_id);
+      const content = entry.content && typeof entry.content === 'object' ? entry.content : {};
+      const loreMessages = getSessionMessages(content);
+      const userMessageCount = countUserMessages(loreMessages);
+      const allMessageCount = countAllMessages(loreMessages, Boolean(String(content.reply || '').trim()));
+      const sessionHistory = Array.isArray(content.sessionHistory) ? content.sessionHistory : [];
+      const integrationUserMessages = countUserMessages(sessionHistory);
+      const integrationMessages = countAllMessages(sessionHistory, false);
+
+      summary.lore_rows += 1;
+      summary.lore_user_messages += userMessageCount + integrationUserMessages;
+      summary.lore_messages += allMessageCount + integrationMessages;
+      summary.persisted_user_messages = Math.max(summary.persisted_user_messages, summary.lore_user_messages);
+      summary.persisted_messages = Math.max(summary.persisted_messages, summary.lore_messages);
+      if (entry.type === 'direct') {
+        summary.direct_chat_replies = Math.max(summary.direct_chat_replies, summary.lore_user_messages);
+      } else if (entry.type === 'council') {
+        summary.council_sessions = Math.max(summary.council_sessions, summary.lore_rows);
+      }
+      if (getWeekKeyForDate(entry.created_at) === periodKey) {
+        summary.weekly_interactions = Math.max(summary.weekly_interactions, userMessageCount + integrationUserMessages);
+      }
+      summary.last_interaction_at = keepLatestTimestamp(summary.last_interaction_at, entry.created_at || null);
     });
 
     byUser.forEach(summary => {
