@@ -1977,6 +1977,43 @@ app.get('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, r
   }
 });
 
+app.post('/api/admin/analytics/self-test', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    if (!isSupabaseConfigured()) {
+      return res.status(503).json({ error: 'database_disabled' });
+    }
+
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'app_open',
+      surface: 'admin',
+      userMessageCount: 1,
+      messageCount: 1,
+      metadata: {
+        selfTest: true,
+        requestedAt: new Date().toISOString(),
+      },
+    });
+
+    const accounts = await listAdminAccounts(getWeekKey());
+    const account = accounts.find(item => item.user_id === req.user?.id);
+    res.json({
+      ok: true,
+      userId: req.user.id,
+      usage: account ? toAdminAccountResponse(account).usage : null,
+    });
+  } catch (error: any) {
+    console.error('POST /api/admin/analytics/self-test error:', error?.message || error);
+    res.status(500).json({
+      error: 'analytics_self_test_failed',
+      message: process.env.NODE_ENV === 'production' ? 'Analytics self-test failed.' : error.message,
+    });
+  }
+});
+
 app.post('/api/admin/accounts', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!requireAdmin(req, res)) return;

@@ -146,6 +146,12 @@ export interface CreateAdminAccountResponse {
   account: AdminAccount;
 }
 
+export interface AdminAnalyticsSelfTestResponse {
+  ok: boolean;
+  userId: string;
+  usage?: AdminAccount['usage'];
+}
+
 export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
   const response = await fetch(`${getApiBaseUrl()}/api/admin/accounts?ts=${Date.now()}`, {
     method: 'GET',
@@ -216,4 +222,18 @@ export const deleteAdminAccount = async (userId: string): Promise<void> => {
   if (!response.ok) {
     throw new Error(await readAdminErrorMessage(response, `Admin delete failed: ${response.status}`));
   }
+};
+
+export const runAdminAnalyticsSelfTest = async (): Promise<AdminAnalyticsSelfTestResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/admin/analytics/self-test`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    throw new Error(await readAdminErrorMessage(response, `Analytics self-test failed: ${response.status}`));
+  }
+
+  return response.json();
 };

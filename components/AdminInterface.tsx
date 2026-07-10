@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, CheckCircle2, Crown, Database, KeyRound, Mail, MessageCircle, RefreshCw, Save, Search, Shield, Trash2, UserPlus, UserRound } from 'lucide-react';
-import { AdminAccount, AdminEntitlement, createAdminAccount, deleteAdminAccount, getAdminAccounts, updateAdminAccount } from '../services/adminService';
+import { AdminAccount, AdminEntitlement, createAdminAccount, deleteAdminAccount, getAdminAccounts, runAdminAnalyticsSelfTest, updateAdminAccount } from '../services/adminService';
 import { Language } from '../types';
 
 interface AdminInterfaceProps {
@@ -12,6 +12,7 @@ const copy = {
     title: 'Admin',
     subtitle: 'Accounts, access, and usage limits.',
     refresh: 'Refresh',
+    testAnalytics: 'Test analytics',
     save: 'Save',
     create: 'Create',
     createAccount: 'New account',
@@ -51,6 +52,7 @@ const copy = {
     title: 'Admin',
     subtitle: 'Konten, Zugang und Nutzungslimits.',
     refresh: 'Aktualisieren',
+    testAnalytics: 'Analytics testen',
     save: 'Speichern',
     create: 'Anlegen',
     createAccount: 'Neues Konto',
@@ -158,6 +160,7 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
   const [notice, setNotice] = useState('');
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [testingAnalytics, setTestingAnalytics] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [newAccount, setNewAccount] = useState({
@@ -216,6 +219,22 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
       setError(saveError?.message || 'Save failed');
     } finally {
       setSavingUserId(null);
+    }
+  };
+
+  const testAnalytics = async () => {
+    setTestingAnalytics(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await runAdminAnalyticsSelfTest();
+      const eventRows = result.usage?.sources?.eventRows || 0;
+      setNotice(`Analytics self-test ok. Event rows: ${eventRows}`);
+      await loadAccounts();
+    } catch (testError: any) {
+      setError(testError?.message || 'Analytics self-test failed');
+    } finally {
+      setTestingAnalytics(false);
     }
   };
 
@@ -311,14 +330,24 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
             </div>
             <h2 className="text-2xl font-bold tracking-[0.06em] text-white">{t.subtitle}</h2>
           </div>
-          <button
-            onClick={loadAccounts}
-            disabled={loading}
-            className="flex items-center justify-center gap-2 rounded-lg border border-purple-300/20 bg-purple-500/12 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-purple-100 transition-all hover:bg-purple-500/20 disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            {t.refresh}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              onClick={testAnalytics}
+              disabled={testingAnalytics || loading}
+              className="flex items-center justify-center gap-2 rounded-lg border border-sky-300/20 bg-sky-500/12 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-sky-100 transition-all hover:bg-sky-500/20 disabled:opacity-50"
+            >
+              <Activity size={15} />
+              {testingAnalytics ? <RefreshCw size={15} className="animate-spin" /> : t.testAnalytics}
+            </button>
+            <button
+              onClick={loadAccounts}
+              disabled={loading}
+              className="flex items-center justify-center gap-2 rounded-lg border border-purple-300/20 bg-purple-500/12 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-purple-100 transition-all hover:bg-purple-500/20 disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              {t.refresh}
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-col gap-3 rounded-lg border border-purple-500/15 bg-[#0d0615]/86 p-3 md:flex-row md:items-center md:justify-between">
