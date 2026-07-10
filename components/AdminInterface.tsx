@@ -233,7 +233,12 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
       const eventInsert = result.diagnostics?.eventInsert?.ok ? 'event ok' : 'event failed';
       const profileFallback = result.diagnostics?.profileFallback?.ok ? 'profile ok' : 'profile failed';
       const accountFound = result.diagnostics?.accountFound ? 'account ok' : 'account missing';
-      setNotice(`Analytics self-test ok. ${ensureUser}, ${eventInsert}, ${profileFallback}, ${accountFound}. Event rows: ${eventRows}`);
+      const detail = [
+        result.diagnostics?.ensureUser?.message ? `user: ${result.diagnostics.ensureUser.message}` : '',
+        result.diagnostics?.eventInsert?.message ? `event: ${result.diagnostics.eventInsert.message}` : '',
+        result.diagnostics?.profileFallback?.message ? `profile: ${result.diagnostics.profileFallback.message}` : '',
+      ].filter(Boolean).join(' | ');
+      setNotice(`Analytics self-test ok. ${ensureUser}, ${eventInsert}, ${profileFallback}, ${accountFound}. Event rows: ${eventRows}${detail ? ` (${detail})` : ''}`);
       await loadAccounts();
     } catch (testError: any) {
       setError(testError?.message || 'Analytics self-test failed');

@@ -272,9 +272,13 @@ export const getUserProfile = async (userId: string): Promise<UserProfileRecord 
   }
 };
 
-export const upsertUserProfile = async (profile: UserProfileRecord): Promise<UserProfileRecord | null> => {
+export interface SupabaseDataResult<T> extends SupabaseWriteResult {
+  data?: T | null;
+}
+
+export const upsertUserProfileWithResult = async (profile: UserProfileRecord): Promise<SupabaseDataResult<UserProfileRecord>> => {
   if (!isSupabaseConfigured()) {
-    return null;
+    return { ok: false, message: 'Supabase is not configured.', data: null };
   }
 
   try {
@@ -291,14 +295,19 @@ export const upsertUserProfile = async (profile: UserProfileRecord): Promise<Use
 
     if (error) {
       console.error('[SUPABASE] Error upserting user profile:', error.message);
-      return null;
+      return { ok: false, message: error.message, data: null };
     }
 
-    return (data as UserProfileRecord) || null;
+    return { ok: true, data: (data as UserProfileRecord) || null };
   } catch (error: any) {
     console.error('[SUPABASE] Error in upsertUserProfile:', error.message);
-    return null;
+    return { ok: false, message: error.message, data: null };
   }
+};
+
+export const upsertUserProfile = async (profile: UserProfileRecord): Promise<UserProfileRecord | null> => {
+  const result = await upsertUserProfileWithResult(profile);
+  return result.data || null;
 };
 
 export interface AdminAccountRecord {
@@ -563,9 +572,9 @@ export const listUsageCountersForPeriod = async (periodKey: string): Promise<Usa
   }
 };
 
-export const createInteractionEvent = async (event: InteractionEventRecord): Promise<string | null> => {
+export const createInteractionEventWithResult = async (event: InteractionEventRecord): Promise<SupabaseDataResult<string>> => {
   if (!isSupabaseConfigured()) {
-    return null;
+    return { ok: false, message: 'Supabase is not configured.', data: null };
   }
 
   try {
@@ -585,14 +594,19 @@ export const createInteractionEvent = async (event: InteractionEventRecord): Pro
 
     if (error) {
       console.error('[SUPABASE] Error creating interaction event:', error.message);
-      return null;
+      return { ok: false, message: error.message, data: null };
     }
 
-    return (data as any)?.id || null;
+    return { ok: true, data: (data as any)?.id || null };
   } catch (error: any) {
     console.error('[SUPABASE] Error in createInteractionEvent:', error.message);
-    return null;
+    return { ok: false, message: error.message, data: null };
   }
+};
+
+export const createInteractionEvent = async (event: InteractionEventRecord): Promise<string | null> => {
+  const result = await createInteractionEventWithResult(event);
+  return result.data || null;
 };
 
 const emptyAdminUsageSummary = (userId: string): AdminUsageSummaryRecord => ({

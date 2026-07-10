@@ -158,9 +158,11 @@ export interface AdminAnalyticsSelfTestResponse {
     eventInsert?: {
       ok: boolean;
       eventId?: string | null;
+      message?: string;
     };
     profileFallback?: {
       ok: boolean;
+      message?: string;
       adminUsage?: any;
     };
     accountFound?: boolean;

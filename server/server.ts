@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import { 
   ensureUserExists, 
   createInteractionEvent,
+  createInteractionEventWithResult,
   createCouncilSession, 
   createCouncilMessages,
   CouncilMessageRecord,
@@ -32,6 +33,7 @@ import {
   upsertUserAccess,
   UserAccessRecord,
   upsertUserProfile,
+  upsertUserProfileWithResult,
   createQuestLogEntry,
   getQuestLogEntries,
   createSoulTimelineEvent,
@@ -1025,7 +1027,7 @@ const writeAdminUsageProfileFallback = async (
     },
   };
 
-  const savedProfile = await upsertUserProfile({
+  const savedProfileResult = await upsertUserProfileWithResult({
     user_id: user.id,
     display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
     language: profile?.language || null,
@@ -1037,8 +1039,10 @@ const writeAdminUsageProfileFallback = async (
   });
 
   return {
-    saved: Boolean(savedProfile),
-    adminUsage: savedProfile?.preferences?.adminUsage || nextAdminUsage,
+    saved: Boolean(savedProfileResult.data),
+    ok: savedProfileResult.ok,
+    message: savedProfileResult.message,
+    adminUsage: savedProfileResult.data?.preferences?.adminUsage || nextAdminUsage,
   };
 };
 
@@ -1069,6 +1073,9 @@ const recordAdminUsageEvent = async (
     const weekKey = getWeekKey();
     const userInputs = Math.max(1, Math.floor(Number(event.userMessageCount || 1)));
     const messageCount = Math.max(userInputs, Math.floor(Number(event.messageCount || userInputs)));
+    const username = user.email || user.username || user.id;
+    const secretHash = createHash('sha256').update(`supabase-auth:${user.id}`).digest('hex');
+    await ensureUserExists(user.id, username, secretHash);
 
     await createInteractionEvent({
       user_id: user.id,
@@ -2014,7 +2021,7 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
     const analyticsUsername = req.user.email || req.user.username || req.user.id;
     const analyticsSecretHash = createHash('sha256').update(`supabase-auth:${req.user.id}`).digest('hex');
     const ensureUser = await ensureUserExists(req.user.id, analyticsUsername, analyticsSecretHash);
-    const eventId = await createInteractionEvent({
+    const eventWrite = await createInteractionEventWithResult({
       user_id: req.user.id,
       event_type: 'app_open',
       surface: 'admin',
@@ -2041,11 +2048,13 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
       diagnostics: {
         ensureUser,
         eventInsert: {
-          ok: Boolean(eventId),
-          eventId,
+          ok: eventWrite.ok,
+          eventId: eventWrite.data,
+          message: eventWrite.message,
         },
         profileFallback: {
-          ok: profileFallback.saved,
+          ok: profileFallback.ok,
+          message: profileFallback.message,
           adminUsage: profileFallback.adminUsage,
         },
         accountFound: Boolean(account),
