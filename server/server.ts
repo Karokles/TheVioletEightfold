@@ -2011,6 +2011,9 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
     }
 
     const weekKey = getWeekKey();
+    const analyticsUsername = req.user.email || req.user.username || req.user.id;
+    const analyticsSecretHash = createHash('sha256').update(`supabase-auth:${req.user.id}`).digest('hex');
+    const ensureUser = await ensureUserExists(req.user.id, analyticsUsername, analyticsSecretHash);
     const eventId = await createInteractionEvent({
       user_id: req.user.id,
       event_type: 'app_open',
@@ -2036,6 +2039,7 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
       ok: true,
       userId: req.user.id,
       diagnostics: {
+        ensureUser,
         eventInsert: {
           ok: Boolean(eventId),
           eventId,

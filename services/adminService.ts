@@ -151,6 +151,10 @@ export interface AdminAnalyticsSelfTestResponse {
   userId: string;
   usage?: AdminAccount['usage'];
   diagnostics?: {
+    ensureUser?: {
+      ok: boolean;
+      message?: string;
+    };
     eventInsert?: {
       ok: boolean;
       eventId?: string | null;

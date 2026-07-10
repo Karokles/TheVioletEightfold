@@ -203,9 +203,14 @@ export interface DbUser {
   updated_at?: string;
 }
 
-export const ensureUserExists = async (userId: string, username: string, secretHash: string): Promise<void> => {
+export interface SupabaseWriteResult {
+  ok: boolean;
+  message?: string;
+}
+
+export const ensureUserExists = async (userId: string, username: string, secretHash: string): Promise<SupabaseWriteResult> => {
   if (!isSupabaseConfigured()) {
-    return; // Fallback to in-memory
+    return { ok: false, message: 'Supabase is not configured.' };
   }
 
   try {
@@ -222,11 +227,13 @@ export const ensureUserExists = async (userId: string, username: string, secretH
 
     if (error) {
       console.error('[SUPABASE] Error ensuring user exists:', error.message);
-      // Don't throw - fallback to in-memory
+      return { ok: false, message: error.message };
     }
+
+    return { ok: true };
   } catch (error: any) {
     console.error('[SUPABASE] Error in ensureUserExists:', error.message);
-    // Don't throw - fallback to in-memory
+    return { ok: false, message: error.message };
   }
 };
 
