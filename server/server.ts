@@ -985,6 +985,63 @@ const getWeeklyResetAt = (): string => {
   return reset.toISOString();
 };
 
+const writeAdminUsageProfileFallback = async (
+  user: User,
+  event: {
+    eventType: string;
+    weekKey: string;
+    userInputs: number;
+    messageCount: number;
+  },
+) => {
+  const profile = await getUserProfile(user.id);
+  const preferences = asObject(profile?.preferences);
+  const existing = asObject(preferences.adminUsage);
+  const byWeek = asObject(existing.byWeek);
+  const existingWeek = asObject(byWeek[event.weekKey]);
+
+  const increment = (value: unknown, amount: number) => Math.max(0, Math.floor(Number(value) || 0)) + amount;
+  const isDirectChat = event.eventType === 'direct_chat_message';
+  const isCouncilStart = event.eventType === 'council_started';
+  const nextWeek = {
+    totalInteractions: increment(existingWeek.totalInteractions, event.userInputs),
+    directChatReplies: increment(existingWeek.directChatReplies, isDirectChat ? event.userInputs : 0),
+    councilSessions: increment(existingWeek.councilSessions, isCouncilStart ? 1 : 0),
+    persistedUserMessages: increment(existingWeek.persistedUserMessages, event.userInputs),
+    persistedMessages: increment(existingWeek.persistedMessages, event.messageCount),
+  };
+  const nextAdminUsage = {
+    ...existing,
+    schemaVersion: 1,
+    totalInteractions: increment(existing.totalInteractions, event.userInputs),
+    directChatReplies: increment(existing.directChatReplies, isDirectChat ? event.userInputs : 0),
+    councilSessions: increment(existing.councilSessions, isCouncilStart ? 1 : 0),
+    persistedUserMessages: increment(existing.persistedUserMessages, event.userInputs),
+    persistedMessages: increment(existing.persistedMessages, event.messageCount),
+    lastInteractionAt: new Date().toISOString(),
+    byWeek: {
+      ...byWeek,
+      [event.weekKey]: nextWeek,
+    },
+  };
+
+  const savedProfile = await upsertUserProfile({
+    user_id: user.id,
+    display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
+    language: profile?.language || null,
+    active_archetype: profile?.active_archetype || null,
+    preferences: {
+      ...preferences,
+      adminUsage: nextAdminUsage,
+    },
+  });
+
+  return {
+    saved: Boolean(savedProfile),
+    adminUsage: savedProfile?.preferences?.adminUsage || nextAdminUsage,
+  };
+};
+
 const recordAdminUsageEvent = async (
   user: User,
   event: {
@@ -1026,45 +1083,11 @@ const recordAdminUsageEvent = async (
       },
     });
 
-    const profile = await getUserProfile(user.id);
-    const preferences = asObject(profile?.preferences);
-    const existing = asObject(preferences.adminUsage);
-    const byWeek = asObject(existing.byWeek);
-    const existingWeek = asObject(byWeek[weekKey]);
-
-    const increment = (value: unknown, amount: number) => Math.max(0, Math.floor(Number(value) || 0)) + amount;
-    const isDirectChat = inferredEventType === 'direct_chat_message';
-    const isCouncilStart = inferredEventType === 'council_started';
-    const nextWeek = {
-      totalInteractions: increment(existingWeek.totalInteractions, userInputs),
-      directChatReplies: increment(existingWeek.directChatReplies, isDirectChat ? userInputs : 0),
-      councilSessions: increment(existingWeek.councilSessions, isCouncilStart ? 1 : 0),
-      persistedUserMessages: increment(existingWeek.persistedUserMessages, userInputs),
-      persistedMessages: increment(existingWeek.persistedMessages, messageCount),
-    };
-
-    await upsertUserProfile({
-      user_id: user.id,
-      display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
-      language: profile?.language || null,
-      active_archetype: profile?.active_archetype || null,
-      preferences: {
-        ...preferences,
-        adminUsage: {
-          ...existing,
-          schemaVersion: 1,
-          totalInteractions: increment(existing.totalInteractions, userInputs),
-          directChatReplies: increment(existing.directChatReplies, isDirectChat ? userInputs : 0),
-          councilSessions: increment(existing.councilSessions, isCouncilStart ? 1 : 0),
-          persistedUserMessages: increment(existing.persistedUserMessages, userInputs),
-          persistedMessages: increment(existing.persistedMessages, messageCount),
-          lastInteractionAt: new Date().toISOString(),
-          byWeek: {
-            ...byWeek,
-            [weekKey]: nextWeek,
-          },
-        },
-      },
+    await writeAdminUsageProfileFallback(user, {
+      eventType: inferredEventType,
+      weekKey,
+      userInputs,
+      messageCount,
     });
   } catch (error: any) {
     console.warn(`[ADMIN_USAGE] Failed to record usage for user ${user.id}:`, error?.message || error);
@@ -1987,15 +2010,24 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
       return res.status(503).json({ error: 'database_disabled' });
     }
 
-    await recordAdminUsageEvent(req.user, {
-      eventType: 'app_open',
+    const weekKey = getWeekKey();
+    const eventId = await createInteractionEvent({
+      user_id: req.user.id,
+      event_type: 'app_open',
       surface: 'admin',
-      userMessageCount: 1,
-      messageCount: 1,
+      source: 'admin_self_test',
+      period_key: weekKey,
+      quantity: 1,
       metadata: {
         selfTest: true,
         requestedAt: new Date().toISOString(),
       },
+    });
+    const profileFallback = await writeAdminUsageProfileFallback(req.user, {
+      eventType: 'app_open',
+      weekKey,
+      userInputs: 1,
+      messageCount: 1,
     });
 
     const accounts = await listAdminAccounts(getWeekKey());
@@ -2003,6 +2035,17 @@ app.post('/api/admin/analytics/self-test', authenticate, async (req: Authenticat
     res.json({
       ok: true,
       userId: req.user.id,
+      diagnostics: {
+        eventInsert: {
+          ok: Boolean(eventId),
+          eventId,
+        },
+        profileFallback: {
+          ok: profileFallback.saved,
+          adminUsage: profileFallback.adminUsage,
+        },
+        accountFound: Boolean(account),
+      },
       usage: account ? toAdminAccountResponse(account).usage : null,
     });
   } catch (error: any) {

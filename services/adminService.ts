@@ -150,6 +150,17 @@ export interface AdminAnalyticsSelfTestResponse {
   ok: boolean;
   userId: string;
   usage?: AdminAccount['usage'];
+  diagnostics?: {
+    eventInsert?: {
+      ok: boolean;
+      eventId?: string | null;
+    };
+    profileFallback?: {
+      ok: boolean;
+      adminUsage?: any;
+    };
+    accountFound?: boolean;
+  };
 }
 
 export const getAdminAccounts = async (): Promise<AdminAccountsResponse> => {
