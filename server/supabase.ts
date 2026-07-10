@@ -908,15 +908,28 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
     });
 
     byUser.forEach(summary => {
+      const eventUserInputs = summary.event_direct_chat_messages
+        + summary.event_council_starts
+        + summary.event_council_replies
+        + summary.event_meaning_actions
+        + summary.event_cycle_actions;
+      const eventCouncilInteractions = summary.event_council_starts + summary.event_council_replies;
       const persistedFeatureInteractions = summary.blueprint_saves + summary.cycle_unlocks;
-      summary.total_interactions = Math.max(
-        summary.total_interactions,
-        summary.event_total,
-        summary.persisted_user_messages + summary.persisted_council_sessions + persistedFeatureInteractions,
-      );
-      summary.weekly_interactions = Math.max(summary.weekly_interactions, summary.event_weekly);
-      summary.direct_chat_replies = Math.max(summary.direct_chat_replies, summary.event_direct_chat_messages);
-      summary.council_sessions = Math.max(summary.council_sessions, summary.event_council_starts);
+      const legacyTotal = summary.persisted_user_messages + summary.persisted_council_sessions + persistedFeatureInteractions;
+
+      if (summary.event_rows > 0) {
+        summary.total_interactions = summary.event_total;
+        summary.weekly_interactions = summary.event_weekly;
+        summary.direct_chat_replies = summary.event_direct_chat_messages;
+        summary.council_sessions = eventCouncilInteractions;
+        summary.persisted_user_messages = eventUserInputs;
+        summary.persisted_messages = eventUserInputs;
+        return;
+      }
+
+      summary.total_interactions = Math.max(summary.total_interactions, legacyTotal);
+      summary.direct_chat_replies = Math.max(summary.direct_chat_replies, summary.persisted_direct_sessions);
+      summary.council_sessions = Math.max(summary.council_sessions, summary.persisted_council_sessions);
     });
 
     return Array.from(byUser.values());
