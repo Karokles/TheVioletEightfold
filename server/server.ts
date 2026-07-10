@@ -559,6 +559,17 @@ const requireAdmin = (req: AuthenticatedRequest, res: Response): boolean => {
   return true;
 };
 
+const readAdminUsageNumber = (value: unknown): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+};
+
+const keepNewestIso = (left?: string | null, right?: string | null): string | null => {
+  if (!left) return right || null;
+  if (!right) return left;
+  return right > left ? right : left;
+};
+
 const toAdminAccountResponse = (account: any) => {
   const settings = getProfileAdminSettings(account.preferences);
   const access = getAccessFromRecord(account.access || null);
@@ -568,6 +579,9 @@ const toAdminAccountResponse = (account: any) => {
     account.username,
     account.user_id,
   );
+  const adminUsage = asObject(account.preferences?.adminUsage);
+  const adminUsageWeek = asObject(asObject(adminUsage.byWeek)[getWeekKey()]);
+  const usageSummary = account.usageSummary || {};
 
   return {
     userId: account.user_id,
@@ -590,17 +604,17 @@ const toAdminAccountResponse = (account: any) => {
       weeklyMeaningAnalyses: settings.weeklyMeaningAnalyses ?? null,
     },
     usage: {
-      totalInteractions: account.usageSummary?.total_interactions || 0,
-      weeklyInteractions: account.usageSummary?.weekly_interactions || 0,
-      directChatReplies: account.usageSummary?.direct_chat_replies || 0,
-      councilSessions: account.usageSummary?.council_sessions || 0,
-      blueprintSaves: account.usageSummary?.blueprint_saves || 0,
-      cycleUnlocks: account.usageSummary?.cycle_unlocks || 0,
-      persistedDirectSessions: account.usageSummary?.persisted_direct_sessions || 0,
-      persistedCouncilSessions: account.usageSummary?.persisted_council_sessions || 0,
-      persistedMessages: account.usageSummary?.persisted_messages || 0,
-      persistedUserMessages: account.usageSummary?.persisted_user_messages || 0,
-      lastInteractionAt: account.usageSummary?.last_interaction_at || null,
+      totalInteractions: Math.max(readAdminUsageNumber(usageSummary.total_interactions), readAdminUsageNumber(adminUsage.totalInteractions)),
+      weeklyInteractions: Math.max(readAdminUsageNumber(usageSummary.weekly_interactions), readAdminUsageNumber(adminUsageWeek.totalInteractions)),
+      directChatReplies: Math.max(readAdminUsageNumber(usageSummary.direct_chat_replies), readAdminUsageNumber(adminUsage.directChatReplies)),
+      councilSessions: Math.max(readAdminUsageNumber(usageSummary.council_sessions), readAdminUsageNumber(adminUsage.councilSessions)),
+      blueprintSaves: readAdminUsageNumber(usageSummary.blueprint_saves),
+      cycleUnlocks: readAdminUsageNumber(usageSummary.cycle_unlocks),
+      persistedDirectSessions: readAdminUsageNumber(usageSummary.persisted_direct_sessions),
+      persistedCouncilSessions: readAdminUsageNumber(usageSummary.persisted_council_sessions),
+      persistedMessages: Math.max(readAdminUsageNumber(usageSummary.persisted_messages), readAdminUsageNumber(adminUsage.persistedMessages)),
+      persistedUserMessages: Math.max(readAdminUsageNumber(usageSummary.persisted_user_messages), readAdminUsageNumber(adminUsage.persistedUserMessages)),
+      lastInteractionAt: keepNewestIso(usageSummary.last_interaction_at, typeof adminUsage.lastInteractionAt === 'string' ? adminUsage.lastInteractionAt : null),
     },
   };
 };
@@ -952,6 +966,66 @@ const getWeeklyResetAt = (): string => {
   const daysUntilMonday = (8 - day) % 7 || 7;
   const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 0, 0, 0));
   return reset.toISOString();
+};
+
+const recordAdminUsageEvent = async (
+  user: User,
+  event: {
+    mode: 'direct' | 'council';
+    initialCouncilCall?: boolean;
+    userMessageCount?: number;
+    messageCount?: number;
+  },
+): Promise<void> => {
+  if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
+    return;
+  }
+
+  try {
+    const profile = await getUserProfile(user.id);
+    const preferences = asObject(profile?.preferences);
+    const existing = asObject(preferences.adminUsage);
+    const byWeek = asObject(existing.byWeek);
+    const weekKey = getWeekKey();
+    const existingWeek = asObject(byWeek[weekKey]);
+    const userInputs = Math.max(1, Math.floor(Number(event.userMessageCount || 1)));
+    const messageCount = Math.max(userInputs, Math.floor(Number(event.messageCount || userInputs)));
+
+    const increment = (value: unknown, amount: number) => Math.max(0, Math.floor(Number(value) || 0)) + amount;
+    const nextWeek = {
+      totalInteractions: increment(existingWeek.totalInteractions, userInputs),
+      directChatReplies: increment(existingWeek.directChatReplies, event.mode === 'direct' ? userInputs : 0),
+      councilSessions: increment(existingWeek.councilSessions, event.mode === 'council' && event.initialCouncilCall ? 1 : 0),
+      persistedUserMessages: increment(existingWeek.persistedUserMessages, userInputs),
+      persistedMessages: increment(existingWeek.persistedMessages, messageCount),
+    };
+
+    await upsertUserProfile({
+      user_id: user.id,
+      display_name: chooseDisplayName(profile?.display_name || user.displayName, user.email || user.username, user.id),
+      language: profile?.language || null,
+      active_archetype: profile?.active_archetype || null,
+      preferences: {
+        ...preferences,
+        adminUsage: {
+          ...existing,
+          schemaVersion: 1,
+          totalInteractions: increment(existing.totalInteractions, userInputs),
+          directChatReplies: increment(existing.directChatReplies, event.mode === 'direct' ? userInputs : 0),
+          councilSessions: increment(existing.councilSessions, event.mode === 'council' && event.initialCouncilCall ? 1 : 0),
+          persistedUserMessages: increment(existing.persistedUserMessages, userInputs),
+          persistedMessages: increment(existing.persistedMessages, messageCount),
+          lastInteractionAt: new Date().toISOString(),
+          byWeek: {
+            ...byWeek,
+            [weekKey]: nextWeek,
+          },
+        },
+      },
+    });
+  } catch (error: any) {
+    console.warn(`[ADMIN_USAGE] Failed to record usage for user ${user.id}:`, error?.message || error);
+  }
 };
 
 const isAccessActive = (access: AccessSnapshot): boolean => {
@@ -2167,6 +2241,7 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
     }
     const mode = activeArchetype ? 'direct' : 'council';
     const userMessageCount = messages.filter((msg: any) => msg?.role === 'user').length;
+    let initialCouncilCall = false;
     if (mode === 'direct') {
       if (!(await enforceFeatureAccess(req, res, 'single_voice_reply', {
         counterFeature: `single_voice_reply:${activeArchetype}`,
@@ -2175,8 +2250,8 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         return;
       }
     } else {
-      const isInitialCouncilCall = userMessageCount <= 1;
-      if (isInitialCouncilCall) {
+      initialCouncilCall = userMessageCount <= 1;
+      if (initialCouncilCall) {
         if (!(await enforceFeatureAccess(req, res, 'council_session'))) {
           return;
         }
@@ -2187,6 +2262,13 @@ app.post('/api/council', authenticate, async (req: AuthenticatedRequest, res: Re
         return;
       }
     }
+
+    await recordAdminUsageEvent(req.user, {
+      mode,
+      initialCouncilCall,
+      userMessageCount: 1,
+      messageCount: messages.length,
+    });
     
     // Log request (no secrets) - CRITICAL for debugging mode detection
     console.log(`[API] Request - userId: ${userId}, mode: ${mode.toUpperCase()}, activeArchetype: ${activeArchetype || 'none'}`);
