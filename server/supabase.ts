@@ -537,6 +537,16 @@ const keepLatestTimestamp = (left?: string | null, right?: string | null): strin
   return right > left ? right : left;
 };
 
+const getWeekKeyForDate = (value?: string | null): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const firstDayOfYear = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const today = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const week = Math.ceil(((today - firstDayOfYear) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${week}`;
+};
+
 const listAllRows = async <T>(table: string, columns: string): Promise<T[]> => {
   const rows: T[] = [];
   const pageSize = 1000;
@@ -561,6 +571,25 @@ const listAllRows = async <T>(table: string, columns: string): Promise<T[]> => {
   return rows;
 };
 
+const getSessionMessages = (value: any): any[] => {
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const directMessages = Array.isArray(value.messages) ? value.messages : [];
+  const nestedMessages = Array.isArray(value.messages?.messages) ? value.messages.messages : [];
+  return nestedMessages.length > 0 ? nestedMessages : directMessages;
+};
+
+const countUserMessages = (messages: any[]): number => {
+  return messages.filter(message => message?.role === 'user' && String(message?.content || '').trim()).length;
+};
+
+const countAllMessages = (messages: any[], hasReply: boolean): number => {
+  const visibleMessages = messages.filter(message => String(message?.content || '').trim()).length;
+  return visibleMessages + (hasReply ? 1 : 0);
+};
+
 export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminUsageSummaryRecord[]> => {
   if (!isSupabaseConfigured()) {
     return [];
@@ -569,9 +598,9 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
   try {
     const [usageCounters, councilSessions, councilMessages] = await Promise.all([
       listAllRows<UsageCounterRecord>('usage_counters', 'user_id, period_key, feature, count, created_at, updated_at'),
-      listAllRows<{ user_id: string; mode?: string | null; created_at?: string | null; updated_at?: string | null }>(
+      listAllRows<{ user_id: string; mode?: string | null; messages?: any; created_at?: string | null; updated_at?: string | null }>(
         'council_sessions',
-        'user_id, mode, created_at, updated_at',
+        'user_id, mode, messages, created_at, updated_at',
       ),
       listAllRows<{ user_id: string; role?: string | null; created_at?: string | null }>(
         'council_messages',
@@ -610,33 +639,66 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
       );
     });
 
+    const sessionDerivedCounts = new Map<string, { directUserMessages: number; weeklyInteractions: number }>();
     councilSessions.forEach(session => {
       const summary = getSummary(session.user_id);
+      const existingDerived = sessionDerivedCounts.get(session.user_id) || { directUserMessages: 0, weeklyInteractions: 0 };
+      const sessionMessages = getSessionMessages(session.messages);
+      const userMessageCount = countUserMessages(sessionMessages);
+      const allMessageCount = countAllMessages(
+        sessionMessages,
+        Boolean(session.messages && typeof session.messages === 'object' && String(session.messages.reply || '').trim()),
+      );
+
       if (session.mode === 'direct') {
         summary.persisted_direct_sessions += 1;
+        existingDerived.directUserMessages += userMessageCount;
       } else if (session.mode === 'council') {
         summary.persisted_council_sessions += 1;
+        summary.council_sessions = Math.max(summary.council_sessions, summary.persisted_council_sessions);
       }
+      if (getWeekKeyForDate(session.updated_at || session.created_at) === periodKey) {
+        existingDerived.weeklyInteractions += userMessageCount + (session.mode === 'council' ? 1 : 0);
+      }
+      sessionDerivedCounts.set(session.user_id, existingDerived);
+      summary.persisted_user_messages += userMessageCount;
+      summary.persisted_messages += allMessageCount;
       summary.last_interaction_at = keepLatestTimestamp(
         summary.last_interaction_at,
         session.updated_at || session.created_at || null,
       );
     });
 
+    sessionDerivedCounts.forEach((counts, userId) => {
+      const summary = getSummary(userId);
+      summary.direct_chat_replies = Math.max(summary.direct_chat_replies, counts.directUserMessages);
+      summary.weekly_interactions = Math.max(summary.weekly_interactions, counts.weeklyInteractions);
+    });
+
+    const messageTableCounts = new Map<string, { messages: number; userMessages: number }>();
     councilMessages.forEach(message => {
-      const summary = getSummary(message.user_id);
-      summary.persisted_messages += 1;
+      const existing = messageTableCounts.get(message.user_id) || { messages: 0, userMessages: 0 };
+      existing.messages += 1;
       if (message.role === 'user') {
-        summary.persisted_user_messages += 1;
+        existing.userMessages += 1;
       }
+      messageTableCounts.set(message.user_id, existing);
+
+      const summary = getSummary(message.user_id);
       summary.last_interaction_at = keepLatestTimestamp(summary.last_interaction_at, message.created_at || null);
+    });
+
+    messageTableCounts.forEach((counts, userId) => {
+      const summary = getSummary(userId);
+      summary.persisted_messages = Math.max(summary.persisted_messages, counts.messages);
+      summary.persisted_user_messages = Math.max(summary.persisted_user_messages, counts.userMessages);
     });
 
     byUser.forEach(summary => {
       const persistedFeatureInteractions = summary.blueprint_saves + summary.cycle_unlocks;
       summary.total_interactions = Math.max(
         summary.total_interactions,
-        summary.persisted_user_messages + persistedFeatureInteractions,
+        summary.persisted_user_messages + summary.persisted_council_sessions + persistedFeatureInteractions,
       );
     });
 
