@@ -104,6 +104,14 @@ export interface AdminAccount {
       loreRows: number;
       loreUserMessages: number;
       loreMessages: number;
+      eventRows: number;
+      eventTotal: number;
+      eventWeekly: number;
+      eventDirectChatMessages: number;
+      eventCouncilStarts: number;
+      eventCouncilReplies: number;
+      eventMeaningActions: number;
+      eventCycleActions: number;
     };
     lastInteractionAt?: string | null;
   };

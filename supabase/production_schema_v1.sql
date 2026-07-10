@@ -74,11 +74,65 @@ create table if not exists public.usage_counters (
       'blueprint_save',
       'cycle_day_6'
     )
+    or feature ~ '^single_voice_reply:(SOVEREIGN|WARRIOR|SAGE|LOVER|CREATOR|CAREGIVER|EXPLORER|ALCHEMIST)$'
   )
 );
 
+alter table public.usage_counters
+  drop constraint if exists usage_counters_feature_check;
+
+alter table public.usage_counters
+  add constraint usage_counters_feature_check check (
+    feature in (
+      'single_voice_reply',
+      'council_session',
+      'blueprint_save',
+      'cycle_day_6'
+    )
+    or feature ~ '^single_voice_reply:(SOVEREIGN|WARRIOR|SAGE|LOVER|CREATOR|CAREGIVER|EXPLORER|ALCHEMIST)$'
+  );
+
 create index if not exists idx_usage_counters_period
   on public.usage_counters(period_key);
+
+create table if not exists public.interaction_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references public.users(id) on delete cascade,
+  event_type text not null,
+  surface text not null,
+  source text not null default 'server',
+  period_key text not null,
+  quantity integer not null default 1,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  constraint interaction_events_quantity_check check (quantity >= 0),
+  constraint interaction_events_event_type_check check (
+    event_type in (
+      'app_open',
+      'profile_update',
+      'direct_chat_message',
+      'council_started',
+      'council_reply',
+      'meaning_analyze',
+      'meaning_save',
+      'cycle_save',
+      'cycle_archive',
+      'payment_checkout'
+    )
+  ),
+  constraint interaction_events_surface_check check (
+    surface in ('app', 'chat', 'council', 'meaning', 'cycle', 'payment', 'admin')
+  )
+);
+
+create index if not exists idx_interaction_events_user_created
+  on public.interaction_events(user_id, created_at desc);
+
+create index if not exists idx_interaction_events_period
+  on public.interaction_events(period_key);
+
+create index if not exists idx_interaction_events_type
+  on public.interaction_events(event_type);
 
 create table if not exists public.council_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -208,6 +262,7 @@ alter table public.users enable row level security;
 alter table public.user_profiles enable row level security;
 alter table public.user_access enable row level security;
 alter table public.usage_counters enable row level security;
+alter table public.interaction_events enable row level security;
 alter table public.council_sessions enable row level security;
 alter table public.council_messages enable row level security;
 alter table public.lore_entries enable row level security;
@@ -228,6 +283,7 @@ where table_schema = 'public'
     'user_profiles',
     'user_access',
     'usage_counters',
+    'interaction_events',
     'council_sessions',
     'council_messages',
     'lore_entries',

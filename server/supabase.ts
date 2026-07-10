@@ -330,6 +330,14 @@ export interface AdminUsageSummaryRecord {
   lore_rows: number;
   lore_user_messages: number;
   lore_messages: number;
+  event_rows: number;
+  event_total: number;
+  event_weekly: number;
+  event_direct_chat_messages: number;
+  event_council_starts: number;
+  event_council_replies: number;
+  event_meaning_actions: number;
+  event_cycle_actions: number;
   last_interaction_at: string | null;
 }
 
@@ -353,6 +361,32 @@ export interface UsageCounterRecord {
   count: number;
   created_at?: string;
   updated_at?: string;
+}
+
+export type InteractionEventType =
+  | 'app_open'
+  | 'profile_update'
+  | 'direct_chat_message'
+  | 'council_started'
+  | 'council_reply'
+  | 'meaning_analyze'
+  | 'meaning_save'
+  | 'cycle_save'
+  | 'cycle_archive'
+  | 'payment_checkout';
+
+export type InteractionSurface = 'app' | 'chat' | 'council' | 'meaning' | 'cycle' | 'payment' | 'admin';
+
+export interface InteractionEventRecord {
+  id?: string;
+  user_id: string;
+  event_type: InteractionEventType;
+  surface: InteractionSurface;
+  source?: string;
+  period_key: string;
+  quantity: number;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
 }
 
 export const getUserAccess = async (userId: string): Promise<UserAccessRecord | null> => {
@@ -522,6 +556,38 @@ export const listUsageCountersForPeriod = async (periodKey: string): Promise<Usa
   }
 };
 
+export const createInteractionEvent = async (event: InteractionEventRecord): Promise<string | null> => {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('interaction_events')
+      .insert({
+        user_id: event.user_id,
+        event_type: event.event_type,
+        surface: event.surface,
+        source: event.source || 'server',
+        period_key: event.period_key,
+        quantity: Math.max(0, Math.floor(Number(event.quantity) || 1)),
+        metadata: event.metadata || {},
+      } as any)
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('[SUPABASE] Error creating interaction event:', error.message);
+      return null;
+    }
+
+    return (data as any)?.id || null;
+  } catch (error: any) {
+    console.error('[SUPABASE] Error in createInteractionEvent:', error.message);
+    return null;
+  }
+};
+
 const emptyAdminUsageSummary = (userId: string): AdminUsageSummaryRecord => ({
   user_id: userId,
   total_interactions: 0,
@@ -540,6 +606,14 @@ const emptyAdminUsageSummary = (userId: string): AdminUsageSummaryRecord => ({
   lore_rows: 0,
   lore_user_messages: 0,
   lore_messages: 0,
+  event_rows: 0,
+  event_total: 0,
+  event_weekly: 0,
+  event_direct_chat_messages: 0,
+  event_council_starts: 0,
+  event_council_replies: 0,
+  event_meaning_actions: 0,
+  event_cycle_actions: 0,
   last_interaction_at: null,
 });
 
@@ -608,8 +682,12 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
   }
 
   try {
-    const [usageCounters, councilSessions, councilMessages, loreEntries] = await Promise.all([
+    const [usageCounters, interactionEvents, councilSessions, councilMessages, loreEntries] = await Promise.all([
       listAllRows<UsageCounterRecord>('usage_counters', 'user_id, period_key, feature, count, created_at, updated_at'),
+      listAllRows<InteractionEventRecord>(
+        'interaction_events',
+        'user_id, event_type, surface, period_key, quantity, created_at',
+      ),
       listAllRows<{ user_id: string; mode?: string | null; messages?: any; created_at?: string | null; updated_at?: string | null }>(
         'council_sessions',
         'user_id, mode, messages, created_at, updated_at',
@@ -654,6 +732,28 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
         summary.last_interaction_at,
         counter.updated_at || counter.created_at || null,
       );
+    });
+
+    interactionEvents.forEach(event => {
+      const summary = getSummary(event.user_id);
+      const quantity = Math.max(0, Number(event.quantity) || 0);
+      summary.event_rows += 1;
+      summary.event_total += quantity;
+      if (event.period_key === periodKey) {
+        summary.event_weekly += quantity;
+      }
+      if (event.event_type === 'direct_chat_message') {
+        summary.event_direct_chat_messages += quantity;
+      } else if (event.event_type === 'council_started') {
+        summary.event_council_starts += quantity;
+      } else if (event.event_type === 'council_reply') {
+        summary.event_council_replies += quantity;
+      } else if (event.event_type === 'meaning_analyze' || event.event_type === 'meaning_save') {
+        summary.event_meaning_actions += quantity;
+      } else if (event.event_type === 'cycle_save' || event.event_type === 'cycle_archive') {
+        summary.event_cycle_actions += quantity;
+      }
+      summary.last_interaction_at = keepLatestTimestamp(summary.last_interaction_at, event.created_at || null);
     });
 
     const sessionDerivedCounts = new Map<string, { directUserMessages: number; weeklyInteractions: number }>();
@@ -746,8 +846,12 @@ export const listAdminUsageSummaries = async (periodKey: string): Promise<AdminU
       const persistedFeatureInteractions = summary.blueprint_saves + summary.cycle_unlocks;
       summary.total_interactions = Math.max(
         summary.total_interactions,
+        summary.event_total,
         summary.persisted_user_messages + summary.persisted_council_sessions + persistedFeatureInteractions,
       );
+      summary.weekly_interactions = Math.max(summary.weekly_interactions, summary.event_weekly);
+      summary.direct_chat_replies = Math.max(summary.direct_chat_replies, summary.event_direct_chat_messages);
+      summary.council_sessions = Math.max(summary.council_sessions, summary.event_council_starts);
     });
 
     return Array.from(byUser.values());

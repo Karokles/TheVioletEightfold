@@ -137,6 +137,14 @@ const getUsage = (account: AdminAccount) => account.usage || {
     loreRows: 0,
     loreUserMessages: 0,
     loreMessages: 0,
+    eventRows: 0,
+    eventTotal: 0,
+    eventWeekly: 0,
+    eventDirectChatMessages: 0,
+    eventCouncilStarts: 0,
+    eventCouncilReplies: 0,
+    eventMeaningActions: 0,
+    eventCycleActions: 0,
   },
   lastInteractionAt: null,
 };
@@ -549,7 +557,7 @@ export const AdminInterface: React.FC<AdminInterfaceProps> = ({ language }) => {
                       {t.userInputs}: {formatNumber(usage.persistedUserMessages)} · {t.messages}: {formatNumber(usage.persistedMessages)} · {t.lastInteraction}: {formatDateTime(usage.lastInteractionAt)}
                     </div>
                     <div className="mt-1 font-mono text-[10px] text-purple-300/35">
-                      {t.sources}: C{usage.sources?.counterRows || 0}/S{usage.sources?.sessionRows || 0}/M{usage.sources?.messageRows || 0}/L{usage.sources?.loreRows || 0}
+                      {t.sources}: E{usage.sources?.eventRows || 0}/C{usage.sources?.counterRows || 0}/S{usage.sources?.sessionRows || 0}/M{usage.sources?.messageRows || 0}/L{usage.sources?.loreRows || 0}
                     </div>
                   </td>
                   <td className="px-4 py-3">

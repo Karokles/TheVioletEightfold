@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import jwt from 'jsonwebtoken';
 import { 
   ensureUserExists, 
+  createInteractionEvent,
   createCouncilSession, 
   createCouncilMessages,
   CouncilMessageRecord,
@@ -621,6 +622,14 @@ const toAdminAccountResponse = (account: any) => {
         loreRows: readAdminUsageNumber(usageSummary.lore_rows),
         loreUserMessages: readAdminUsageNumber(usageSummary.lore_user_messages),
         loreMessages: readAdminUsageNumber(usageSummary.lore_messages),
+        eventRows: readAdminUsageNumber(usageSummary.event_rows),
+        eventTotal: readAdminUsageNumber(usageSummary.event_total),
+        eventWeekly: readAdminUsageNumber(usageSummary.event_weekly),
+        eventDirectChatMessages: readAdminUsageNumber(usageSummary.event_direct_chat_messages),
+        eventCouncilStarts: readAdminUsageNumber(usageSummary.event_council_starts),
+        eventCouncilReplies: readAdminUsageNumber(usageSummary.event_council_replies),
+        eventMeaningActions: readAdminUsageNumber(usageSummary.event_meaning_actions),
+        eventCycleActions: readAdminUsageNumber(usageSummary.event_cycle_actions),
       },
       lastInteractionAt: keepNewestIso(usageSummary.last_interaction_at, typeof adminUsage.lastInteractionAt === 'string' ? adminUsage.lastInteractionAt : null),
     },
@@ -979,10 +988,13 @@ const getWeeklyResetAt = (): string => {
 const recordAdminUsageEvent = async (
   user: User,
   event: {
-    mode: 'direct' | 'council';
+    mode?: 'direct' | 'council';
+    eventType?: 'app_open' | 'profile_update' | 'direct_chat_message' | 'council_started' | 'council_reply' | 'meaning_analyze' | 'meaning_save' | 'cycle_save' | 'cycle_archive' | 'payment_checkout';
+    surface?: 'app' | 'chat' | 'council' | 'meaning' | 'cycle' | 'payment' | 'admin';
     initialCouncilCall?: boolean;
     userMessageCount?: number;
     messageCount?: number;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<void> => {
   if (!isSupabaseConfigured() || isOfflineOnlyUser(user)) {
@@ -990,20 +1002,43 @@ const recordAdminUsageEvent = async (
   }
 
   try {
+    const inferredEventType = event.eventType
+      || (event.mode === 'direct'
+        ? 'direct_chat_message'
+        : event.initialCouncilCall
+          ? 'council_started'
+          : 'council_reply');
+    const inferredSurface = event.surface || (event.mode === 'direct' ? 'chat' : event.mode === 'council' ? 'council' : 'app');
+    const weekKey = getWeekKey();
+    const userInputs = Math.max(1, Math.floor(Number(event.userMessageCount || 1)));
+    const messageCount = Math.max(userInputs, Math.floor(Number(event.messageCount || userInputs)));
+
+    await createInteractionEvent({
+      user_id: user.id,
+      event_type: inferredEventType,
+      surface: inferredSurface,
+      source: 'server',
+      period_key: weekKey,
+      quantity: userInputs,
+      metadata: {
+        messageCount,
+        ...event.metadata,
+      },
+    });
+
     const profile = await getUserProfile(user.id);
     const preferences = asObject(profile?.preferences);
     const existing = asObject(preferences.adminUsage);
     const byWeek = asObject(existing.byWeek);
-    const weekKey = getWeekKey();
     const existingWeek = asObject(byWeek[weekKey]);
-    const userInputs = Math.max(1, Math.floor(Number(event.userMessageCount || 1)));
-    const messageCount = Math.max(userInputs, Math.floor(Number(event.messageCount || userInputs)));
 
     const increment = (value: unknown, amount: number) => Math.max(0, Math.floor(Number(value) || 0)) + amount;
+    const isDirectChat = inferredEventType === 'direct_chat_message';
+    const isCouncilStart = inferredEventType === 'council_started';
     const nextWeek = {
       totalInteractions: increment(existingWeek.totalInteractions, userInputs),
-      directChatReplies: increment(existingWeek.directChatReplies, event.mode === 'direct' ? userInputs : 0),
-      councilSessions: increment(existingWeek.councilSessions, event.mode === 'council' && event.initialCouncilCall ? 1 : 0),
+      directChatReplies: increment(existingWeek.directChatReplies, isDirectChat ? userInputs : 0),
+      councilSessions: increment(existingWeek.councilSessions, isCouncilStart ? 1 : 0),
       persistedUserMessages: increment(existingWeek.persistedUserMessages, userInputs),
       persistedMessages: increment(existingWeek.persistedMessages, messageCount),
     };
@@ -1019,8 +1054,8 @@ const recordAdminUsageEvent = async (
           ...existing,
           schemaVersion: 1,
           totalInteractions: increment(existing.totalInteractions, userInputs),
-          directChatReplies: increment(existing.directChatReplies, event.mode === 'direct' ? userInputs : 0),
-          councilSessions: increment(existing.councilSessions, event.mode === 'council' && event.initialCouncilCall ? 1 : 0),
+          directChatReplies: increment(existing.directChatReplies, isDirectChat ? userInputs : 0),
+          councilSessions: increment(existing.councilSessions, isCouncilStart ? 1 : 0),
           persistedUserMessages: increment(existing.persistedUserMessages, userInputs),
           persistedMessages: increment(existing.persistedMessages, messageCount),
           lastInteractionAt: new Date().toISOString(),
@@ -1641,6 +1676,12 @@ app.get('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
     }
 
     const profile = await getUserProfile(req.user.id);
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'app_open',
+      surface: 'app',
+      userMessageCount: 1,
+      messageCount: 1,
+    });
     res.json({
       userId: req.user.id,
       displayName: chooseDisplayName(profile?.display_name || req.user.displayName, req.user.email || req.user.username, req.user.id),
@@ -1705,6 +1746,17 @@ app.put('/api/profile', authenticate, async (req: AuthenticatedRequest, res: Res
       language: safeLanguage || existingProfile?.language || null,
       active_archetype: safeActiveArchetype || existingProfile?.active_archetype || null,
       preferences: nextPreferences
+    });
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'profile_update',
+      surface: 'app',
+      userMessageCount: 1,
+      messageCount: 1,
+      metadata: {
+        changedDisplayName: Boolean(safeDisplayName),
+        changedLanguage: Boolean(safeLanguage),
+        changedActiveArchetype: safeActiveArchetype !== null,
+      },
     });
 
     res.json({
@@ -1816,6 +1868,16 @@ app.put('/api/cycle/current', authenticate, async (req: AuthenticatedRequest, re
     } catch (error: any) {
       console.warn(`[CYCLE] Failed to save remote cycle state for user ${req.user.id}:`, error.message);
     }
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'cycle_save',
+      surface: 'cycle',
+      userMessageCount: 1,
+      messageCount: 1,
+      metadata: {
+        cycleId: localState.currentCycle?.id,
+        dayRecords: localState.currentCycle?.dayRecords?.length || 0,
+      },
+    });
 
     res.json({
       currentCycle: localState.currentCycle,
@@ -1864,6 +1926,16 @@ app.post('/api/cycle/archive', authenticate, async (req: AuthenticatedRequest, r
     } catch (error: any) {
       console.warn(`[CYCLE] Failed to archive remote cycle state for user ${req.user.id}:`, error.message);
     }
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'cycle_archive',
+      surface: 'cycle',
+      userMessageCount: 1,
+      messageCount: 1,
+      metadata: {
+        cycleId: requestedCycle.id,
+        archivedCount: localState.archivedCycles.length,
+      },
+    });
 
     res.json({
       currentCycle: null,
@@ -2623,6 +2695,13 @@ app.post('/api/payment/create-checkout-session', authenticate, async (req: Authe
 
     const access = await getEffectiveAccess(req.user);
     if (hasFounderAccess(req.user) || isAccessActive(access)) {
+      await recordAdminUsageEvent(req.user, {
+        eventType: 'payment_checkout',
+        surface: 'payment',
+        userMessageCount: 1,
+        messageCount: 1,
+        metadata: { alreadyActive: true },
+      });
       return res.json({
         active: true,
         tier: access.tier,
@@ -2633,6 +2712,13 @@ app.post('/api/payment/create-checkout-session', authenticate, async (req: Authe
     if (!stripe || !stripeBetaPriceId) {
       const fallbackUrl = buildPaymentLinkUrl(req.user);
       if (fallbackUrl) {
+        await recordAdminUsageEvent(req.user, {
+          eventType: 'payment_checkout',
+          surface: 'payment',
+          userMessageCount: 1,
+          messageCount: 1,
+          metadata: { provider: 'stripe_payment_link' },
+        });
         return res.json({
           provider: 'stripe_payment_link',
           url: fallbackUrl,
@@ -2668,6 +2754,13 @@ app.post('/api/payment/create-checkout-session', authenticate, async (req: Authe
     if (!session.url) {
       return res.status(500).json({ error: 'stripe_checkout_url_missing' });
     }
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'payment_checkout',
+      surface: 'payment',
+      userMessageCount: 1,
+      messageCount: 1,
+      metadata: { provider: 'stripe_checkout' },
+    });
 
     res.json({
       provider: 'stripe_checkout',
@@ -2819,6 +2912,24 @@ app.post('/api/meaning/analyze', authenticate, async (req: AuthenticatedRequest,
 
     if (persist === true && !(await enforceFeatureAccess(req, res, 'blueprint_save', { increment: false }))) {
       return;
+    }
+
+    const meaningUserMessages = messages.filter(message => message?.role === 'user').length || 1;
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'meaning_analyze',
+      surface: 'meaning',
+      userMessageCount: meaningUserMessages,
+      messageCount: messages.length,
+      metadata: { mode: mode || 'council', persist: Boolean(persist) },
+    });
+    if (persist === true) {
+      await recordAdminUsageEvent(req.user, {
+        eventType: 'meaning_save',
+        surface: 'meaning',
+        userMessageCount: 1,
+        messageCount: messages.length,
+        metadata: { mode: mode || 'council' },
+      });
     }
 
     if (!openai) {
@@ -3285,6 +3396,18 @@ app.post('/api/meaning/state', authenticate, async (req: AuthenticatedRequest, r
       attributeUpdates: Array.isArray(patch.attributeUpdates) ? patch.attributeUpdates : undefined,
       skillUpdates: Array.isArray(patch.skillUpdates) ? patch.skillUpdates : undefined,
       nextQuestState: patch.nextQuestState,
+    });
+    const savedItemCount = [
+      ...(Array.isArray(patch.questLogEntries) ? patch.questLogEntries : []),
+      ...(Array.isArray(patch.soulTimelineEvents) ? patch.soulTimelineEvents : []),
+      ...(Array.isArray(patch.breakthroughs) ? patch.breakthroughs : []),
+    ].length;
+    await recordAdminUsageEvent(req.user, {
+      eventType: 'meaning_save',
+      surface: 'meaning',
+      userMessageCount: Math.max(1, savedItemCount),
+      messageCount: Math.max(1, savedItemCount),
+      metadata: { savedItemCount },
     });
 
     return res.json(nextState);
